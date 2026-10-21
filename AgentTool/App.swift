@@ -27,20 +27,9 @@ struct AgentToolApp: App {
         // 关键：两个数据体系必须用【两个独立 ModelContainer】，不能合成一个多配置容器——
         // iOS 17 早期版本在主 context 上查询非默认配置的模型会直接崩溃（房源板块闪退根因）。
         // 每个容器单配置、单 store，是最稳定的 SwiftData 用法（与两个原 App 各自的行为一致）。
-        let mainSchema = Schema([
-            Property.self, RentMonthRecord.self, UtilityQuarterRecord.self, UtilitySettlementRecord.self, TodoItem.self,
-            DealRecord.self, MiscIncome.self, MiscExpense.self,
-            PayoutRecord.self, PayoutMonthRecord.self, PayoutUtilityRecord.self, ProfitCalculation.self, UtilitySettlementHistory.self
-        ])
-        let houseSchema = Schema([House.self, MediaItem.self])
-        let houseStoreURL = DataRoot.url().appendingPathComponent("housekeeper.store")
-
-        // 尝试初始化两个 ModelContainer，失败则备份旧 store 后重试
+        // 注意：两个容器必须一次性创建（元组赋值），避免第一个成功第二个抛错导致重复初始化崩溃。
         do {
-            mainContainer = try ModelContainer(for: mainSchema)
-            houseContainer = try ModelContainer(for: houseSchema, configurations: [
-                ModelConfiguration("HouseStore", schema: houseSchema, url: houseStoreURL)
-            ])
+            (mainContainer, houseContainer) = try Self.makePersistentContainers()
             storageWarning = nil
         } catch {
             print("ModelContainer init failed: \(error)")
@@ -62,24 +51,48 @@ struct AgentToolApp: App {
             }
             // 再试一次，不行就用内存模式
             do {
-                mainContainer = try ModelContainer(for: mainSchema)
-                houseContainer = try ModelContainer(for: houseSchema, configurations: [
-                    ModelConfiguration("HouseStore", schema: houseSchema, url: houseStoreURL)
-                ])
+                (mainContainer, houseContainer) = try Self.makePersistentContainers()
                 storageWarning = nil
             } catch {
                 let persistentError = error
                 print("Second init also failed: \(persistentError)")
                 // 持久库不可用时进入明确标识的临时模式，避免误以为数据已保存。
                 do {
-                    mainContainer = try ModelContainer(for: mainSchema, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
-                    houseContainer = try ModelContainer(for: houseSchema, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+                    (mainContainer, houseContainer) = try Self.makeMemoryContainers()
                     storageWarning = "本地数据库无法打开，当前为临时模式；本次新增或修改的数据不会永久保存。请先导出可用数据并重启 APP。错误：\(persistentError.localizedDescription)"
                 } catch {
                     fatalError("数据库和临时存储均无法初始化：\(error.localizedDescription)")
                 }
             }
         }
+    }
+
+    /// 创建两个持久化 ModelContainer（租房管家经营数据 → 默认 store；房源管家数据 → Documents/备份/housekeeper.store）
+    private static func makePersistentContainers() throws -> (ModelContainer, ModelContainer) {
+        let mainSchema = Schema([
+            Property.self, RentMonthRecord.self, UtilityQuarterRecord.self, UtilitySettlementRecord.self, TodoItem.self,
+            DealRecord.self, MiscIncome.self, MiscExpense.self,
+            PayoutRecord.self, PayoutMonthRecord.self, PayoutUtilityRecord.self, ProfitCalculation.self, UtilitySettlementHistory.self
+        ])
+        let houseSchema = Schema([House.self, MediaItem.self])
+        let main = try ModelContainer(for: mainSchema)
+        let house = try ModelContainer(for: houseSchema, configurations: [
+            ModelConfiguration("HouseStore", schema: houseSchema, url: DataRoot.url().appendingPathComponent("housekeeper.store"))
+        ])
+        return (main, house)
+    }
+
+    /// 内存模式兜底（两个容器均为 in-memory，重启即清空）
+    private static func makeMemoryContainers() throws -> (ModelContainer, ModelContainer) {
+        let mainSchema = Schema([
+            Property.self, RentMonthRecord.self, UtilityQuarterRecord.self, UtilitySettlementRecord.self, TodoItem.self,
+            DealRecord.self, MiscIncome.self, MiscExpense.self,
+            PayoutRecord.self, PayoutMonthRecord.self, PayoutUtilityRecord.self, ProfitCalculation.self, UtilitySettlementHistory.self
+        ])
+        let houseSchema = Schema([House.self, MediaItem.self])
+        let main = try ModelContainer(for: mainSchema, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        let house = try ModelContainer(for: houseSchema, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        return (main, house)
     }
 
     var body: some Scene {
