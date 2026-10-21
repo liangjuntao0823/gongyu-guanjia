@@ -165,12 +165,12 @@ jobs:
           FILE="${{ steps.package.outputs.ipa_path }}"
           ASSET="GongYuGuanJia-v${VERSION}.ipa"
           RELEASE_NOTES="公寓管家 v${VERSION} (build ${BUILD}) — GitHub Actions 自动构建"
-          gh release create "$TAG" "$FILE" \
+          gh release create "$TAG" "$FILE#$ASSET" \
             --repo "${{ github.repository }}" \
             --title "公寓管家 v${VERSION}" \
             --notes "$RELEASE_NOTES" \
             --target "${{ github.sha }}" 2>/dev/null || \
-          gh release upload "$TAG" "$FILE" \
+          gh release upload "$TAG" "$FILE#$ASSET" \
             --repo "${{ github.repository }}" --clobber
           echo "Release asset: https://github.com/${{ github.repository }}/releases/download/$TAG/$ASSET"
       - name: Upload build log on failure
