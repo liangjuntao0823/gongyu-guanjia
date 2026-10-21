@@ -3,8 +3,15 @@ import SwiftData
 import PhotosUI
 
 struct HouseEditView: View {
-    @Environment(\.modelContext) private var modelContext
+    /// 房源板块专属 context（独立 HouseStore 容器，由 App 注入）
+    @Environment(\.houseModelContext) private var houseModelContext
     @Environment(\.dismiss) private var dismiss
+
+    /// 当前可用的房源数据上下文（App 内必然已注入）
+    private var modelContext: ModelContext {
+        guard let ctx = houseModelContext else { fatalError("houseModelContext 未注入") }
+        return ctx
+    }
 
     /// 传入房源 = 编辑；nil = 新增
     let house: House?

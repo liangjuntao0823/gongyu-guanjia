@@ -2,9 +2,9 @@ import SwiftUI
 import SwiftData
 
 struct HouseListView: View {
-    @Environment(\.modelContext) private var modelContext
-    /// 房源 store 是独立 ModelConfiguration（HouseStore），@Query 在部分 iOS 17 版本上
-    /// 对多配置容器会崩溃，这里改为手动 fetch + 数据变更通知刷新（行为与 @Query 一致）
+    /// 房源板块使用独立 HouseStore 容器的专属 context（由 App 注入）。
+    /// 不能用主容器的 modelContext——iOS 17 早期版本多配置容器上查询会崩溃（闪退根因）。
+    @Environment(\.houseModelContext) private var houseModelContext
     @State private var houses: [House] = []
 
     static let houseStoreChanged = Notification.Name("houseStoreChanged")
@@ -165,8 +165,9 @@ struct HouseListView: View {
 
     /// 从独立 HouseStore 配置拉取房源（按创建时间倒序，与原来 @Query 一致）
     private func reloadHouses() {
+        guard let ctx = houseModelContext else { return }
         var descriptor = FetchDescriptor<House>(sortBy: [SortDescriptor(\House.createdAt, order: .reverse)])
-        houses = (try? modelContext.fetch(descriptor)) ?? []
+        houses = (try? ctx.fetch(descriptor)) ?? []
     }
 
     // MARK: - 统计（动态跟随当前筛选；v1.31：恢复 v1.29 显示方式 + 修复统计栏下沉）

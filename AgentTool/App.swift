@@ -9,7 +9,8 @@ final class TabRouter: ObservableObject {
 
 @main
 struct AgentToolApp: App {
-    private let container: ModelContainer
+    private let mainContainer: ModelContainer
+    private let houseContainer: ModelContainer
     private let storageWarning: String?
     @StateObject private var tabRouter = TabRouter()
 
@@ -23,24 +24,23 @@ struct AgentToolApp: App {
         // 与租房管家经营数据（默认 default.store）完全隔离：复制「备份」文件夹即可整体还原房源数据
         BackupGuide.ensureExists()
 
-        // 尝试初始化ModelContainer，失败则备份旧store后重试
+        // 关键：两个数据体系必须用【两个独立 ModelContainer】，不能合成一个多配置容器——
+        // iOS 17 早期版本在主 context 上查询非默认配置的模型会直接崩溃（房源板块闪退根因）。
+        // 每个容器单配置、单 store，是最稳定的 SwiftData 用法（与两个原 App 各自的行为一致）。
+        let mainSchema = Schema([
+            Property.self, RentMonthRecord.self, UtilityQuarterRecord.self, UtilitySettlementRecord.self, TodoItem.self,
+            DealRecord.self, MiscIncome.self, MiscExpense.self,
+            PayoutRecord.self, PayoutMonthRecord.self, PayoutUtilityRecord.self, ProfitCalculation.self, UtilitySettlementHistory.self
+        ])
+        let houseSchema = Schema([House.self, MediaItem.self])
+        let houseStoreURL = DataRoot.url().appendingPathComponent("housekeeper.store")
+
+        // 尝试初始化两个 ModelContainer，失败则备份旧 store 后重试
         do {
-            let defaultConfig = ModelConfiguration(schema: Schema([
-                Property.self, RentMonthRecord.self, UtilityQuarterRecord.self, UtilitySettlementRecord.self, TodoItem.self,
-                DealRecord.self, MiscIncome.self, MiscExpense.self,
-                PayoutRecord.self, PayoutMonthRecord.self, PayoutUtilityRecord.self, ProfitCalculation.self, UtilitySettlementHistory.self
-            ]))
-            let houseStoreURL = DataRoot.url().appendingPathComponent("housekeeper.store")
-            let houseConfig = ModelConfiguration("HouseStore", schema: Schema([House.self, MediaItem.self]), url: houseStoreURL)
-            container = try ModelContainer(
-                for: Schema([
-                    Property.self, RentMonthRecord.self, UtilityQuarterRecord.self, UtilitySettlementRecord.self, TodoItem.self,
-                    DealRecord.self, MiscIncome.self, MiscExpense.self,
-                    PayoutRecord.self, PayoutMonthRecord.self, PayoutUtilityRecord.self, ProfitCalculation.self, UtilitySettlementHistory.self,
-                    House.self, MediaItem.self
-                ]),
-                configurations: [defaultConfig, houseConfig]
-            )
+            mainContainer = try ModelContainer(for: mainSchema)
+            houseContainer = try ModelContainer(for: houseSchema, configurations: [
+                ModelConfiguration("HouseStore", schema: houseSchema, url: houseStoreURL)
+            ])
             storageWarning = nil
         } catch {
             print("ModelContainer init failed: \(error)")
@@ -60,40 +60,20 @@ struct AgentToolApp: App {
                     }
                 }
             }
-            // 再试一次，不行就用空配置
+            // 再试一次，不行就用内存模式
             do {
-                let defaultConfig = ModelConfiguration(schema: Schema([
-                    Property.self, RentMonthRecord.self, UtilityQuarterRecord.self, UtilitySettlementRecord.self, TodoItem.self,
-                    DealRecord.self, MiscIncome.self, MiscExpense.self,
-                    PayoutRecord.self, PayoutMonthRecord.self, PayoutUtilityRecord.self, ProfitCalculation.self, UtilitySettlementHistory.self
-                ]))
-                let houseStoreURL = DataRoot.url().appendingPathComponent("housekeeper.store")
-                let houseConfig = ModelConfiguration("HouseStore", schema: Schema([House.self, MediaItem.self]), url: houseStoreURL)
-                container = try ModelContainer(
-                    for: Schema([
-                        Property.self, RentMonthRecord.self, UtilityQuarterRecord.self, UtilitySettlementRecord.self, TodoItem.self,
-                        DealRecord.self, MiscIncome.self, MiscExpense.self,
-                        PayoutRecord.self, PayoutMonthRecord.self, PayoutUtilityRecord.self, ProfitCalculation.self, UtilitySettlementHistory.self,
-                        House.self, MediaItem.self
-                    ]),
-                    configurations: [defaultConfig, houseConfig]
-                )
+                mainContainer = try ModelContainer(for: mainSchema)
+                houseContainer = try ModelContainer(for: houseSchema, configurations: [
+                    ModelConfiguration("HouseStore", schema: houseSchema, url: houseStoreURL)
+                ])
                 storageWarning = nil
             } catch {
                 let persistentError = error
                 print("Second init also failed: \(persistentError)")
                 // 持久库不可用时进入明确标识的临时模式，避免误以为数据已保存。
-                let config = ModelConfiguration(isStoredInMemoryOnly: true)
                 do {
-                    container = try ModelContainer(
-                        for: Schema([
-                            Property.self, RentMonthRecord.self, UtilityQuarterRecord.self, UtilitySettlementRecord.self, TodoItem.self,
-                            DealRecord.self, MiscIncome.self, MiscExpense.self,
-                            PayoutRecord.self, PayoutMonthRecord.self, PayoutUtilityRecord.self, ProfitCalculation.self, UtilitySettlementHistory.self,
-                            House.self, MediaItem.self
-                        ]),
-                        configurations: config
-                    )
+                    mainContainer = try ModelContainer(for: mainSchema, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+                    houseContainer = try ModelContainer(for: houseSchema, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
                     storageWarning = "本地数据库无法打开，当前为临时模式；本次新增或修改的数据不会永久保存。请先导出可用数据并重启 APP。错误：\(persistentError.localizedDescription)"
                 } catch {
                     fatalError("数据库和临时存储均无法初始化：\(error.localizedDescription)")
@@ -109,6 +89,7 @@ struct AgentToolApp: App {
                 .environment(\.locale, Locale(identifier: "zh_CN"))
                 .environment(\.calendar, Calendar(identifier: .gregorian))
                 .environmentObject(tabRouter)
+                .environment(\.houseModelContext, houseContainer.mainContext)
                 .alert("存储异常", isPresented: Binding(
                     get: { storageWarning != nil },
                     set: { _ in }
@@ -118,7 +99,20 @@ struct AgentToolApp: App {
                     Text(storageWarning ?? "")
                 }
         }
-        .modelContainer(container)
+        .modelContainer(mainContainer)
+    }
+}
+
+// 房源板块专用 ModelContext（独立 HouseStore 容器）。
+// 租房管家页面继续用主容器的 @Environment(\.modelContext)；房源页面用 houseModelContext。
+private struct HouseModelContextKey: EnvironmentKey {
+    static let defaultValue: ModelContext? = nil
+}
+
+extension EnvironmentValues {
+    var houseModelContext: ModelContext? {
+        get { self[HouseModelContextKey.self] }
+        set { self[HouseModelContextKey.self] = newValue }
     }
 }
 
