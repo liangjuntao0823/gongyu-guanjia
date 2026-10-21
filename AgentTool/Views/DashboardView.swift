@@ -14,7 +14,6 @@ struct DashboardView: View {
     @State private var payoutReminders: [PayoutReminder] = []
     @State private var currentTime = Date()
     @State private var showUtility = false
-    @State private var showTrash = false
     @State private var showAddDeal = false
     @State private var showAddRent = false
     @State private var showAddPayout = false
@@ -38,6 +37,8 @@ struct DashboardView: View {
     @State private var quickPayMonth = 0
     @State private var quickPayRecordMonth = 0
     @State private var showRefreshTip = false
+    /// v1.3：工作台「新增房源」→ 切到房源 Tab 后自动弹出新增表单
+    @AppStorage("pendingHouseAdd") private var pendingHouseAdd = false
     @State private var viewingProperty: Property?
     @State private var viewingPayout: PayoutRecord?
 
@@ -399,7 +400,11 @@ struct DashboardView: View {
                                 QuickActionItem(icon: "checklist", label: "新增待办", color: .themeAccentDark) { showAddTodo = true }
                                 QuickActionItem(icon: "creditcard.fill", label: "新增收租", color: .themeBlue) { showAddRent = true }
                                 QuickActionItem(icon: "bolt.fill", label: "水电结算", color: .themeAmber) { showUtility = true }
-                                QuickActionItem(icon: "trash.fill", label: "回收站", color: Color(hex: "8E8E93")) { showTrash = true }
+                                // v1.3：回收站已移至「设置 → 数据管理」；空位改为「新增房源」，跳转房源板块并弹出新增表单
+                                QuickActionItem(icon: "building.2.fill", label: "新增房源", color: AppTheme.primary) {
+                                    pendingHouseAdd = true
+                                    tabRouter.selectedTab = 1
+                                }
                             }
                         }
                     }
@@ -605,9 +610,6 @@ struct DashboardView: View {
         }
         .sheet(isPresented: $showUtility) {
             NavigationStack { UtilityView(onWriteSuccess: { refreshDashboard() }) }
-        }
-        .sheet(isPresented: $showTrash) {
-            TrashView()
         }
         .sheet(isPresented: $showAddDeal) {
             NavigationStack { AddDealView() }

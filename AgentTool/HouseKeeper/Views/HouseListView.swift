@@ -12,8 +12,10 @@ struct HouseListView: View {
     @State private var searchText = ""
     @State private var towerFilter: Int? = nil      // nil = 全部
     @State private var statusFilter: HouseStatus? = .available   // 首页默认显示待租房源
-    @State private var layoutFilter: String? = nil
+    @State private var layoutFilters: Set<String> = []   // v1.3：户型筛选支持多选，空 = 全部户型
     @State private var showAdd = false
+    /// v1.3：工作台「新增房源」跳转——切到本 Tab 后弹出新增表单
+    @AppStorage("pendingHouseAdd") private var pendingHouseAdd = false
 
     // v1.22：首页多选分享——一次选多套，生成【一个合集分享卡片】（好友点开链接即可查看全部 N 套），
     // 不再逐套生成链接逐次弹微信，避免 App 与微信来回跳转
@@ -44,7 +46,7 @@ struct HouseListView: View {
                 }()
                 let matchTower = towerFilter == nil || house.tower == towerFilter
                 let matchStatus = statusFilter == nil || house.status == statusFilter
-                let matchLayout = layoutFilter == nil || house.layout == layoutFilter
+                let matchLayout = layoutFilters.isEmpty || layoutFilters.contains(house.layout)
                 return matchSearch && matchTower && matchStatus && matchLayout
             }
             .sorted { a, b in
@@ -157,6 +159,11 @@ struct HouseListView: View {
         }
         .onAppear {
             reloadHouses()
+            // v1.3：工作台「新增房源」跳转——切到本 Tab 后自动弹出新增表单
+            if pendingHouseAdd {
+                pendingHouseAdd = false
+                showAdd = true
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: Self.houseStoreChanged)) { _ in
             reloadHouses()
@@ -193,7 +200,7 @@ struct HouseListView: View {
 
             Spacer()
 
-            if towerFilter != nil || layoutFilter != nil {
+            if towerFilter != nil || !layoutFilters.isEmpty {
                 Text(statsFilteredLabel)
                     .font(.footnote.weight(.semibold))
                     .foregroundColor(AppTheme.primary)
@@ -228,7 +235,7 @@ struct HouseListView: View {
     private var statsFilteredLabel: String {
         var parts: [String] = []
         if let t = towerFilter { parts.append("\(t)座") }
-        if let l = layoutFilter { parts.append(l) }
+        if !layoutFilters.isEmpty { parts.append(layoutFilters.sorted().joined(separator: "、")) }
         parts.append("\(filteredHouses.count)套")
         return parts.joined(separator: " ")
     }
@@ -292,15 +299,19 @@ struct HouseListView: View {
                 .padding(.horizontal, 16)
             }
 
-            // 第二行：户型筛选（独立一行，选项随已收录房源的户型类型动态增减）
+            // 第二行：户型筛选（独立一行，选项随已收录房源的户型类型动态增减；支持多选）
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
-                    filterChip(title: "全部户型", isOn: layoutFilter == nil) {
-                        layoutFilter = nil
+                    filterChip(title: "全部户型", isOn: layoutFilters.isEmpty) {
+                        layoutFilters.removeAll()
                     }
                     ForEach(layouts, id: \.self) { layout in
-                        filterChip(title: layout, isOn: layoutFilter == layout) {
-                            layoutFilter = layout
+                        filterChip(title: layout, isOn: layoutFilters.contains(layout)) {
+                            if layoutFilters.contains(layout) {
+                                layoutFilters.remove(layout)
+                            } else {
+                                layoutFilters.insert(layout)
+                            }
                         }
                     }
                 }

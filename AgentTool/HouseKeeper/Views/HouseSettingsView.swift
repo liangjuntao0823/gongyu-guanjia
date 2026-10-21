@@ -73,6 +73,7 @@ enum KeychainFix {
 /// 名片信息：分享 H5 页面与微信卡片上显示的姓名/电话（默认：梁涛 / 13288251132）
 struct HouseSettingsView: View {
     @State private var refreshedTip: String?
+    @State private var showClearCacheConfirm = false
 
     var body: some View {
         Form {
@@ -93,9 +94,10 @@ struct HouseSettingsView: View {
 
             // v1.23：分享时压缩开关——视频压到 720p、图片轻压缩（参照微信非原图质量），
             // 大幅降低上传流量与 COS 流量费用；关掉则按原文件原样上传
+            // v1.3：开关默认开启（未设置过时按开启处理）
             Section {
                 Toggle("分享时压缩视频和图片", isOn: Binding(
-                    get: { UserDefaults.standard.bool(forKey: "compressOnShare") },
+                    get: { shareCompressionEnabled },
                     set: { UserDefaults.standard.set($0, forKey: "compressOnShare") }
                 ))
             } footer: {
@@ -104,10 +106,10 @@ struct HouseSettingsView: View {
 
             // v1.25：分享缓存管理——改了分享页面样式后想立刻重新生成链接时手动刷新；
             // 平时不需要：App 每次更新页面模板后旧缓存会自动失效，下次分享自动重新生成
+            // v1.3：增加二级确认，防止误触导致全部链接失效
             Section {
                 Button {
-                    ShareCacheStore.clearAll()
-                    refreshedTip = "分享缓存已清空 ✅\n下次分享会重新上传并生成新链接（所有房源）"
+                    showClearCacheConfirm = true
                 } label: {
                     Label("刷新分享缓存", systemImage: "arrow.clockwise.circle")
                 }
@@ -143,22 +145,20 @@ struct HouseSettingsView: View {
                     Label("打开「文件」App 查看数据文件夹", systemImage: "folder")
                 }
             } footer: {
-                Text("本 App 的全部数据（房源数据库、图片视频、二维码）默认存放在「房源管家」文件夹内的「备份」子文件夹。备份：长按「备份」文件夹 → 拷贝/共享到电脑、网盘或微信；恢复：重装后把「备份」文件夹放回原位即可，房源信息和图片视频全部还原。")
-            }
-
-            // v1.28：版本号移到设置页最底部（原首页左上角版本徽章已移除）
-            Section {
-                HStack {
-                    Spacer()
-                    Text("房源管家 v\(appVersion)")
-                        .font(.footnote)
-                        .foregroundColor(.secondary)
-                    Spacer()
-                }
+                Text("本 App 的全部数据（房源数据库、图片视频、二维码）默认存放在「公寓管家」文件夹内的「备份」子文件夹。备份：长按「备份」文件夹 → 拷贝/共享到电脑、网盘或微信；恢复：重装后把「备份」文件夹放回原位即可，房源信息和图片视频全部还原。")
             }
         }
         .navigationTitle("设置")
         .navigationBarTitleDisplayMode(.inline)
+        .confirmationDialog("刷新分享缓存", isPresented: $showClearCacheConfirm, titleVisibility: .visible) {
+            Button("清空并刷新", role: .destructive) {
+                ShareCacheStore.clearAll()
+                refreshedTip = "分享缓存已清空 ✅\n下次分享会重新上传并生成新链接（所有房源）"
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("将清空全部房源的分享缓存，下次分享时重新上传并生成新链接。确定继续吗？")
+        }
         .alert("刷新分享缓存", isPresented: Binding(
             get: { refreshedTip != nil },
             set: { if !$0 { refreshedTip = nil } }
@@ -167,11 +167,6 @@ struct HouseSettingsView: View {
         } message: {
             Text(refreshedTip ?? "")
         }
-    }
-
-    /// 当前 App 版本号（读自工程配置，如 1.29）
-    private var appVersion: String {
-        (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String) ?? ""
     }
 
     /// v1.30：「备份」子文件夹总大小（数据库、Media/、二维码、分享缓存等都在这里）

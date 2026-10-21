@@ -21,6 +21,7 @@ struct SettingsView: View {
     @State private var showManualSync = false
     @State private var showMigration = false
     @State private var showBillTemplate = false
+    @State private var showTrash = false   // v1.3：回收站入口从工作台移至设置页
     @AppStorage("notificationSound_rent") private var rentSound = "system"
     @AppStorage("notificationSound_expiry") private var expirySound = "system"
     @AppStorage("notificationSound_payout") private var payoutSound = "system"
@@ -46,6 +47,9 @@ struct SettingsView: View {
                     Button { showRestoreSheet = true } label: {
                         Label("恢复数据", systemImage: "square.and.arrow.up")
                     }
+                    Button { showTrash = true } label: {
+                        Label("回收站", systemImage: "trash.fill")
+                    }
                     Button { showClearSheet = true } label: {
                         HStack {
                             Label("清空数据", systemImage: "trash")
@@ -57,7 +61,7 @@ struct SettingsView: View {
                         }
                     }
                 } footer: {
-                    Text("备份与恢复均为手动操作，建议重要数据每次修改后及时备份。")
+                    Text("备份与恢复均为手动操作，建议重要数据每次修改后及时备份。回收站中可还原或永久删除已删除的记录。")
                 }
 
                 // MARK: 跨端数据
@@ -328,6 +332,9 @@ struct SettingsView: View {
             .sheet(isPresented: $showBillTemplate) {
                 BillTemplateSettingsView()
             }
+            .sheet(isPresented: $showTrash) {
+                TrashView()
+            }
         }
     }
 
@@ -396,6 +403,7 @@ struct SettingsView: View {
 // MARK: - 版本更新介绍
 struct VersionHistoryView: View {
     let versions: [(version: String, date: String, changes: [String])] = [
+        ("v1.3", "2026-10-22", ["房源板块：户型筛选支持多选（可同时筛选多种户型）", "房源设置：刷新分享缓存增加二次确认，防止误触", "房源设置：移除底部版本号", "分享压缩开关默认开启（此前默认关闭，视频按原文件上传）", "工作台：回收站入口移至「设置 → 数据管理」，空位新增「新增房源」（一键跳转房源板块并弹出登记表单）"]),
         ("v1.2", "2026-10-22", ["修复：房源板块闪退（根治）——租房管家与房源管家数据改为两个独立存储容器，房源页面使用专属数据上下文，规避 iOS 17 早期版本多存储配置崩溃问题", "房源数据仍独立存放 Documents/备份/（housekeeper.store），拷贝还原方式不变"]),
         ("v1.1", "2026-10-22", ["修复：与旧租房管家彻底隔离——App Group 改为全新 group.com.gj.tg.shared，桌面小组件/同步数据不再与旧应用互通", "优化：房源板块移至第二个 Tab（工作台之后），通知提醒跳转同步更新"]),
         ("v1.0", "2026-10-21", ["公寓管家正式版：租房管家（经营工具）与房源管家（获客分享）合体", "完整保留租房管家全部功能：工作台/成交/收租/包租/汇总/设置/回收站/待办/备忘录/账单模板/自动备份", "新增房源管家板块：房源库/实拍图视频/微信卡片分享/H5脱敏页/腾讯云COS远程配置", "房源数据独立存储（备份文件夹），可直接拷贝还原", "全新应用ID（com.gj.tg），与旧应用完全隔离，可并行安装"]),

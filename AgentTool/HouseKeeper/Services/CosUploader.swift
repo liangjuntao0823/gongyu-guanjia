@@ -6,6 +6,11 @@ import AVFoundation
 
 // MARK: - 钥匙串存取（COS 密钥等敏感配置）
 
+/// v1.3：分享压缩开关默认开启——未设置过时按开启处理（省流量、省 COS 费用）
+var shareCompressionEnabled: Bool {
+    UserDefaults.standard.object(forKey: "compressOnShare") == nil || UserDefaults.standard.bool(forKey: "compressOnShare")
+}
+
 enum KeychainKey {
     static let bucket = "cos.bucket"
     static let region = "cos.region"
@@ -195,7 +200,7 @@ enum CosUploader {
         // v1.23：压缩开关也纳入缓存校验——开关变化 → 旧缓存失效 → 重新压缩上传
         // v1.25：HTML 模板版本纳入校验——模板改动 → 旧缓存失效 → 重新生成新页面（避免改设计后还用旧链接）
         // v1.27：二维码是否存在（qrcodeSet）纳入校验——设置/清除二维码后旧缓存失效重新生成
-        let compressOnShare = UserDefaults.standard.bool(forKey: "compressOnShare")
+        let compressOnShare = shareCompressionEnabled
         let hasQR = QrcodeStore.exists()
         if let cached = ShareCacheStore.load(roomKey: roomKey, mode: mode.rawValue),
            cached.bucket == config.bucket,
@@ -357,7 +362,7 @@ enum CosUploader {
         // v1.25：①模板版本纳入校验——模板改动 → 旧合集缓存自动失效重新生成；
         //   ②合集房源比较改为【顺序无关】（Set）——多选点选顺序变化不再误判为变化导致重传
         // v1.27：二维码是否存在（qrcodeSet）纳入校验——设置/清除二维码后旧合集缓存自动失效
-        let compressOnShare = UserDefaults.standard.bool(forKey: "compressOnShare")
+        let compressOnShare = shareCompressionEnabled
         let hasQR = QrcodeStore.exists()
         let sortedKeys = validRooms.map { $0.roomKey }.sorted().joined(separator: "_")
         let cacheKey = "collection_\(sortedKeys)"
