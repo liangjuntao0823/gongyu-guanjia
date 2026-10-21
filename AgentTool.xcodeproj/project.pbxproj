@@ -444,10 +444,10 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDevelopmentRegion = "zh_CN";
-				INFOPLIST_KEY_CFBundleDisplayName = "闁稿浚鍓欓惁顒傜不閳ユ剚鍟€";
+INFOPLIST_KEY_CFBundleDisplayName = "公寓管家";
 				INFOPLIST_KEY_CFBundleShortVersionString = "5.0";
-				INFOPLIST_KEY_NSCameraUsageDescription = "闁活潿鍔嬬花顒勫箥椤愶絽浼庨柛蹇ｅ墮閻︻剛绮婚垾鎰佸晙闁汇劌瀚晶婊堝礉閵娿儲鍊辨慨婵勫劚閹风増娼绘担鐩掆晜绂嶅畝鈧ǎ顕€鎯嶆担纰樺亾?;
-				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "濞寸姴鎳庡﹢顏呮媴閻橀潧浠柛鎴ｎ嚙閹挸顫㈤妷锔筋槯閺夆晝鍋炵敮鎾触鐏炶偐顏遍悘鐐╁亾闁糕晝鍠撶紞澶愬礃閸涱垱鐣遍柛蹇ｅ墮閻︻剛绮婚垾鎰佸晙闁活澀绲婚崜鎶芥偋閸稈鍋?;
+INFOPLIST_KEY_NSCameraUsageDescription = "用于扫描公寓管家的手动同步和迁移二维码。";
+INFOPLIST_KEY_NSLocalNetworkUsageDescription = "仅在你点击同步时连接同一局域网内的公寓管家电脑版。";
 				INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsLocalNetworking = YES;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -479,10 +479,10 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDevelopmentRegion = "zh_CN";
-				INFOPLIST_KEY_CFBundleDisplayName = "闁稿浚鍓欓惁顒傜不閳ユ剚鍟€";
+INFOPLIST_KEY_CFBundleDisplayName = "公寓管家";
 				INFOPLIST_KEY_CFBundleShortVersionString = "5.0";
-				INFOPLIST_KEY_NSCameraUsageDescription = "闁活潿鍔嬬花顒勫箥椤愶絽浼庨柛蹇ｅ墮閻︻剛绮婚垾鎰佸晙闁汇劌瀚晶婊堝礉閵娿儲鍊辨慨婵勫劚閹风増娼绘担鐩掆晜绂嶅畝鈧ǎ顕€鎯嶆担纰樺亾?;
-				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "濞寸姴鎳庡﹢顏呮媴閻橀潧浠柛鎴ｎ嚙閹挸顫㈤妷锔筋槯閺夆晝鍋炵敮鎾触鐏炶偐顏遍悘鐐╁亾闁糕晝鍠撶紞澶愬礃閸涱垱鐣遍柛蹇ｅ墮閻︻剛绮婚垾鎰佸晙闁活澀绲婚崜鎶芥偋閸稈鍋?;
+INFOPLIST_KEY_NSCameraUsageDescription = "用于扫描公寓管家的手动同步和迁移二维码。";
+INFOPLIST_KEY_NSLocalNetworkUsageDescription = "仅在你点击同步时连接同一局域网内的公寓管家电脑版。";
 				INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsLocalNetworking = YES;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
