@@ -1,0 +1,832 @@
+import SwiftUI
+import PhotosUI
+import UIKit
+import UniformTypeIdentifiers
+import Security
+
+// MARK: - v1.34 钥匙串写入修复（独立实现，避免改动 CosUploader.swift 整文件）
+
+/// 旧 KeychainStore.save 的 bug：SecItemDelete 的查询字典里带了 kSecValueData（要写入的新值），
+/// 而删除匹配按查询属性匹配——旧条目存的是旧数据，与新值不匹配 → 删不掉旧条目；
+/// 随后 SecItemAdd 因同 account 条目已存在返回 errSecDuplicateItem 被当作成功 → 返回 true 但钥匙串仍是旧值
+/// （表现为「保存成功退出再进又变回旧地域」，自检时读到 ap-guangzhou 旧值）。
+/// 新实现：存在则 SecItemUpdate 更新、不存在则 SecItemAdd 添加，并立即回读比对，值一致才返回 true。
+enum KeychainFix {
+    private static let service = "com.zfgj.housekeeper"
+
+    @discardableResult
+    static func saveVerified(_ value: String, for key: String) -> Bool {
+        let data = Data(value.utf8)
+        let base: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: key
+        ]
+        // 已存在 → 更新（保留 kSecAttrAccessible 属性不被覆盖）
+        let update: [String: Any] = [
+            kSecValueData as String: data,
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock
+        ]
+        let updateStatus = SecItemUpdate(base as CFDictionary, update as CFDictionary)
+        if updateStatus == errSecSuccess {
+            return load(key) == value   // 回读验证：值一致才算成功
+        }
+        if updateStatus != errSecItemNotFound {
+            return false   // 权限等错误，明确失败
+        }
+        // 不存在 → 新增
+        var add = base
+        add[kSecValueData as String] = data
+        add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
+        guard SecItemAdd(add as CFDictionary, nil) == errSecSuccess else { return false }
+        return load(key) == value   // 回读验证
+    }
+
+    /// 删除指定 key 的钥匙串条目（清空配置用）
+    static func deleteKey(_ key: String) -> Bool {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: key
+        ]
+        let status = SecItemDelete(query as CFDictionary)
+        return status == errSecSuccess || status == errSecItemNotFound
+    }
+
+    private static func load(_ key: String) -> String? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: key,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne
+        ]
+        var item: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
+              let data = item as? Data else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+}
+
+/// 设置页（v1.22 重构：归拢成两个入口——远程配置 / 名片信息）
+/// 远程配置：腾讯云 COS 存储桶、密钥、自定义域名（用于分享房源卡片链接）
+/// 名片信息：分享 H5 页面与微信卡片上显示的姓名/电话（默认：梁涛 / 13288251132）
+struct HouseSettingsView: View {
+    @State private var refreshedTip: String?
+
+    var body: some View {
+        Form {
+            Section {
+                NavigationLink {
+                    CosConfigView()
+                } label: {
+                    Label("远程配置", systemImage: "server.rack")
+                }
+                NavigationLink {
+                    ShareProfileView()
+                } label: {
+                    Label("名片信息", systemImage: "person.crop.circle")
+                }
+            } footer: {
+                Text("远程配置：腾讯云 COS 存储桶、密钥与自定义域名，用于把房源的图片/视频上传并生成分享卡片链接。名片信息：分享 H5 页面和微信卡片上显示的姓名与电话。")
+            }
+
+            // v1.23：分享时压缩开关——视频压到 720p、图片轻压缩（参照微信非原图质量），
+            // 大幅降低上传流量与 COS 流量费用；关掉则按原文件原样上传
+            Section {
+                Toggle("分享时压缩视频和图片", isOn: Binding(
+                    get: { UserDefaults.standard.bool(forKey: "compressOnShare") },
+                    set: { UserDefaults.standard.set($0, forKey: "compressOnShare") }
+                ))
+            } footer: {
+                Text("开启后：视频压缩到 720p 再上传，图片做轻压缩（不牺牲观感，参照微信「不加载原图」的画质），分享更快、更省流量。")
+            }
+
+            // v1.25：分享缓存管理——改了分享页面样式后想立刻重新生成链接时手动刷新；
+            // 平时不需要：App 每次更新页面模板后旧缓存会自动失效，下次分享自动重新生成
+            Section {
+                Button {
+                    ShareCacheStore.clearAll()
+                    refreshedTip = "分享缓存已清空 ✅\n下次分享会重新上传并生成新链接（所有房源）"
+                } label: {
+                    Label("刷新分享缓存", systemImage: "arrow.clockwise.circle")
+                }
+            } footer: {
+                Text("平时无需操作：App 更新页面设计后，旧缓存会自动失效、分享自动生成新页面。仅当您想立刻重置全部缓存（例如改了页面样式想马上生效）时才需要点这里。")
+            }
+
+            // v1.30：数据备份——全部数据默认存放在「备份」子文件夹（数据库 + Media + 二维码 + 分享缓存），
+            // 根目录保持整洁；复制「备份」子文件夹 = 备份，放回 = 恢复（微信式文件夹备份）
+            Section {
+                HStack {
+                    Label("数据文件夹大小", systemImage: "externaldrive")
+                    Spacer()
+                    Text(Self.documentsSizeText())
+                        .foregroundColor(.secondary)
+                }
+                // v1.35：已收录房源套数——以本地 Media/ 房号文件夹数量为准
+                HStack {
+                    Label {
+                        Text(verbatim: "已收录房源")
+                    } icon: {
+                        Image(systemName: "building.2")
+                    }
+                    Spacer()
+                    Text("\(MediaStore.houseCount()) 套")
+                        .foregroundColor(.secondary)
+                }
+                Button {
+                    if let url = URL(string: "shareddocuments://") {
+                        UIApplication.shared.open(url)
+                    }
+                } label: {
+                    Label("打开「文件」App 查看数据文件夹", systemImage: "folder")
+                }
+            } footer: {
+                Text("本 App 的全部数据（房源数据库、图片视频、二维码）默认存放在「房源管家」文件夹内的「备份」子文件夹。备份：长按「备份」文件夹 → 拷贝/共享到电脑、网盘或微信；恢复：重装后把「备份」文件夹放回原位即可，房源信息和图片视频全部还原。")
+            }
+
+            // v1.28：版本号移到设置页最底部（原首页左上角版本徽章已移除）
+            Section {
+                HStack {
+                    Spacer()
+                    Text("房源管家 v\(appVersion)")
+                        .font(.footnote)
+                        .foregroundColor(.secondary)
+                    Spacer()
+                }
+            }
+        }
+        .navigationTitle("设置")
+        .navigationBarTitleDisplayMode(.inline)
+        .alert("刷新分享缓存", isPresented: Binding(
+            get: { refreshedTip != nil },
+            set: { if !$0 { refreshedTip = nil } }
+        )) {
+            Button("好", role: .cancel) {}
+        } message: {
+            Text(refreshedTip ?? "")
+        }
+    }
+
+    /// 当前 App 版本号（读自工程配置，如 1.29）
+    private var appVersion: String {
+        (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String) ?? ""
+    }
+
+    /// v1.30：「备份」子文件夹总大小（数据库、Media/、二维码、分享缓存等都在这里）
+    private static func documentsSizeText() -> String {
+        var total: Int64 = 0
+        if let enumerator = FileManager.default.enumerator(at: DataRoot.url(), includingPropertiesForKeys: [.fileSizeKey]) {
+            for case let url as URL in enumerator {
+                if let values = try? url.resourceValues(forKeys: [.fileSizeKey]), let size = values.fileSize {
+                    total += Int64(size)
+                }
+            }
+        }
+        return ByteCountFormatter.string(fromByteCount: total, countStyle: .file)
+    }
+}
+
+// MARK: - 远程配置（腾讯云 COS）
+
+/// v1.19：新增「自定义域名（可选）」——腾讯云 2024 年后新建桶默认域名会被微信识别成文件，
+/// 绑定自定义域名后微信才会把分享链接抓成网页卡片；域名留空则回退默认域名（仅兜底）
+/// v1.20：保存改为「保存并验证连接」——写入钥匙串成功后立即用当前配置向 COS 上传一个测试文件
+/// 并回读，真实连通才算保存成功；任何环节失败都会给出具体错误码（桶不存在/签名错误/域名未生效），
+/// 不再静默提示「已保存」；同时密钥写入失败也会明确报出。
+// MARK: - COS 配置备份 / 恢复（v1.33 剪贴板版 → v1.34 文件版）
+
+/// 把钥匙串里的 COS 配置导出为 JSON（v1.34 改为生成「桶名_地域_日期.json」文件由用户选择位置保存），
+/// 换机 / 重装 / 误改后可从备份文件一键恢复。配置含密钥，备份文件请妥善保管。
+enum CosConfigBackup {
+    static func exportJSON() -> String? {
+        guard let config = CosConfig.load() else { return nil }
+        let dict: [String: String] = [
+            "bucket": config.bucket,
+            "region": config.region,
+            "secretId": config.secretId,
+            "secretKey": config.secretKey,
+            "customDomain": config.customDomain
+        ]
+        guard let data = try? JSONSerialization.data(withJSONObject: dict, options: [.prettyPrinted, .sortedKeys]),
+              let json = String(data: data, encoding: .utf8) else { return nil }
+        return json
+    }
+
+    /// 从备份文件内容恢复配置到钥匙串；返回 (是否成功, 提示)
+    static func restore(fromJSON json: String) -> (Bool, String) {
+        guard let data = json.data(using: .utf8) else {
+            return (false, "所选文件内容不是有效的配置文本，请确认选择的是「备份配置到文件」生成的 .json 文件")
+        }
+        let parsed: Any?
+        do {
+            parsed = try JSONSerialization.jsonObject(with: data)
+        } catch {
+            return (false, "所选文件内容不是有效的配置文本，请确认选择的是「备份配置到文件」生成的 .json 文件")
+        }
+        guard let dict = parsed as? [String: Any] else {
+            return (false, "所选文件内容不是有效的配置文本，请确认选择的是「备份配置到文件」生成的 .json 文件")
+        }
+        let trimSet = CharacterSet.whitespacesAndNewlines
+        let bucket = (dict["bucket"] as? String ?? "").trimmingCharacters(in: trimSet)
+        let region = (dict["region"] as? String ?? "").trimmingCharacters(in: trimSet)
+        let secretId = (dict["secretId"] as? String ?? "").trimmingCharacters(in: trimSet)
+        let secretKey = (dict["secretKey"] as? String ?? "").trimmingCharacters(in: trimSet)
+        let customDomain = (dict["customDomain"] as? String ?? "").trimmingCharacters(in: trimSet)
+        if bucket.isEmpty || region.isEmpty || secretId.isEmpty || secretKey.isEmpty {
+            return (false, "配置缺少必填项（存储桶 / 地域 / SecretId / SecretKey），请检查备份文件")
+        }
+        var allSaved = true
+        let items: [(String, String)] = [
+            (KeychainKey.bucket, bucket),
+            (KeychainKey.region, region),
+            (KeychainKey.secretId, secretId),
+            (KeychainKey.secretKey, secretKey),
+            (KeychainKey.customDomain, customDomain)
+        ]
+        for item in items {
+            if !KeychainFix.saveVerified(item.1, for: item.0) {
+                allSaved = false
+            }
+        }
+        if !allSaved {
+            return (false, "写入本机钥匙串失败，请重试；若仍失败请重启 App 后再试")
+        }
+        let msg = "配置已恢复：地域 " + region + " / 存储桶 " + bucket + "\n表单已刷新，可点「保存并验证连接」确认可用"
+        return (true, msg)
+    }
+}
+
+struct CosConfigView: View {
+    @State private var bucket = ""
+    @State private var region = ""
+    @State private var secretId = ""
+    @State private var secretKey = ""
+    @State private var customDomain = ""
+    @State private var savedTip: String?
+    @State private var isVerifying = false
+    // v1.34：文件备份 / 恢复 + 清空配置（v1.35：备份直写「备份」文件夹；v1.36：恢复改为列表选择）
+    @State private var showRestoreList = false
+    @State private var showImporter = false
+    @State private var confirmClear = false
+
+    init() {
+        // v1.34：新装 App 默认配置全部为空，由用户自行填写（不再预填 ap-hongkong）
+        let b = KeychainStore.load(KeychainKey.bucket) ?? ""
+        let r = KeychainStore.load(KeychainKey.region) ?? ""
+        let i = KeychainStore.load(KeychainKey.secretId) ?? ""
+        let k = KeychainStore.load(KeychainKey.secretKey) ?? ""
+        let d = KeychainStore.load(KeychainKey.customDomain) ?? ""
+        _bucket = State(initialValue: b)
+        _region = State(initialValue: r)
+        _secretId = State(initialValue: i)
+        _secretKey = State(initialValue: k)
+        _customDomain = State(initialValue: d)
+    }
+
+    var body: some View {
+        Form {
+            Section {
+                LabeledContent("用途", value: "分享房源卡片链接")
+                LabeledContent("有效期", value: "长期有效（不自动过期）")
+            } footer: {
+                Text("分享时 App 会把该房源的图片和视频上传到腾讯云 COS，生成一个链接卡片发给微信好友；好友点开卡片即可查看，链接长期有效。")
+            }
+
+            Section("腾讯云 COS 配置") {
+                TextField("存储桶名称", text: $bucket)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                TextField("地域（如 ap-hongkong）", text: $region)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                TextField("自定义域名（必填，如 share.fangyuan88.site）", text: $customDomain)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .keyboardType(.URL)
+                TextField("SecretId", text: $secretId)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                SecureField("SecretKey", text: $secretKey)
+            }
+
+            Section {
+                HStack(spacing: 12) {
+                    Button {
+                        saveAndVerify()
+                    } label: {
+                        if isVerifying {
+                            ProgressView()
+                                .frame(maxWidth: .infinity)
+                        } else {
+                            Text("保存并验证连接")
+                                .font(.subheadline)
+                                .fontWeight(.medium)
+                                .frame(maxWidth: .infinity)
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(Color(red: 31/255, green: 58/255, blue: 95/255))
+                    .disabled(bucket.isEmpty || region.isEmpty || secretId.isEmpty || secretKey.isEmpty || isVerifying)
+                    // v1.35：访问储存桶——用当前填写的桶名/地域直接打开腾讯云 COS 控制台对应桶
+                    Button {
+                        openBucketConsole()
+                    } label: {
+                        Label("访问储存桶", systemImage: "safari")
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(bucket.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                             || region.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            } footer: {
+                Text("「保存并验证连接」会用当前配置上传测试文件并回读，成功才提示「配置正确」；「访问储存桶」用当前填写的桶名和地域打开腾讯云控制台。")
+            }
+
+            // v1.34：备份 / 恢复配置（文件方式）——备份生成「桶名_地域_日期.json」文件，
+            // v1.35：备份文件直接生成到「房源管家」→「备份」文件夹，不再弹出文件选择器
+            // v1.36：恢复改为 App 内列表选择（租房管家式写法，避免系统文件选择器点击无反应）
+            Section(header: Text("备份 / 恢复配置"), footer: Text("点「备份配置到文件」后，备份文件（桶名_地域_日期.json，含密钥）会直接生成到 iOS「文件」App → 我的 iPhone → 房源管家 → 「备份」文件夹，随整个「备份」文件夹一起备份即可。换机 / 重装 / 误改后，点「从备份文件恢复配置」在列表中选择备份文件（或从其他位置导入）即可一键还原。含密钥内容请勿外泄。")) {
+                Button {
+                    prepareBackupFile()
+                } label: {
+                    Label("备份配置到文件", systemImage: "square.and.arrow.up")
+                }
+                Button {
+                    showRestoreList = true
+                } label: {
+                    Label("从备份文件恢复配置", systemImage: "square.and.arrow.down")
+                }
+                // v1.34：清空全部配置并断开与桶的连接
+                Button(role: .destructive) {
+                    confirmClear = true
+                } label: {
+                    Label("清空全部配置并断开连接", systemImage: "trash")
+                }
+                .alert("确认清空全部配置？", isPresented: $confirmClear) {
+                    Button("清空", role: .destructive) { clearAllConfig() }
+                    Button("取消", role: .cancel) {}
+                } message: {
+                    Text("将删除本机保存的存储桶、地域、密钥、自定义域名全部配置，并断开与 COS 的连接。此操作不可撤销，可先用「备份配置到文件」留底。")
+                }
+            }
+
+            // v1.28：开通步骤从设置主页面移入本页（仅首次配置需要）
+            Section("开通步骤（简述）") {
+                Text("1. 打开 cloud.tencent.com 注册并实名认证；2. 开通「对象存储 COS」；3. 创建存储桶：名称可自定义（如 fangyuan88）、地域按您实际选择的填写（如香港 ap-hongkong）、访问权限选「私有读写」；4. 在「访问管理 CAM → API 密钥管理」新建密钥，得到 SecretId 和 SecretKey；5. 在「存储桶 → 域名与传输管理 → 自定义源站域名」绑定自己的域名（需先在腾讯云购买域名），并把域名填入远程配置的「自定义域名」栏——微信只认自定义域名，才能把链接抓成网页卡片。注意：桶名和地域必须和您实际创建的存储桶一致，才能连接成功。")
+                    .font(.footnote)
+                    .foregroundColor(.secondary)
+                Text("密钥与名片只存在本机钥匙串，不会上传到任何地方。")
+                    .font(.footnote)
+                    .foregroundColor(.secondary)
+            }
+        }
+        .navigationTitle("远程配置")
+        .navigationBarTitleDisplayMode(.inline)
+        .sheet(isPresented: $showRestoreList) {
+            ConfigRestoreListView(
+                onPick: { url in
+                    handleRestoreFile(url)
+                },
+                onImportOther: {
+                    // 先关列表再弹系统选择器（延迟 0.35s 避免 sheet 交替冲突，租房管家同款写法）
+                    showRestoreList = false
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                        showImporter = true
+                    }
+                }
+            )
+        }
+        .fileImporter(isPresented: $showImporter, allowedContentTypes: [.json], allowsMultipleSelection: false) { result in
+            switch result {
+            case .success(let urls):
+                if let url = urls.first {
+                    handleRestoreFile(url)
+                }
+            case .failure(let error):
+                savedTip = "无法读取所选文件：\(error.localizedDescription)"
+            }
+        }
+        .alert("配置结果", isPresented: Binding(
+            get: { savedTip != nil },
+            set: { if !$0 { savedTip = nil } }
+        )) {
+            Button("好", role: .cancel) {}
+        } message: {
+            Text(savedTip ?? "")
+        }
+    }
+
+    private func saveAndVerify() {
+        // 0. 统一去除首尾空格（粘贴带入空白会导致签名失败或地域识别异常）
+        let trimSet = CharacterSet.whitespacesAndNewlines
+        bucket = bucket.trimmingCharacters(in: trimSet)
+        region = region.trimmingCharacters(in: trimSet)
+        secretId = secretId.trimmingCharacters(in: trimSet)
+        secretKey = secretKey.trimmingCharacters(in: trimSet)
+        customDomain = customDomain.trimmingCharacters(in: trimSet)
+
+        // 1. 写入钥匙串：任一项写失败都要明确提示（v1.20 之前写入失败被静默吞掉）
+        var allSaved = true
+        let items: [(String, String)] = [
+            (KeychainKey.bucket, bucket),
+            (KeychainKey.region, region),
+            (KeychainKey.secretId, secretId),
+            (KeychainKey.secretKey, secretKey),
+            (KeychainKey.customDomain, customDomain)
+        ]
+        for (key, value) in items {
+            if !KeychainFix.saveVerified(value, for: key) {
+                allSaved = false
+            }
+        }
+        if !allSaved {
+            savedTip = "写入本机钥匙串失败，请重新保存一次；若仍失败请重启 App 后再试"
+            return
+        }
+
+        // 1.5 回读自检（v1.33）：保存后立即从钥匙串读回比对，防止「保存成功但重启后是旧值」
+        let savedBucket = KeychainStore.load(KeychainKey.bucket) ?? ""
+        let savedRegion = KeychainStore.load(KeychainKey.region) ?? ""
+        if savedRegion != region || savedBucket != bucket {
+            savedTip = "写入自检失败：钥匙串中地域为「\(savedRegion)」、存储桶为「\(savedBucket)」，与本次填写不一致。请重启 App 后重新保存"
+            return
+        }
+
+        // 2. 后台真实验证：上传测试文件 + 回读（失败会带具体错误码）
+        isVerifying = true
+        let config = CosConfig(bucket: bucket, region: region, secretId: secretId, secretKey: secretKey, customDomain: customDomain)
+        Task {
+            do {
+                let hostUsed = try await CosUploader.verifyConnection(config: config)
+                savedTip = "配置正确：云存储连接成功 ✅\n已保存地域：\(region)\n实际使用域名：\(hostUsed)\n现在可以去详情页「分享」生成卡片链接"
+            } catch {
+                savedTip = "验证失败：\(error.localizedDescription)"
+            }
+            isVerifying = false
+        }
+    }
+
+    // MARK: - v1.34 备份 / 恢复配置（文件方式）
+
+    /// 生成备份文件名：桶名_地域_日期.json（如 fangyuan88-1511251056_ap-hongkong_20261021.json）
+    private var backupFileName: String {
+        let df = DateFormatter()
+        df.dateFormat = "yyyyMMdd"
+        let safeBucket = bucket.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "cos" : bucket.trimmingCharacters(in: .whitespacesAndNewlines)
+        let safeRegion = region.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "unknown" : region.trimmingCharacters(in: .whitespacesAndNewlines)
+        return "\(safeBucket)_\(safeRegion)_\(df.string(from: Date())).json"
+    }
+
+    /// 备份：生成 JSON 文件并直接写入「备份」子文件夹（Documents/备份/<桶名_地域_日期.json>），
+    /// v1.35：不再弹出文件导出器（避免 iOS 上偶发空白面板）；备份文件随整个「备份」文件夹一起备份
+    private func prepareBackupFile() {
+        guard let json = CosConfigBackup.exportJSON() else {
+            savedTip = "当前没有完整配置可备份，请先填写存储桶 / 地域 / SecretId / SecretKey 并保存"
+            return
+        }
+        let target = DataRoot.url().appendingPathComponent(backupFileName)
+        do {
+            try json.data(using: .utf8)?.write(to: target, options: .atomic)
+            savedTip = "配置备份成功 ✅\n文件已生成到：文件 App → 我的 iPhone → 房源管家 → 备份\n\(backupFileName)\n（随「备份」文件夹一起拷贝/共享即可留底）"
+        } catch {
+            savedTip = "生成备份文件失败：\(error.localizedDescription)"
+        }
+    }
+
+    /// v1.35：访问储存桶——用当前填写的桶名/地域打开腾讯云 COS 控制台对应桶页面（默认浏览器）
+    private func openBucketConsole() {
+        let b = bucket.trimmingCharacters(in: .whitespacesAndNewlines)
+        let r = region.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !b.isEmpty, !r.isEmpty else {
+            savedTip = "请先填写存储桶名称和地域，再访问储存桶"
+            return
+        }
+        let urlString = "https://console.cloud.tencent.com/cos/bucket?bucket=\(b)&region=\(r)"
+        guard let url = URL(string: urlString) else {
+            savedTip = "无法打开储存桶，请检查桶名 / 地域是否填写正确"
+            return
+        }
+        UIApplication.shared.open(url) { ok in
+            if !ok {
+                savedTip = "无法打开浏览器，请手动访问腾讯云控制台"
+            }
+        }
+    }
+
+    /// 恢复：从用户选择的备份文件读取并还原配置
+    private func handleRestoreFile(_ url: URL) {
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        guard let data = try? Data(contentsOf: url), let text = String(data: data, encoding: .utf8) else {
+            savedTip = "无法读取所选文件，请确认选择的是「备份配置到文件」生成的 .json 文件"
+            return
+        }
+        let result = CosConfigBackup.restore(fromJSON: text)
+        savedTip = result.1
+        if result.0 {
+            // 恢复成功后刷新表单，用户可直接看到刚恢复的值
+            refreshFormFromKeychain()
+        }
+    }
+
+    /// 清空全部配置：删除钥匙串 5 项并清空表单
+    private func clearAllConfig() {
+        var allCleared = true
+        let keys = [
+            KeychainKey.bucket,
+            KeychainKey.region,
+            KeychainKey.secretId,
+            KeychainKey.secretKey,
+            KeychainKey.customDomain
+        ]
+        for key in keys {
+            if !KeychainFix.deleteKey(key) {
+                allCleared = false
+            }
+        }
+        bucket = ""
+        region = ""
+        secretId = ""
+        secretKey = ""
+        customDomain = ""
+        savedTip = allCleared ? "已清空全部配置并断开与 COS 的连接 ✅" : "部分配置清除失败，请重启 App 后重试"
+    }
+
+    private func refreshFormFromKeychain() {
+        bucket = KeychainStore.load(KeychainKey.bucket) ?? ""
+        region = KeychainStore.load(KeychainKey.region) ?? ""
+        secretId = KeychainStore.load(KeychainKey.secretId) ?? ""
+        secretKey = KeychainStore.load(KeychainKey.secretKey) ?? ""
+        customDomain = KeychainStore.load(KeychainKey.customDomain) ?? ""
+    }
+}
+
+// MARK: - 恢复配置（v1.36：租房管家式列表选择，替代系统文件选择器避免点击无反应）
+
+/// 列出「备份」文件夹内的 .json 备份文件，点击直接恢复（与租房管家 RestoreBackupView 同款写法）；
+/// 列表底部提供「从其他位置选择」用系统文件选择器兜底（保留自由选择路径的能力）
+struct ConfigRestoreListView: View {
+    let onPick: (URL) -> Void
+    let onImportOther: () -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var files: [URL] = []
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if files.isEmpty {
+                    VStack(spacing: 12) {
+                        Image(systemName: "tray")
+                            .font(.system(size: 44))
+                            .foregroundColor(.secondary)
+                        Text("「备份」文件夹里还没有备份文件")
+                            .font(.headline)
+                        Text("请先点「备份配置到文件」生成备份，或把备份 .json 文件放进 iOS「文件」App → 我的 iPhone → 房源管家 → 备份 文件夹")
+                            .font(.footnote)
+                            .foregroundColor(.secondary)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 24)
+                        Button {
+                            onImportOther()
+                        } label: {
+                            Label("从其他位置选择…", systemImage: "folder")
+                                .font(.subheadline)
+                        }
+                        .padding(.top, 6)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    List {
+                        ForEach(files, id: \.self) { url in
+                            Button {
+                                onPick(url)
+                                dismiss()
+                            } label: {
+                                HStack(spacing: 12) {
+                                    Image(systemName: "doc.text")
+                                        .foregroundColor(.blue)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(url.lastPathComponent)
+                                            .font(.body)
+                                            .foregroundColor(.primary)
+                                        Text(fileSize(of: url))
+                                            .font(.caption)
+                                            .foregroundColor(.secondary)
+                                    }
+                                    Spacer()
+                                    Image(systemName: "chevron.right")
+                                        .font(.caption2)
+                                        .foregroundColor(.secondary)
+                                }
+                                .padding(.vertical, 2)
+                            }
+                        }
+                        Section {
+                            Button {
+                                onImportOther()
+                            } label: {
+                                Label("从其他位置选择…", systemImage: "folder")
+                            }
+                        }
+                    }
+                    .listStyle(.insetGrouped)
+                }
+            }
+            .navigationTitle("选择备份文件")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") { dismiss() }
+                }
+            }
+            .onAppear(perform: loadFiles)
+        }
+    }
+
+    /// 列出「备份」文件夹内的 .json 文件，按文件名（含日期）倒序，最新的在最上面
+    private func loadFiles() {
+        let fm = FileManager.default
+        guard let items = try? fm.contentsOfDirectory(
+            at: DataRoot.url(),
+            includingPropertiesForKeys: [.fileSizeKey],
+            options: [.skipsHiddenFiles]
+        ) else { return }
+        files = items
+            .filter { $0.pathExtension.lowercased() == "json" }
+            .sorted { $0.lastPathComponent > $1.lastPathComponent }
+    }
+
+    private func fileSize(of url: URL) -> String {
+        let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+        return ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file)
+    }
+}
+
+// MARK: - 名片信息
+
+/// v1.21：分享名片信息（姓名/电话）——显示在分享 H5 页面的名片区、微信卡片的描述和
+/// 「拨打电话/复制电话」按钮上。v1.22：修改后再次分享自动按新名片重新生成链接
+/// （分享缓存里存了名片，名片一变缓存自动失效，无需手动清缓存）。
+/// v1.26：①新增实时名片预览；②说明应用范围覆盖所有出现姓名/电话的位置
+/// （H5 名片区、微信卡片描述、页面底栏电话、拨打电话/复制电话）。
+/// v1.27：新增「微信二维码」入口——从相册选择二维码图片保存（Documents/qrcode.png），
+/// 分享时自动上传 COS 并显示在所有 H5 名片板块左侧，访客长按可直接被微信识别。
+struct ShareProfileView: View {
+    @State private var shareName = ""
+    @State private var sharePhone = ""
+    @State private var savedTip: String?
+    @State private var qrImage: UIImage?
+    @State private var qrPickerItem: PhotosPickerItem?
+
+    init() {
+        let n = KeychainStore.load(KeychainKey.shareName) ?? "梁涛"
+        let p = KeychainStore.load(KeychainKey.sharePhone) ?? "13288251132"
+        _shareName = State(initialValue: n)
+        _sharePhone = State(initialValue: p)
+        if let data = QrcodeStore.loadData() {
+            _qrImage = State(initialValue: UIImage(data: data))
+        }
+    }
+
+    /// 预览用的姓名/电话：输入为空时显示默认值（与分享时行为一致）
+    private var previewName: String {
+        let n = shareName.trimmingCharacters(in: .whitespacesAndNewlines)
+        return n.isEmpty ? "梁涛" : n
+    }
+    private var previewPhone: String {
+        let p = sharePhone.trimmingCharacters(in: .whitespacesAndNewlines)
+        return p.isEmpty ? "13288251132" : p
+    }
+
+    var body: some View {
+        Form {
+            // v1.26：实时名片预览——输入即变，所见即所得
+            Section(header: Text("名片预览")) {
+                VStack(spacing: 10) {
+                    Text("米兰租赁管家 · 专业省心租好房")
+                        .font(.footnote)
+                        .foregroundColor(.secondary)
+                    HStack(spacing: 8) {
+                        Text(previewName)
+                            .font(.headline)
+                        Text(previewPhone)
+                            .font(.headline)
+                            .foregroundColor(.orange)
+                    }
+                    Text("微信同号 · 24小时可约看房")
+                        .font(.footnote)
+                        .foregroundColor(.secondary)
+                    HStack(spacing: 10) {
+                        Text("拨打电话")
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 26)
+                            .padding(.vertical, 9)
+                            .background(Color(red: 31/255, green: 58/255, blue: 95/255))
+                            .clipShape(Capsule())
+                        Text("复制电话")
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                            .padding(.horizontal, 26)
+                            .padding(.vertical, 9)
+                            .background(Color(.systemGray6))
+                            .clipShape(Capsule())
+                    }
+                    // v1.27：二维码预览（有则显示缩略图，无则提示）
+                    if let qrImage {
+                        Image(uiImage: qrImage)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 104, height: 104)
+                            .background(Color.white)
+                            .cornerRadius(10)
+                            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color(.systemGray4), lineWidth: 1))
+                            .padding(.top, 6)
+                    } else {
+                        Text("未设置微信二维码")
+                            .font(.footnote)
+                            .foregroundColor(.secondary)
+                            .padding(.top, 6)
+                    }
+                }
+                .padding(14)
+                .frame(maxWidth: .infinity)
+                .background(Color(.systemBackground))
+                .cornerRadius(14)
+                .padding(.top, 4)
+            }
+
+            Section(header: Text("名片信息"), footer: Text("姓名和电话会应用到所有出现它们的地方：分享 H5 页面的名片区（含合集列表与详情页）、微信卡片的描述、页面底栏的联系电话、以及「拨打电话/复制电话」按钮。修改并保存后，下次分享会自动按新名片重新生成链接；之前已发出的链接保持原样。")) {
+                TextField("姓名（默认：梁涛）", text: $shareName)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                TextField("电话（默认：13288251132）", text: $sharePhone)
+                    .keyboardType(.phonePad)
+                Button {
+                    saveShareProfile()
+                } label: {
+                    Text("保存名片信息")
+                        .frame(maxWidth: .infinity)
+                }
+                .disabled(shareName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+
+            // v1.27：微信二维码——相册选择保存；分享时自动上传，显示在所有 H5 名片板块左侧
+            Section(header: Text("微信二维码"), footer: Text("二维码会显示在所有分享 H5 页面的名片板块左侧（拨打电话/复制电话上方），访客长按二维码即可弹出微信「识别图中二维码」菜单。更换后无需重新分享——已发出的链接也会自动显示新二维码。")) {
+                PhotosPicker(selection: $qrPickerItem, matching: .images) {
+                    Label(qrImage == nil ? "选择二维码图片" : "更换二维码图片", systemImage: "qrcode")
+                }
+                .onChange(of: qrPickerItem) { _, newItem in
+                    guard let newItem else { return }
+                    Task {
+                        if let data = try? await newItem.loadTransferable(type: Data.self),
+                           let image = UIImage(data: data),
+                           let jpeg = image.jpegData(compressionQuality: 0.9) {
+                            let ok = QrcodeStore.save(jpeg)
+                            qrImage = UIImage(data: jpeg)
+                            savedTip = ok ? "微信二维码已更新 ✅\n下次分享起所有 H5 名片板块都会显示新二维码" : "保存二维码失败，请重试"
+                        } else {
+                            savedTip = "无法读取所选图片，请换一张清晰的二维码图片"
+                        }
+                        qrPickerItem = nil
+                    }
+                }
+                if qrImage != nil {
+                    Button("清除二维码", role: .destructive) {
+                        QrcodeStore.clear()
+                        qrImage = nil
+                        savedTip = "二维码已清除，下次分享的页面将不再显示二维码"
+                    }
+                }
+            }
+        }
+        .navigationTitle("名片信息")
+        .navigationBarTitleDisplayMode(.inline)
+        .alert("保存结果", isPresented: Binding(
+            get: { savedTip != nil },
+            set: { if !$0 { savedTip = nil } }
+        )) {
+            Button("好", role: .cancel) {}
+        } message: {
+            Text(savedTip ?? "")
+        }
+    }
+
+    /// 保存分享名片信息（姓名/电话）到钥匙串
+    private func saveShareProfile() {
+        let name = shareName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let phone = sharePhone.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else {
+            savedTip = "姓名不能为空"
+            return
+        }
+        var ok = KeychainFix.saveVerified(name, for: KeychainKey.shareName)
+        ok = KeychainFix.saveVerified(phone, for: KeychainKey.sharePhone) && ok
+        savedTip = ok ? "名片信息已保存 ✅\n姓名：\(name)\n电话：\(phone.isEmpty ? "（未填，分享时用默认号）" : phone)" : "写入本机钥匙串失败，请重新保存一次"
+    }
+}

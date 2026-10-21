@@ -1,0 +1,533 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		A10000010000000000000001 /* App.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000001 /* App.swift */; };
+		A10000010000000000000002 /* Property.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000002 /* Property.swift */; };
+		A10000010000000000000003 /* DealRecord.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000003 /* DealRecord.swift */; };
+		A10000010000000000000004 /* PayoutRecord.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000004 /* PayoutRecord.swift */; };
+		A10000010000000000000005 /* DataManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000005 /* DataManager.swift */; };
+		A10000010000000000000006 /* DashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000006 /* DashboardView.swift */; };
+		A10000010000000000000025 /* TodoViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000025 /* TodoViews.swift */; };
+		A10000010000000000000007 /* DealsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000007 /* DealsView.swift */; };
+		A10000010000000000000008 /* RentCollectionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000008 /* RentCollectionView.swift */; };
+		A10000010000000000000009 /* PayoutView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000009 /* PayoutView.swift */; };
+		A10000010000000000000010 /* ProfitView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000010 /* ProfitView.swift */; };
+		A10000010000000000000095 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000095 /* SettingsView.swift */; };
+		A10000010000000000000096 /* DataBackupManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000096 /* DataBackupManager.swift */; };
+		A30000010000000000000001 /* LocalNotificationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = B30000010000000000000001 /* LocalNotificationManager.swift */; };
+		A10000010000000000000011 /* UtilityView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000011 /* UtilityView.swift */; };
+		A10000010000000000000015 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000015 /* Theme.swift */; };
+		A10000010000000000000012 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000012 /* Assets.xcassets */; };
+		A10000010000000000000097 /* initialData.json in Resources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000097 /* initialData.json */; };
+		A10000010000000000000098 /* presetBackup.json in Resources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000098 /* presetBackup.json */; };
+		A20000010000000000000001 /* SyncDTO.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000010000000000000001 /* SyncDTO.swift */; };
+		A20000010000000000000002 /* ManualSyncView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000010000000000000002 /* ManualSyncView.swift */; };
+		A20000010000000000000003 /* MigrationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000010000000000000003 /* MigrationView.swift */; };
+		A20000010000000000000004 /* SyncCore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000010000000000000004 /* SyncCore.swift */; };
+		A20000010000000000000005 /* SwiftDataSyncSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000010000000000000005 /* SwiftDataSyncSnapshot.swift */; };
+		A10000010000000000000013 /* Preview Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000013 /* Preview Assets.xcassets */; };
+		WA /* WidgetDataSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = WB /* WidgetDataSync.swift */; };
+		W1 /* AgentToolWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = W2 /* AgentToolWidget.swift */; };
+		W3 /* AgentToolWidget.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = W4 /* AgentToolWidget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		PE1 /* PlanEditors.swift in Sources */ = {isa = PBXBuildFile; fileRef = PE2 /* PlanEditors.swift */; };
+		A10000010000000000000099 /* TrashView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000099 /* TrashView.swift */; };
+		A10000010000000000000100 /* House.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000100 /* House.swift */; };
+		A10000010000000000000101 /* CosUploader.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000101 /* CosUploader.swift */; };
+		A10000010000000000000102 /* MediaStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000102 /* MediaStore.swift */; };
+		A10000010000000000000103 /* HouseComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000103 /* HouseComponents.swift */; };
+		A10000010000000000000104 /* HouseDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000104 /* HouseDetailView.swift */; };
+		A10000010000000000000105 /* HouseEditView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000105 /* HouseEditView.swift */; };
+		A10000010000000000000106 /* HouseListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000106 /* HouseListView.swift */; };
+		A10000010000000000000107 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000107 /* SettingsView.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		B10000010000000000000001 /* App.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App.swift; sourceTree = "<group>"; };
+		B10000010000000000000002 /* Property.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Property.swift; sourceTree = "<group>"; };
+		B10000010000000000000003 /* DealRecord.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DealRecord.swift; sourceTree = "<group>"; };
+		B10000010000000000000004 /* PayoutRecord.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PayoutRecord.swift; sourceTree = "<group>"; };
+		B10000010000000000000005 /* DataManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DataManager.swift; sourceTree = "<group>"; };
+		B10000010000000000000006 /* DashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardView.swift; sourceTree = "<group>"; };
+		B10000010000000000000025 /* TodoViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodoViews.swift; sourceTree = "<group>"; };
+		B10000010000000000000007 /* DealsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DealsView.swift; sourceTree = "<group>"; };
+		B10000010000000000000008 /* RentCollectionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RentCollectionView.swift; sourceTree = "<group>"; };
+		B10000010000000000000009 /* PayoutView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PayoutView.swift; sourceTree = "<group>"; };
+		B10000010000000000000010 /* ProfitView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfitView.swift; sourceTree = "<group>"; };
+		B10000010000000000000095 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		B10000010000000000000096 /* DataBackupManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DataBackupManager.swift; sourceTree = "<group>"; };
+		B30000010000000000000001 /* LocalNotificationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalNotificationManager.swift; sourceTree = "<group>"; };
+		B10000010000000000000011 /* UtilityView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UtilityView.swift; sourceTree = "<group>"; };
+		B10000010000000000000015 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
+		B10000010000000000000012 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		B10000010000000000000097 /* initialData.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = initialData.json; sourceTree = "<group>"; };
+		B10000010000000000000098 /* presetBackup.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = presetBackup.json; sourceTree = "<group>"; };
+		B10000010000000000000013 /* Preview Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = "Preview Assets.xcassets"; sourceTree = "<group>"; };
+		B10000010000000000000014 /* AgentTool.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AgentTool.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		B20000010000000000000001 /* SyncDTO.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncDTO.swift; sourceTree = "<group>"; };
+		B20000010000000000000002 /* ManualSyncView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManualSyncView.swift; sourceTree = "<group>"; };
+		B20000010000000000000003 /* MigrationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MigrationView.swift; sourceTree = "<group>"; };
+		B20000010000000000000004 /* SyncCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncCore.swift; sourceTree = "<group>"; };
+		B20000010000000000000005 /* SwiftDataSyncSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwiftDataSyncSnapshot.swift; sourceTree = "<group>"; };
+		W2 /* AgentToolWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentToolWidget.swift; sourceTree = "<group>"; };
+		WB /* WidgetDataSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetDataSync.swift; sourceTree = "<group>"; };
+		W5 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		W4 /* AgentToolWidget.appex */ = {isa = PBXFileReference; explicitFileType = wrapper.app-extension; path = AgentToolWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		PE2 /* PlanEditors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlanEditors.swift; sourceTree = "<group>"; };
+		B10000010000000000000099 /* TrashView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrashView.swift; sourceTree = "<group>"; };
+		B10000010000000000000100 /* House.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = House.swift; sourceTree = "<group>"; };
+		B10000010000000000000101 /* CosUploader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CosUploader.swift; sourceTree = "<group>"; };
+		B10000010000000000000102 /* MediaStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaStore.swift; sourceTree = "<group>"; };
+		B10000010000000000000103 /* HouseComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HouseComponents.swift; sourceTree = "<group>"; };
+		B10000010000000000000104 /* HouseDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HouseDetailView.swift; sourceTree = "<group>"; };
+		B10000010000000000000105 /* HouseEditView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HouseEditView.swift; sourceTree = "<group>"; };
+		B10000010000000000000106 /* HouseListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HouseListView.swift; sourceTree = "<group>"; };
+		B10000010000000000000107 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		C10000010000000000000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		EW /* Embed App Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			buildActionMask = 2147483647;
+			files = (
+				W3 /* AgentToolWidget.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed App Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXContainerItemProxy section */
+		TP /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = H10000010000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = WT;
+			remoteInfo = AgentToolWidget;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXTargetDependency section */
+		TD /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = WT /* AgentToolWidget */;
+			targetProxy = TP /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin PBXGroup section */
+		D10000010000000000000001 = {
+			isa = PBXGroup;
+			children = (
+				D10000010000000000000002 /* AgentTool */,
+				D10000010000000000000003 /* Products */,
+				WG /* AgentToolWidget */,
+			);
+			sourceTree = "<group>";
+		};
+		D10000010000000000000002 /* AgentTool */ = {
+			isa = PBXGroup;
+			children = (
+				B10000010000000000000001 /* App.swift */,
+				WB /* WidgetDataSync.swift */,
+				D10000010000000000000004 /* Models */,
+				D10000010000000000000005 /* ViewModels */,
+				D20000010000000000000001 /* Sync */,
+				D10000010000000000000006 /* Views */,
+				B10000010000000000000012 /* Assets.xcassets */,
+				B10000010000000000000097 /* initialData.json */,
+				B10000010000000000000098 /* presetBackup.json */,
+				D10000010000000000000007 /* Preview Content */,
+				D10000010000000000000008 /* HouseKeeper */,
+			);
+			path = AgentTool;
+			sourceTree = "<group>";
+		};
+		D10000010000000000000003 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				B10000010000000000000014 /* AgentTool.app */,
+				W4 /* AgentToolWidget.appex */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		D10000010000000000000004 /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				B10000010000000000000002 /* Property.swift */,
+				B10000010000000000000003 /* DealRecord.swift */,
+				B10000010000000000000004 /* PayoutRecord.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		D10000010000000000000005 /* ViewModels */ = {
+			isa = PBXGroup;
+			children = (
+				B10000010000000000000005 /* DataManager.swift */,
+				B10000010000000000000096 /* DataBackupManager.swift */,
+				B30000010000000000000001 /* LocalNotificationManager.swift */,
+			);
+			path = ViewModels;
+			sourceTree = "<group>";
+		};
+		D20000010000000000000001 /* Sync */ = {
+			isa = PBXGroup;
+			children = (
+				B20000010000000000000001 /* SyncDTO.swift */,
+				B20000010000000000000002 /* ManualSyncView.swift */,
+				B20000010000000000000003 /* MigrationView.swift */,
+				B20000010000000000000004 /* SyncCore.swift */,
+				B20000010000000000000005 /* SwiftDataSyncSnapshot.swift */,
+			);
+			path = Sync;
+			sourceTree = "<group>";
+		};
+		D10000010000000000000006 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				B10000010000000000000006 /* DashboardView.swift */,
+				B10000010000000000000025 /* TodoViews.swift */,
+				B10000010000000000000007 /* DealsView.swift */,
+				B10000010000000000000008 /* RentCollectionView.swift */,
+				B10000010000000000000009 /* PayoutView.swift */,
+				B10000010000000000000010 /* ProfitView.swift */,
+				B10000010000000000000095 /* SettingsView.swift */,
+				B10000010000000000000011 /* UtilityView.swift */,
+				B10000010000000000000099 /* TrashView.swift */,
+				B10000010000000000000015 /* Theme.swift */,
+				PE2 /* PlanEditors.swift */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		D10000010000000000000007 /* Preview Content */ = {
+			isa = PBXGroup;
+			children = (
+				B10000010000000000000013 /* Preview Assets.xcassets */,
+			);
+			path = "Preview Content";
+			sourceTree = "<group>";
+		};
+		WG /* AgentToolWidget */ = {isa = PBXGroup; children = (W2 /* AgentToolWidget.swift */, W5 /* Info.plist */,); path = AgentToolWidget; sourceTree = "<group>"; };
+		D10000010000000000000008 /* HouseKeeper */ = {
+			isa = PBXGroup;
+			children = (
+				D10000010000000000000009 /* Models */,
+				D10000010000000000000010 /* Services */,
+				D10000010000000000000011 /* Views */,
+			);
+			path = HouseKeeper;
+			sourceTree = "<group>";
+		};
+		D10000010000000000000009 /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				B10000010000000000000100 /* House.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		D10000010000000000000010 /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				B10000010000000000000101 /* CosUploader.swift */,
+				B10000010000000000000102 /* MediaStore.swift */,
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
+		D10000010000000000000011 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				B10000010000000000000103 /* HouseComponents.swift */,
+				B10000010000000000000104 /* HouseDetailView.swift */,
+				B10000010000000000000105 /* HouseEditView.swift */,
+				B10000010000000000000106 /* HouseListView.swift */,
+				B10000010000000000000107 /* SettingsView.swift */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXSourcesBuildPhase section */
+		WP = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (W1 /* AgentToolWidget.swift in Sources */,); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXSourcesBuildPhase section */
+/* Begin PBXNativeTarget section */
+		E10000010000000000000001 /* AgentTool */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F10000010000000000000003 /* Build configuration list for PBXNativeTarget "AgentTool" */;
+			buildPhases = (
+				G10000010000000000000001 /* Sources */,
+				C10000010000000000000001 /* Frameworks */,
+				G10000010000000000000002 /* Resources */,
+				EW /* Embed App Extensions */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				TD /* PBXTargetDependency */,
+			);
+			name = AgentTool;
+			productName = AgentTool;
+			productReference = B10000010000000000000014 /* AgentTool.app */;
+			productType = "com.apple.product-type.application";
+		};
+		WT /* AgentToolWidget */ = {isa = PBXNativeTarget; buildConfigurationList = WC; buildPhases = (WP,); buildRules = (); dependencies = (); name = AgentToolWidget; productName = AgentToolWidget; productReference = W4; productType = "com.apple.product-type.app-extension"; };
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		H10000010000000000000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1500;
+				LastUpgradeCheck = 1500;
+				TargetAttributes = {
+					E10000010000000000000001 = {
+						CreatedOnToolsVersion = 15.0;
+					};
+				};
+			};
+			buildConfigurationList = F10000010000000000000001 /* Build configuration list for PBXProject "AgentTool" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = zh_CN;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = D10000010000000000000001;
+			productRefGroup = D10000010000000000000003 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				E10000010000000000000001 /* AgentTool */,
+				WT /* AgentToolWidget */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		G10000010000000000000002 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A10000010000000000000013 /* Preview Assets.xcassets in Resources */,
+				A10000010000000000000012 /* Assets.xcassets in Resources */,
+				A10000010000000000000097 /* initialData.json in Resources */,
+				A10000010000000000000098 /* presetBackup.json in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		G10000010000000000000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A10000010000000000000001 /* App.swift in Sources */,
+				WA /* WidgetDataSync.swift in Sources */,
+				A10000010000000000000002 /* Property.swift in Sources */,
+				A10000010000000000000003 /* DealRecord.swift in Sources */,
+				A10000010000000000000004 /* PayoutRecord.swift in Sources */,
+				A10000010000000000000005 /* DataManager.swift in Sources */,
+				A10000010000000000000006 /* DashboardView.swift in Sources */,
+				A10000010000000000000025 /* TodoViews.swift in Sources */,
+				A10000010000000000000007 /* DealsView.swift in Sources */,
+				A10000010000000000000008 /* RentCollectionView.swift in Sources */,
+				A10000010000000000000009 /* PayoutView.swift in Sources */,
+				A10000010000000000000010 /* ProfitView.swift in Sources */,
+				A10000010000000000000095 /* SettingsView.swift in Sources */,
+				A10000010000000000000096 /* DataBackupManager.swift in Sources */,
+				A30000010000000000000001 /* LocalNotificationManager.swift in Sources */,
+				A10000010000000000000011 /* UtilityView.swift in Sources */,
+				A10000010000000000000099 /* TrashView.swift in Sources */,
+				A10000010000000000000015 /* Theme.swift in Sources */,
+				PE1 /* PlanEditors.swift in Sources */,
+				A20000010000000000000001 /* SyncDTO.swift in Sources */,
+				A20000010000000000000002 /* ManualSyncView.swift in Sources */,
+				A20000010000000000000003 /* MigrationView.swift in Sources */,
+				A20000010000000000000004 /* SyncCore.swift in Sources */,
+				A20000010000000000000005 /* SwiftDataSyncSnapshot.swift in Sources */,
+				A10000010000000000000100 /* House.swift in Sources */,
+				A10000010000000000000101 /* CosUploader.swift in Sources */,
+				A10000010000000000000102 /* MediaStore.swift in Sources */,
+				A10000010000000000000103 /* HouseComponents.swift in Sources */,
+				A10000010000000000000104 /* HouseDetailView.swift in Sources */,
+				A10000010000000000000105 /* HouseEditView.swift in Sources */,
+				A10000010000000000000106 /* HouseListView.swift in Sources */,
+				A10000010000000000000107 /* SettingsView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		I10000010000000000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		I10000010000000000000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		I10000010000000000000003 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = AgentTool/AgentTool.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_ASSET_PATHS = "\"AgentTool/Preview Content\"";
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDevelopmentRegion = "zh_CN";
+				INFOPLIST_KEY_CFBundleDisplayName = "公寓管家";
+				INFOPLIST_KEY_CFBundleShortVersionString = "5.0";
+				INFOPLIST_KEY_NSCameraUsageDescription = "用于扫描公寓管家的手动同步和迁移二维码。";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "仅在你点击同步时连接同一局域网内的公寓管家电脑版。";
+				INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsLocalNetworking = YES;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UIFileSharingEnabled = YES;
+				INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.gj.tg;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		I10000010000000000000004 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = AgentTool/AgentTool.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_ASSET_PATHS = "\"AgentTool/Preview Content\"";
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDevelopmentRegion = "zh_CN";
+				INFOPLIST_KEY_CFBundleDisplayName = "公寓管家";
+				INFOPLIST_KEY_CFBundleShortVersionString = "5.0";
+				INFOPLIST_KEY_NSCameraUsageDescription = "用于扫描公寓管家的手动同步和迁移二维码。";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "仅在你点击同步时连接同一局域网内的公寓管家电脑版。";
+				INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsLocalNetworking = YES;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UIFileSharingEnabled = YES;
+				INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.gj.tg;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		WD = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGN_ENTITLEMENTS = AgentToolWidget/AgentToolWidget.entitlements; CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 1; INFOPLIST_FILE = AgentToolWidget/Info.plist; IPHONEOS_DEPLOYMENT_TARGET = 17.0; MARKETING_VERSION = 1.0; PRODUCT_BUNDLE_IDENTIFIER = com.gj.tg.widget; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = iphoneos; SKIP_INSTALL = YES; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2"; }; name = Debug; };
+		WR = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGN_ENTITLEMENTS = AgentToolWidget/AgentToolWidget.entitlements; CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 1; INFOPLIST_FILE = AgentToolWidget/Info.plist; IPHONEOS_DEPLOYMENT_TARGET = 17.0; MARKETING_VERSION = 1.0; PRODUCT_BUNDLE_IDENTIFIER = com.gj.tg.widget; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = iphoneos; SKIP_INSTALL = YES; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2"; }; name = Release; };
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		F10000010000000000000001 /* Build configuration list for PBXProject "AgentTool" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				I10000010000000000000001 /* Debug */,
+				I10000010000000000000002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		F10000010000000000000003 /* Build configuration list for PBXNativeTarget "AgentTool" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				I10000010000000000000003 /* Debug */,
+				I10000010000000000000004 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		WC = {isa = XCConfigurationList; buildConfigurations = (WD, WR,); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+/* End XCConfigurationList section */
+	};
+	rootObject = H10000010000000000000001 /* Project object */;
+}

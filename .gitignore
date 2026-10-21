@@ -1,0 +1,23 @@
+# Xcode
+build/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+*.xcworkspace/xcuserdata/
+*.xcworkspace/xcshareddata/
+
+# macOS
+.DS_Store
+
+# IPA
+*.ipa
+*.zip
+
+# 备份数据文件（含业务数据，禁止提交）
+手动备份*.json
+自动备份*.json
+备份*.json
+
+# .NET
+**/bin/
+**/obj/

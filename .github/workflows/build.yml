@@ -1,0 +1,183 @@
+name: Build Unsigned IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - "AgentTool/**"
+      - "AgentTool.xcodeproj/**"
+      - "AgentToolWidget/**"
+      - ".github/workflows/build.yml"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "AgentTool/**"
+      - "AgentTool.xcodeproj/**"
+      - "AgentToolWidget/**"
+      - ".github/workflows/build.yml"
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: unsigned-ipa-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PROJECT_PATH: AgentTool.xcodeproj
+  SCHEME: AgentTool
+  CONFIGURATION: Release
+  DERIVED_DATA_PATH: ${{ github.workspace }}/DerivedData
+
+jobs:
+  build:
+    name: Build unsigned IPA
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+      - name: Select Xcode
+        shell: bash
+        run: |
+          set -euo pipefail
+          XCODE_PATH="$(find /Applications -maxdepth 1 -type d -name 'Xcode*.app' | sort -V | tail -1)"
+          test -n "$XCODE_PATH"
+          sudo xcode-select --switch "$XCODE_PATH/Contents/Developer"
+          xcodebuild -version
+          swift --version
+      - name: Verify project and scheme
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -d "$PROJECT_PATH"
+          xcodebuild -project "$PROJECT_PATH" -list
+          xcodebuild -project "$PROJECT_PATH" -scheme "$SCHEME" -showBuildSettings -configuration "$CONFIGURATION" >/dev/null
+      - name: Read build metadata
+        id: metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          SETTINGS="$(xcodebuild -project "$PROJECT_PATH" -scheme "$SCHEME" -configuration "$CONFIGURATION" -showBuildSettings)"
+          VERSION="$(printf '%s\n' "$SETTINGS" | awk -F ' = ' '/^[[:space:]]*MARKETING_VERSION = / {print $2; exit}')"
+          BUILD="$(printf '%s\n' "$SETTINGS" | awk -F ' = ' '/^[[:space:]]*CURRENT_PROJECT_VERSION = / {print $2; exit}')"
+          PRODUCT_NAME="$(printf '%s\n' "$SETTINGS" | awk -F ' = ' '/^[[:space:]]*WRAPPER_NAME = / {print $2; exit}')"
+          if [[ -z "$PRODUCT_NAME" ]]; then
+            PRODUCT_NAME="$(printf '%s\n' "$SETTINGS" | awk -F ' = ' '/^[[:space:]]*FULL_PRODUCT_NAME = / {print $2; exit}')"
+          fi
+          test -n "$VERSION"
+          test -n "$BUILD"
+          test -n "$PRODUCT_NAME"
+          IPA_NAME="公寓管家${VERSION}.ipa"
+          {
+            echo "version=$VERSION"
+            echo "build=$BUILD"
+            echo "product_name=$PRODUCT_NAME"
+            echo "ipa_name=$IPA_NAME"
+          } >> "$GITHUB_OUTPUT"
+      - name: Build for generic iOS device
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf "$DERIVED_DATA_PATH"
+          xcodebuild \
+            -project "$PROJECT_PATH" \
+            -scheme "$SCHEME" \
+            -configuration "$CONFIGURATION" \
+            -destination "generic/platform=iOS" \
+            -derivedDataPath "$DERIVED_DATA_PATH" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            clean build | tee xcodebuild.log
+      - name: Ad-hoc sign App and Widget with App Group entitlements
+        shell: bash
+        env:
+          PRODUCT_NAME: ${{ steps.metadata.outputs.product_name }}
+        run: |
+          set -euo pipefail
+          APP_PATH="$DERIVED_DATA_PATH/Build/Products/${CONFIGURATION}-iphoneos/$PRODUCT_NAME"
+          WIDGET_PATH="$APP_PATH/PlugIns/AgentToolWidget.appex"
+          test -d "$APP_PATH"
+          if [[ -d "$WIDGET_PATH" ]]; then
+            /usr/bin/codesign --force --sign - --entitlements AgentToolWidget/AgentToolWidget.entitlements --deep "$WIDGET_PATH"
+          fi
+          /usr/bin/codesign --force --sign - --entitlements AgentTool/AgentTool.entitlements --deep "$APP_PATH"
+          /usr/bin/codesign --verify --deep --strict "$APP_PATH"
+      - name: Package unsigned IPA
+        id: package
+        shell: bash
+        env:
+          PRODUCT_NAME: ${{ steps.metadata.outputs.product_name }}
+          IPA_NAME: ${{ steps.metadata.outputs.ipa_name }}
+        run: |
+          set -euo pipefail
+          APP_PATH="$DERIVED_DATA_PATH/Build/Products/${CONFIGURATION}-iphoneos/$PRODUCT_NAME"
+          test -d "$APP_PATH"
+          mkdir -p artifacts/Payload
+          ditto "$APP_PATH" "artifacts/Payload/$PRODUCT_NAME"
+          (cd artifacts && /usr/bin/zip -qry "$IPA_NAME" Payload)
+          test -s "artifacts/$IPA_NAME"
+          echo "ipa_path=artifacts/$IPA_NAME" >> "$GITHUB_OUTPUT"
+      - name: Clean up old artifacts (keep latest 3)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          RUN_ID="${{ github.run_id }}"
+          RESP="$(curl -fsS -H "Authorization: Bearer $GH_TOKEN" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/artifacts?per_page=100" 2>/dev/null || true)"
+          if [[ -n "$RESP" ]]; then
+            IDS="$(printf '%s' "$RESP" | jq -r '.artifacts[] | select(.expired == false and .workflow_run.id != '"$RUN_ID"') | [.id, .created_at] | @tsv' 2>/dev/null | sort -k2,2r | tail -n +4 | cut -f1)"
+            if [[ -n "$IDS" ]]; then
+              echo "Deleting old artifacts: $(printf '%s' "$IDS" | tr '\n' ' ')"
+              for id in $IDS; do
+                curl -fsS -X DELETE -H "Authorization: Bearer $GH_TOKEN" \
+                  "https://api.github.com/repos/${{ github.repository }}/actions/artifacts/$id" >/dev/null 2>&1 || true
+              done
+            else
+              echo "No old artifacts to clean"
+            fi
+          fi
+      - name: Upload unsigned IPA
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-ipa-v${{ steps.metadata.outputs.version }}-b${{ steps.metadata.outputs.build }}
+          path: ${{ steps.package.outputs.ipa_path }}
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
+      - name: Publish IPA to Release
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.metadata.outputs.version }}"
+          BUILD="${{ steps.metadata.outputs.build }}"
+          TAG="v${VERSION}"
+          FILE="${{ steps.package.outputs.ipa_path }}"
+          ASSET="GongYuGuanJia-v${VERSION}.ipa"
+          RELEASE_NOTES="公寓管家 v${VERSION} (build ${BUILD}) — GitHub Actions 自动构建"
+          gh release create "$TAG" "$FILE" \
+            --repo "${{ github.repository }}" \
+            --title "公寓管家 v${VERSION}" \
+            --notes "$RELEASE_NOTES" \
+            --target "${{ github.sha }}" 2>/dev/null || \
+          gh release upload "$TAG" "$FILE" \
+            --repo "${{ github.repository }}" --clobber
+          echo "Release asset: https://github.com/${{ github.repository }}/releases/download/$TAG/$ASSET"
+      - name: Upload build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcodebuild-log-${{ github.run_number }}
+          path: xcodebuild.log
+          if-no-files-found: ignore
+          retention-days: 14

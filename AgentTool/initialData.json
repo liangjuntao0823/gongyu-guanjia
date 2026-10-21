@@ -1,0 +1,3334 @@
+{
+  "deals": [
+    {
+      "date": "2025-11-27",
+      "roomNumber": "1-2254下",
+      "landlord": "康",
+      "unitType": "独立厨房下层",
+      "leaseStart": "2025.11.25",
+      "leaseEnd": "2026.11.30",
+      "leaseDuration": "1年",
+      "rent": 1050.0,
+      "deposit": 1050.0,
+      "prepayment": 300.0,
+      "rentDueDay": 1,
+      "agentFeeLandlord": 525.0,
+      "agentFeeTenant": 300.0,
+      "totalFee": 825.0,
+      "manager": "涛",
+      "source": "平台",
+      "notes": "合同日期写错"
+    },
+    {
+      "date": "2025-12-01",
+      "roomNumber": "1-2041上",
+      "landlord": "何",
+      "unitType": "单间上层",
+      "leaseStart": "2025.12.1",
+      "leaseEnd": "2026.3.16",
+      "leaseDuration": "3.5月",
+      "rent": 1150.0,
+      "deposit": 2300.0,
+      "prepayment": 300.0,
+      "rentDueDay": 1,
+      "agentFeeLandlord": 388.0,
+      "agentFeeTenant": 0,
+      "totalFee": 388.0,
+      "manager": "康",
+      "source": "康",
+      "notes": ""
+    },
+    {
+      "date": "2025-12-04",
+      "roomNumber": "1-1119",
+      "landlord": "汇",
+      "unitType": "复式",
+      "leaseStart": "2025.12.6",
+      "leaseEnd": "2026.12.5",
+      "leaseDuration": "1年",
+      "rent": 1500.0,
+      "deposit": 3000.0,
+      "prepayment": 0,
+      "rentDueDay": 1,
+      "agentFeeLandlord": 850.0,
+      "agentFeeTenant": 0,
+      "totalFee": 850.0,
+      "manager": "涛",
+      "source": "何",
+      "notes": "保安介绍"
+    },
+    {
+      "date": "2025-12-11",
+      "roomNumber": "1-1322上",
+      "landlord": "罗",
+      "unitType": "单间上层",
+      "leaseStart": "",
+      "leaseEnd": "",
+      "leaseDuration": "",
+      "rent": 900.0,
+      "deposit": 0,
+      "prepayment": 0,
+      "rentDueDay": null,
+      "agentFeeLandlord": 450.0,
+      "agentFeeTenant": 0,
+      "totalFee": 450.0,
+      "manager": "",
+      "source": "平台",
+      "notes": "转何生"
+    },
+    {
+      "date": "2026-01-02",
+      "roomNumber": "2-1418下",
+      "landlord": "业主",
+      "unitType": "单间下层",
+      "leaseStart": "",
+      "leaseEnd": "",
+      "leaseDuration": "",
+      "rent": 900.0,
+      "deposit": 0,
+      "prepayment": 0,
+      "rentDueDay": null,
+      "agentFeeLandlord": 500.0,
+      "agentFeeTenant": 0,
+      "totalFee": 500.0,
+      "manager": "业主",
+      "source": "平台",
+      "notes": "转康康"
+    },
+    {
+      "date": "2026-01-10",
+      "roomNumber": "1-2325上",
+      "landlord": "康",
+      "unitType": "单间上层",
+      "leaseStart": "",
+      "leaseEnd": "",
+      "leaseDuration": "",
+      "rent": 950.0,
+      "deposit": 950.0,
+      "prepayment": 0,
+      "rentDueDay": null,
+      "agentFeeLandlord": 400.0,
+      "agentFeeTenant": 0,
+      "totalFee": 400.0,
+      "manager": "康",
+      "source": "平台",
+      "notes": "转康康"
+    },
+    {
+      "date": "2026-03-02",
+      "roomNumber": "2-1316上",
+      "landlord": "业主",
+      "unitType": "单间上层",
+      "leaseStart": "2026.3.5",
+      "leaseEnd": "2027.3.5",
+      "leaseDuration": "1年",
+      "rent": 900.0,
+      "deposit": 1800.0,
+      "prepayment": 0,
+      "rentDueDay": null,
+      "agentFeeLandlord": 450.0,
+      "agentFeeTenant": 400.0,
+      "totalFee": 850.0,
+      "manager": "业主",
+      "source": "平台",
+      "notes": ""
+    },
+    {
+      "date": "2026-03-02",
+      "roomNumber": "2-1222上",
+      "landlord": "汇",
+      "unitType": "单间上层",
+      "leaseStart": "2026.3.5",
+      "leaseEnd": "2027.3.5",
+      "leaseDuration": "1年",
+      "rent": 1000.0,
+      "deposit": 2000.0,
+      "prepayment": 300.0,
+      "rentDueDay": 1,
+      "agentFeeLandlord": 600.0,
+      "agentFeeTenant": 0,
+      "totalFee": 600.0,
+      "manager": "涛",
+      "source": "康",
+      "notes": ""
+    },
+    {
+      "date": "2026-03-05",
+      "roomNumber": "1-2323上",
+      "landlord": "康",
+      "unitType": "单间上层",
+      "leaseStart": "2026.3.7",
+      "leaseEnd": "2027.3.7",
+      "leaseDuration": "1年",
+      "rent": 1050.0,
+      "deposit": 2100.0,
+      "prepayment": 300.0,
+      "rentDueDay": 1,
+      "agentFeeLandlord": 500.0,
+      "agentFeeTenant": 0,
+      "totalFee": 500.0,
+      "manager": "涛",
+      "source": "康",
+      "notes": "合同到期日写错 已改"
+    },
+    {
+      "date": "2026-03-07",
+      "roomNumber": "定1546",
+      "landlord": "业主",
+      "unitType": "复式",
+      "leaseStart": "",
+      "leaseEnd": "",
+      "leaseDuration": "",
+      "rent": 0,
+      "deposit": 0,
+      "prepayment": 0,
+      "rentDueDay": null,
+      "agentFeeLandlord": 300.0,
+      "agentFeeTenant": 0,
+      "totalFee": 300.0,
+      "manager": "",
+      "source": "平台",
+      "notes": "条件谈妥反悔，退200"
+    },
+    {
+      "date": "2026-03-11",
+      "roomNumber": "2-518",
+      "landlord": "康",
+      "unitType": "平层",
+      "leaseStart": "2026.3.11",
+      "leaseEnd": "2027.3.11",
+      "leaseDuration": "1年",
+      "rent": 1100.0,
+      "deposit": 2200.0,
+      "prepayment": 0,
+      "rentDueDay": 1,
+      "agentFeeLandlord": 750.0,
+      "agentFeeTenant": 200.0,
+      "totalFee": 950.0,
+      "manager": "涛",
+      "source": "平台",
+      "notes": "合同到期日写错 已改"
+    },
+    {
+      "date": "2026-03-11",
+      "roomNumber": "2-1515下",
+      "landlord": "何",
+      "unitType": "单间下层",
+      "leaseStart": "2026.3.10",
+      "leaseEnd": "2027.3.10",
+      "leaseDuration": "1年",
+      "rent": 950.0,
+      "deposit": 1900.0,
+      "prepayment": 300.0,
+      "rentDueDay": null,
+      "agentFeeLandlord": 300.0,
+      "agentFeeTenant": 0,
+      "totalFee": 300.0,
+      "manager": "何",
+      "source": "康",
+      "notes": ""
+    },
+    {
+      "date": "2026-03-15",
+      "roomNumber": "1-1416上",
+      "landlord": "业主",
+      "unitType": "单间上层",
+      "leaseStart": "2026.3.16",
+      "leaseEnd": "2026.9.16",
+      "leaseDuration": "半年",
+      "rent": 800.0,
+      "deposit": 800.0,
+      "prepayment": 0,
+      "rentDueDay": null,
+      "agentFeeLandlord": 400.0,
+      "agentFeeTenant": 400.0,
+      "totalFee": 800.0,
+      "manager": "业主",
+      "source": "平台",
+      "notes": ""
+    },
+    {
+      "date": "2026-03-21",
+      "roomNumber": "1-2343下",
+      "landlord": "康",
+      "unitType": "单间下层",
+      "leaseStart": "2026",
+      "leaseEnd": "3.21",
+      "leaseDuration": "1月",
+      "rent": 1200.0,
+      "deposit": 1200.0,
+      "prepayment": 0,
+      "rentDueDay": 21,
+      "agentFeeLandlord": 158.0,
+      "agentFeeTenant": 0,
+      "totalFee": 158.0,
+      "manager": "涛",
+      "source": "康",
+      "notes": "短租一个月"
+    },
+    {
+      "date": "2026-03-23",
+      "roomNumber": "1-2317上",
+      "landlord": "康",
+      "unitType": "单间上层",
+      "leaseStart": "2026.3.23",
+      "leaseEnd": "2027.3.23",
+      "leaseDuration": "1年",
+      "rent": 900.0,
+      "deposit": 1800.0,
+      "prepayment": 300.0,
+      "rentDueDay": 1,
+      "agentFeeLandlord": 650.0,
+      "agentFeeTenant": 400.0,
+      "totalFee": 1050.0,
+      "manager": "涛",
+      "source": "平台",
+      "notes": ""
+    },
+    {
+      "date": "2026-03-25",
+      "roomNumber": "1-2411",
+      "landlord": "汇",
+      "unitType": "中空复式",
+      "leaseStart": "2026.3.29",
+      "leaseEnd": "2027.3.29",
+      "leaseDuration": "1年",
+      "rent": 1800.0,
+      "deposit": 3600.0,
+      "prepayment": 200.0,
+      "rentDueDay": 15,
+      "agentFeeLandlord": 800.0,
+      "agentFeeTenant": 600.0,
+      "totalFee": 1400.0,
+      "manager": "涛",
+      "source": "平台",
+      "notes": "5.15号补押金"
+    },
+    {
+      "date": "2026-03-26",
+      "roomNumber": "1-2343上",
+      "landlord": "康",
+      "unitType": "单间上层",
+      "leaseStart": "2026.3.27",
+      "leaseEnd": "2027.3.27",
+      "leaseDuration": "1年",
+      "rent": 950.0,
+      "deposit": 1900.0,
+      "prepayment": 300.0,
+      "rentDueDay": 1,
+      "agentFeeLandlord": 675.0,
+      "agentFeeTenant": 300.0,
+      "totalFee": 975.0,
+      "manager": "涛",
+      "source": "平台",
+      "notes": ""
+    },
+    {
+      "date": "2026-03-29",
+      "roomNumber": "1-2308上",
+      "landlord": "康",
+      "unitType": "独立厨房上层",
+      "leaseStart": "2026.4.1",
+      "leaseEnd": "2027.4.1",
+      "leaseDuration": "1年",
+      "rent": 1100.0,
+      "deposit": 2200.0,
+      "prepayment": 300.0,
+      "rentDueDay": 1,
+      "agentFeeLandlord": 650.0,
+      "agentFeeTenant": 0,
+      "totalFee": 650.0,
+      "manager": "涛",
+      "source": "康",
+      "notes": "5.1号补押金 推了宽带"
+    },
+    {
+      "date": "2026-03-30",
+      "roomNumber": "1-933",
+      "landlord": "业主",
+      "unitType": "复式",
+      "leaseStart": "2026.4.1",
+      "leaseEnd": "2026.10.1",
+      "leaseDuration": "半年",
+      "rent": 1400.0,
+      "deposit": 2800.0,
+      "prepayment": 0,
+      "rentDueDay": null,
+      "agentFeeLandlord": 700.0,
+      "agentFeeTenant": 0,
+      "totalFee": 700.0,
+      "manager": "业主",
+      "source": "康",
+      "notes": ""
+    },
+    {
+      "date": "2026-04-01",
+      "roomNumber": "2-1321上",
+      "landlord": "业主",
+      "unitType": "单间上层",
+      "leaseStart": "2026.4.2",
+      "leaseEnd": "2027.4.2",
+      "leaseDuration": "1年",
+      "rent": 900.0,
+      "deposit": 1800.0,
+      "prepayment": 0,
+      "rentDueDay": null,
+      "agentFeeLandlord": 300.0,
+      "agentFeeTenant": 0,
+      "totalFee": 300.0,
+      "manager": "业主",
+      "source": "康",
+      "notes": ""
+    },
+    {
+      "date": "2026-04-02",
+      "roomNumber": "1-1757上",
+      "landlord": "业主",
+      "unitType": "独立厨房上层",
+      "leaseStart": "2026.4.3",
+      "leaseEnd": "2027.4.3",
+      "leaseDuration": "1年",
+      "rent": 1100.0,
+      "deposit": 1100.0,
+      "prepayment": 0,
+      "rentDueDay": null,
+      "agentFeeLandlord": 550.0,
+      "agentFeeTenant": 300.0,
+      "totalFee": 850.0,
+      "manager": "业主",
+      "source": "平台",
+      "notes": ""
+    },
+    {
+      "date": "2026-04-07",
+      "roomNumber": "1-2101上",
+      "landlord": "汇",
+      "unitType": "独立厨房上层",
+      "leaseStart": "2026.4.7",
+      "leaseEnd": "2027.4.7",
+      "leaseDuration": "1年",
+      "rent": 1150.0,
+      "deposit": 2300.0,
+      "prepayment": 300.0,
+      "rentDueDay": 1,
+      "agentFeeLandlord": 659.0,
+      "agentFeeTenant": 0,
+      "totalFee": 659.0,
+      "manager": "涛",
+      "source": "康",
+      "notes": "包网络"
+    },
+    {
+      "date": "2026-04-09",
+      "roomNumber": "1-1908下",
+      "landlord": "汇",
+      "unitType": "独立厨房下层",
+      "leaseStart": "2026.4.9",
+      "leaseEnd": "2027.4.9",
+      "leaseDuration": "1年",
+      "rent": 1000.0,
+      "deposit": 1500.0,
+      "prepayment": 300.0,
+      "rentDueDay": 1,
+      "agentFeeLandlord": 600.0,
+      "agentFeeTenant": 300.0,
+      "totalFee": 900.0,
+      "manager": "涛",
+      "source": "平台",
+      "notes": ""
+    },
+    {
+      "date": "2026-04-09",
+      "roomNumber": "1-2107下",
+      "landlord": "业主",
+      "unitType": "独立厨房下层",
+      "leaseStart": "2026.4.11",
+      "leaseEnd": "2027.4.11",
+      "leaseDuration": "1年",
+      "rent": 1050.0,
+      "deposit": 1575.0,
+      "prepayment": 0,
+      "rentDueDay": null,
+      "agentFeeLandlord": 525.0,
+      "agentFeeTenant": 234.0,
+      "totalFee": 759.0,
+      "manager": "涛",
+      "source": "转介绍",
+      "notes": "1908下层介绍 男模"
+    },
+    {
+      "date": "2026-04-10",
+      "roomNumber": "1-703",
+      "landlord": "业主",
+      "unitType": "复式",
+      "leaseStart": "2026.4.11",
+      "leaseEnd": "2026.6.11",
+      "leaseDuration": "2月",
+      "rent": 1500.0,
+      "deposit": 1500.0,
+      "prepayment": 0,
+      "rentDueDay": null,
+      "agentFeeLandlord": 750.0,
+      "agentFeeTenant": 500.0,
+      "totalFee": 1250.0,
+      "manager": "业主",
+      "source": "平台",
+      "notes": "短租两个月"
+    },
+    {
+      "date": "2026-04-11",
+      "roomNumber": "定1-1420上",
+      "landlord": "业主",
+      "unitType": "单间上层",
+      "leaseStart": "",
+      "leaseEnd": "",
+      "leaseDuration": "",
+      "rent": 0,
+      "deposit": 0,
+      "prepayment": 0,
+      "rentDueDay": null,
+      "agentFeeLandlord": 200.0,
+      "agentFeeTenant": 0,
+      "totalFee": 200.0,
+      "manager": "",
+      "source": "平台",
+      "notes": "条件谈妥反悔，退300"
+    },
+    {
+      "date": "2026-04-15",
+      "roomNumber": "2-1321下",
+      "landlord": "业主",
+      "unitType": "单间下层",
+      "leaseStart": "2026.4.16",
+      "leaseEnd": "2026.7.16",
+      "leaseDuration": "3月",
+      "rent": 1000.0,
+      "deposit": 1000.0,
+      "prepayment": 0,
+      "rentDueDay": null,
+      "agentFeeLandlord": 300.0,
+      "agentFeeTenant": 350.0,
+      "totalFee": 650.0,
+      "manager": "业主",
+      "source": "平台",
+      "notes": "短租三个月"
+    },
+    {
+      "date": "2026-04-18",
+      "roomNumber": "1-1747",
+      "landlord": "汇",
+      "unitType": "复式",
+      "leaseStart": "2026.4.19",
+      "leaseEnd": "2027.4.19",
+      "leaseDuration": "1年",
+      "rent": 1500.0,
+      "deposit": 3000.0,
+      "prepayment": 0,
+      "rentDueDay": 15,
+      "agentFeeLandlord": 750.0,
+      "agentFeeTenant": 400.0,
+      "totalFee": 1150.0,
+      "manager": "涛",
+      "source": "平台",
+      "notes": ""
+    },
+    {
+      "date": "2026-04-19",
+      "roomNumber": "1-1443A下",
+      "landlord": "康",
+      "unitType": "单间下层",
+      "leaseStart": "2026.4.20",
+      "leaseEnd": "2027.4.20",
+      "leaseDuration": "1年",
+      "rent": 900.0,
+      "deposit": 900.0,
+      "prepayment": 300.0,
+      "rentDueDay": 16,
+      "agentFeeLandlord": 450.0,
+      "agentFeeTenant": 450.0,
+      "totalFee": 900.0,
+      "manager": "涛",
+      "source": "平台",
+      "notes": "推了宽带"
+    },
+    {
+      "date": "2026-04-21",
+      "roomNumber": "1-2106",
+      "landlord": "何",
+      "unitType": "复式",
+      "leaseStart": "2026.4.22",
+      "leaseEnd": "2026.10.31",
+      "leaseDuration": "半年",
+      "rent": 1500.0,
+      "deposit": 3000.0,
+      "prepayment": 0,
+      "rentDueDay": null,
+      "agentFeeLandlord": 500.0,
+      "agentFeeTenant": 0,
+      "totalFee": 500.0,
+      "manager": "何",
+      "source": "康",
+      "notes": "推了宽带"
+    },
+    {
+      "date": "2026-04-27",
+      "roomNumber": "1-2343下",
+      "landlord": "康",
+      "unitType": "单间下层",
+      "leaseStart": "2026.5.1",
+      "leaseEnd": "2027.5.1",
+      "leaseDuration": "1年",
+      "rent": 850.0,
+      "deposit": 1700.0,
+      "prepayment": 300.0,
+      "rentDueDay": 1,
+      "agentFeeLandlord": 625.0,
+      "agentFeeTenant": 300.0,
+      "totalFee": 925.0,
+      "manager": "涛",
+      "source": "转介绍",
+      "notes": "2343上层租客介绍"
+    },
+    {
+      "date": "2026-04-28",
+      "roomNumber": "1-440",
+      "landlord": "业主",
+      "unitType": "复式",
+      "leaseStart": "2026.5.1",
+      "leaseEnd": "2026.11.1",
+      "leaseDuration": "半年",
+      "rent": 1350.0,
+      "deposit": 1350.0,
+      "prepayment": 0,
+      "rentDueDay": null,
+      "agentFeeLandlord": 525.0,
+      "agentFeeTenant": 625.0,
+      "totalFee": 1150.0,
+      "manager": "业主",
+      "source": "小红书",
+      "notes": "给业主出了100卫生费"
+    },
+    {
+      "date": "2026-05-15",
+      "roomNumber": "1-2337下",
+      "landlord": "康",
+      "unitType": "单间下层",
+      "leaseStart": "2026.5.16",
+      "leaseEnd": "2027.5.31",
+      "leaseDuration": "1年",
+      "rent": 880.0,
+      "deposit": 880.0,
+      "prepayment": 300.0,
+      "rentDueDay": null,
+      "agentFeeLandlord": 230.0,
+      "agentFeeTenant": 0,
+      "totalFee": 230.0,
+      "manager": "康",
+      "source": "康",
+      "notes": ""
+    },
+    {
+      "date": "2026-05-21",
+      "roomNumber": "1-1954下",
+      "landlord": "业主",
+      "unitType": "独立厨房下层",
+      "leaseStart": "2026.5.21",
+      "leaseEnd": "2027.5.21",
+      "leaseDuration": "1年",
+      "rent": 1100.0,
+      "deposit": 0,
+      "prepayment": 0,
+      "rentDueDay": null,
+      "agentFeeLandlord": 550.0,
+      "agentFeeTenant": 0,
+      "totalFee": 550.0,
+      "manager": "春生",
+      "source": "平台",
+      "notes": "转春生成交"
+    },
+    {
+      "date": "2026-05-21",
+      "roomNumber": "2-616",
+      "landlord": "何",
+      "unitType": "平层",
+      "leaseStart": "2026.5.23",
+      "leaseEnd": "2027.5.20",
+      "leaseDuration": "1年",
+      "rent": 1000.0,
+      "deposit": 1000.0,
+      "prepayment": 0,
+      "rentDueDay": null,
+      "agentFeeLandlord": 500.0,
+      "agentFeeTenant": 500.0,
+      "totalFee": 1000.0,
+      "manager": "何",
+      "source": "平台",
+      "notes": "推了宽带"
+    },
+    {
+      "date": "2026-05-23",
+      "roomNumber": "1-1748",
+      "landlord": "业主",
+      "unitType": "复式",
+      "leaseStart": "2026.5.26",
+      "leaseEnd": "2027.5.26",
+      "leaseDuration": "1年",
+      "rent": 1350.0,
+      "deposit": 1350.0,
+      "prepayment": 0,
+      "rentDueDay": 26,
+      "agentFeeLandlord": 650.0,
+      "agentFeeTenant": 0,
+      "totalFee": 650.0,
+      "manager": "业主",
+      "source": "平台",
+      "notes": "托管一年800 不需要收租"
+    },
+    {
+      "date": "2026-05-26",
+      "roomNumber": "1-1062下",
+      "landlord": "汇",
+      "unitType": "独立厨房下层",
+      "leaseStart": "2026.5.26",
+      "leaseEnd": "2027.5.31",
+      "leaseDuration": "1年",
+      "rent": 1000.0,
+      "deposit": 1000.0,
+      "prepayment": 300.0,
+      "rentDueDay": 1,
+      "agentFeeLandlord": 500.0,
+      "agentFeeTenant": 500.0,
+      "totalFee": 1000.0,
+      "manager": "涛",
+      "source": "平台",
+      "notes": ""
+    },
+    {
+      "date": "2026-05-27",
+      "roomNumber": "1-1709下",
+      "landlord": "业主",
+      "unitType": "独立厨房下层",
+      "leaseStart": "2026.5.27",
+      "leaseEnd": "2027.5.27",
+      "leaseDuration": "1年",
+      "rent": 900.0,
+      "deposit": 900.0,
+      "prepayment": 0,
+      "rentDueDay": null,
+      "agentFeeLandlord": 450.0,
+      "agentFeeTenant": 450.0,
+      "totalFee": 900.0,
+      "manager": "涛",
+      "source": "平台",
+      "notes": ""
+    },
+    {
+      "date": "2026-05-27",
+      "roomNumber": "1-2320下",
+      "landlord": "康",
+      "unitType": "单间下层",
+      "leaseStart": "2026.6.1",
+      "leaseEnd": "2027.5.31",
+      "leaseDuration": "1年",
+      "rent": 900.0,
+      "deposit": 1800.0,
+      "prepayment": 300.0,
+      "rentDueDay": 1,
+      "agentFeeLandlord": 650.0,
+      "agentFeeTenant": 450.0,
+      "totalFee": 1100.0,
+      "manager": "涛",
+      "source": "平台",
+      "notes": ""
+    },
+    {
+      "date": "2026-05-30",
+      "roomNumber": "1-422",
+      "landlord": "何",
+      "unitType": "复式",
+      "leaseStart": "2026.6.1",
+      "leaseEnd": "2027.5.31",
+      "leaseDuration": "1年",
+      "rent": 1350.0,
+      "deposit": 2700.0,
+      "prepayment": 0,
+      "rentDueDay": null,
+      "agentFeeLandlord": 875.0,
+      "agentFeeTenant": 450.0,
+      "totalFee": 1325.0,
+      "manager": "何",
+      "source": "转介绍",
+      "notes": "2343租客介绍 包网络"
+    },
+    {
+      "date": "2026-06-01",
+      "roomNumber": "1-2450",
+      "landlord": "汇",
+      "unitType": "中空复式",
+      "leaseStart": "2026.6.1",
+      "leaseEnd": "2027.6.1",
+      "leaseDuration": "1年",
+      "rent": 1850.0,
+      "deposit": 3700.0,
+      "prepayment": 300.0,
+      "rentDueDay": 1,
+      "agentFeeLandlord": 1125.0,
+      "agentFeeTenant": 0,
+      "totalFee": 925.0,
+      "manager": "涛",
+      "source": "平台",
+      "notes": ""
+    },
+    {
+      "date": "2026-06-03",
+      "roomNumber": "2-1613",
+      "landlord": "康",
+      "unitType": "双钥匙一套",
+      "leaseStart": "2026.6.4",
+      "leaseEnd": "2027.5.31",
+      "leaseDuration": "1年",
+      "rent": 2000.0,
+      "deposit": 3000.0,
+      "prepayment": 0,
+      "rentDueDay": 15,
+      "agentFeeLandlord": 1200.0,
+      "agentFeeTenant": 500.0,
+      "totalFee": 1700.0,
+      "manager": "涛",
+      "source": "平台",
+      "notes": ""
+    },
+    {
+      "date": "2026-06-04",
+      "roomNumber": "1-2246",
+      "landlord": "康",
+      "unitType": "复式",
+      "leaseStart": "2026.6.1",
+      "leaseEnd": "2027.5.31",
+      "leaseDuration": "1年",
+      "rent": 1350.0,
+      "deposit": 2700.0,
+      "prepayment": 0,
+      "rentDueDay": 1,
+      "agentFeeLandlord": 606.0,
+      "agentFeeTenant": 0,
+      "totalFee": 606.0,
+      "manager": "涛",
+      "source": "平台",
+      "notes": "8.1号补押金 转康康成交"
+    },
+    {
+      "date": "2026-06-07",
+      "roomNumber": "1-1420",
+      "landlord": "业主",
+      "unitType": "双钥匙一套",
+      "leaseStart": "2026.6.10",
+      "leaseEnd": "2027.6.10",
+      "leaseDuration": "1年",
+      "rent": 1400.0,
+      "deposit": 1400.0,
+      "prepayment": 0,
+      "rentDueDay": null,
+      "agentFeeLandlord": 0,
+      "agentFeeTenant": 0,
+      "totalFee": 1200.0,
+      "manager": "业主",
+      "source": "康",
+      "notes": "汇联行1102上层租客换房 宽带返500"
+    },
+    {
+      "date": "2026-06-07",
+      "roomNumber": "1-2317下",
+      "landlord": "康",
+      "unitType": "单间下层",
+      "leaseStart": "2026.6.8",
+      "leaseEnd": "2027.5.31",
+      "leaseDuration": "1年",
+      "rent": 800.0,
+      "deposit": 1600.0,
+      "prepayment": 300.0,
+      "rentDueDay": 1,
+      "agentFeeLandlord": 350.0,
+      "agentFeeTenant": 0,
+      "totalFee": 350.0,
+      "manager": "涛",
+      "source": "康",
+      "notes": ""
+    },
+    {
+      "date": "2026-06-09",
+      "roomNumber": "1-1333",
+      "landlord": "业主",
+      "unitType": "复式",
+      "leaseStart": "2026.6.10",
+      "leaseEnd": "2027.6.10",
+      "leaseDuration": "1年",
+      "rent": 1300.0,
+      "deposit": 1300.0,
+      "prepayment": 0,
+      "rentDueDay": null,
+      "agentFeeLandlord": 325.0,
+      "agentFeeTenant": 0,
+      "totalFee": 325.0,
+      "manager": "业主",
+      "source": "康",
+      "notes": ""
+    },
+    {
+      "date": "2026-06-15",
+      "roomNumber": "1-1610下",
+      "landlord": "业主",
+      "unitType": "独立厨房下层",
+      "leaseStart": "2026.6.15",
+      "leaseEnd": "2027.6.15",
+      "leaseDuration": "1年",
+      "rent": 1000.0,
+      "deposit": 1000.0,
+      "prepayment": 0,
+      "rentDueDay": null,
+      "agentFeeLandlord": 500.0,
+      "agentFeeTenant": 0,
+      "totalFee": 500.0,
+      "manager": "业主",
+      "source": "闲置群",
+      "notes": "1606的租客闲置群加的我，介绍的这个"
+    },
+    {
+      "date": "2026-06-22",
+      "roomNumber": "1-1448",
+      "landlord": "罗",
+      "unitType": "复式",
+      "leaseStart": "2026.6.26",
+      "leaseEnd": "2027.6.31",
+      "leaseDuration": "1年",
+      "rent": 1450.0,
+      "deposit": 2000.0,
+      "prepayment": 0,
+      "rentDueDay": null,
+      "agentFeeLandlord": 725.0,
+      "agentFeeTenant": 300.0,
+      "totalFee": 1025.0,
+      "manager": "罗",
+      "source": "平台",
+      "notes": "1306租客的朋友"
+    },
+    {
+      "date": "2026-06-27",
+      "roomNumber": "1-1440",
+      "landlord": "业主",
+      "unitType": "复式",
+      "leaseStart": "2026.6.26",
+      "leaseEnd": "2027.6.26",
+      "leaseDuration": "1年",
+      "rent": 1400.0,
+      "deposit": 1400.0,
+      "prepayment": 0,
+      "rentDueDay": null,
+      "agentFeeLandlord": 700.0,
+      "agentFeeTenant": 500.0,
+      "totalFee": 1200.0,
+      "manager": "业主",
+      "source": "平台",
+      "notes": ""
+    },
+    {
+      "date": "2026-06-28",
+      "roomNumber": "2-1006",
+      "landlord": "涛",
+      "unitType": "复式",
+      "leaseStart": "2026.7.1",
+      "leaseEnd": "2027.6.31",
+      "leaseDuration": "1年",
+      "rent": 1300.0,
+      "deposit": 1300.0,
+      "prepayment": 0,
+      "rentDueDay": 1,
+      "agentFeeLandlord": 0,
+      "agentFeeTenant": 325.0,
+      "totalFee": 325.0,
+      "manager": "涛",
+      "source": "平台",
+      "notes": "自己包租的房，推了宽带"
+    },
+    {
+      "date": "2026-06-29",
+      "roomNumber": "1-903",
+      "landlord": "业主",
+      "unitType": "复式",
+      "leaseStart": "2026.7.1",
+      "leaseEnd": "2026.8.31",
+      "leaseDuration": "2月",
+      "rent": 1400.0,
+      "deposit": 1400.0,
+      "prepayment": 0,
+      "rentDueDay": null,
+      "agentFeeLandlord": 300.0,
+      "agentFeeTenant": 188.0,
+      "totalFee": 488.0,
+      "manager": "涛",
+      "source": "平台",
+      "notes": "短租2个月"
+    },
+    {
+      "date": "2026-06-30",
+      "roomNumber": "1-1102上",
+      "landlord": "汇",
+      "unitType": "独立厨房上层",
+      "leaseStart": "2026.7.1",
+      "leaseEnd": "2027.6.30",
+      "leaseDuration": "1年",
+      "rent": 1000.0,
+      "deposit": 1000.0,
+      "prepayment": 300.0,
+      "rentDueDay": 1,
+      "agentFeeLandlord": 212.0,
+      "agentFeeTenant": 0,
+      "totalFee": 212.0,
+      "manager": "涛",
+      "source": "康",
+      "notes": ""
+    },
+    {
+      "date": "2026-07-10",
+      "roomNumber": "1-1421下",
+      "landlord": "康",
+      "unitType": "单间下层",
+      "leaseStart": "2026.7.11",
+      "leaseEnd": "2027.6.30",
+      "leaseDuration": "1年",
+      "rent": 850.0,
+      "deposit": 850.0,
+      "prepayment": 300.0,
+      "rentDueDay": 1,
+      "agentFeeLandlord": 260.0,
+      "agentFeeTenant": 0,
+      "totalFee": 260.0,
+      "manager": "康",
+      "source": "康",
+      "notes": ""
+    },
+    {
+      "date": "2026-07-11",
+      "roomNumber": "1-1431下",
+      "landlord": "业主",
+      "unitType": "单间下层",
+      "leaseStart": "2026.7.12",
+      "leaseEnd": "2026.10.12",
+      "leaseDuration": "3月",
+      "rent": 800.0,
+      "deposit": 800.0,
+      "prepayment": 0,
+      "rentDueDay": null,
+      "agentFeeLandlord": 400.0,
+      "agentFeeTenant": 200.0,
+      "totalFee": 600.0,
+      "manager": "业主",
+      "source": "平台",
+      "notes": "短租3个月"
+    },
+    {
+      "date": "2026-07-15",
+      "roomNumber": "1-1708上",
+      "landlord": "业主",
+      "unitType": "独立厨房上层",
+      "leaseStart": "2026.7.20",
+      "leaseEnd": "2027.7.20",
+      "leaseDuration": "1年",
+      "rent": 850.0,
+      "deposit": 850.0,
+      "prepayment": 0,
+      "rentDueDay": null,
+      "agentFeeLandlord": 850.0,
+      "agentFeeTenant": 200.0,
+      "totalFee": 1050.0,
+      "manager": "业主",
+      "source": "平台",
+      "notes": ""
+    },
+    {
+      "date": "2026-07-15",
+      "roomNumber": "1-1043A下",
+      "landlord": "康",
+      "unitType": "单间下层",
+      "leaseStart": "2026.7.16",
+      "leaseEnd": "2027.7.15",
+      "leaseDuration": "1年",
+      "rent": 700.0,
+      "deposit": 700.0,
+      "prepayment": 300.0,
+      "rentDueDay": 1,
+      "agentFeeLandlord": 350.0,
+      "agentFeeTenant": 88.0,
+      "totalFee": 438.0,
+      "manager": "涛",
+      "source": "平台",
+      "notes": "首月预存只有150元"
+    },
+    {
+      "date": "2026-07-16",
+      "roomNumber": "1-1431上",
+      "landlord": "业主",
+      "unitType": "单间上层",
+      "leaseStart": "2026.7.17",
+      "leaseEnd": "2026.10.17",
+      "leaseDuration": "3月",
+      "rent": 850.0,
+      "deposit": 850.0,
+      "prepayment": 0,
+      "rentDueDay": null,
+      "agentFeeLandlord": 425.0,
+      "agentFeeTenant": 0,
+      "totalFee": 425.0,
+      "manager": "业主",
+      "source": "视频号",
+      "notes": "视频号的客，短租3个月"
+    },
+    {
+      "date": "2026-07-17",
+      "roomNumber": "1-2341下",
+      "landlord": "康",
+      "unitType": "单间下层",
+      "leaseStart": "2026.7",
+      "leaseEnd": "22",
+      "leaseDuration": "1年",
+      "rent": 800.0,
+      "deposit": 1600.0,
+      "prepayment": 300.0,
+      "rentDueDay": 1,
+      "agentFeeLandlord": 600.0,
+      "agentFeeTenant": 400.0,
+      "totalFee": 1000.0,
+      "manager": "涛",
+      "source": "平台",
+      "notes": "推了宽带"
+    },
+    {
+      "date": "2026-07-22",
+      "roomNumber": "1-1511",
+      "landlord": "业主",
+      "unitType": "复式",
+      "leaseStart": "2026.7.23",
+      "leaseEnd": "2027.7.23",
+      "leaseDuration": "1年",
+      "rent": 1200.0,
+      "deposit": 1200.0,
+      "prepayment": 0,
+      "rentDueDay": null,
+      "agentFeeLandlord": 600.0,
+      "agentFeeTenant": 97.0,
+      "totalFee": 697.0,
+      "manager": "业主",
+      "source": "平台",
+      "notes": "推了宽带"
+    },
+    {
+      "date": "2026-07-22",
+      "roomNumber": "1-1235下",
+      "landlord": "业主",
+      "unitType": "单间下层",
+      "leaseStart": "2026.7.25",
+      "leaseEnd": "2027.7.25",
+      "leaseDuration": "1年",
+      "rent": 700.0,
+      "deposit": 700.0,
+      "prepayment": 0,
+      "rentDueDay": null,
+      "agentFeeLandlord": 350.0,
+      "agentFeeTenant": 88.0,
+      "totalFee": 438.0,
+      "manager": "业主",
+      "source": "转介绍",
+      "notes": "2-518租客介绍"
+    },
+    {
+      "date": "2026-07-22",
+      "roomNumber": "1-2423",
+      "landlord": "何",
+      "unitType": "中空复式",
+      "leaseStart": "2026.7.23",
+      "leaseEnd": "2027.7",
+      "leaseDuration": "1年",
+      "rent": 1750.0,
+      "deposit": 3500.0,
+      "prepayment": 0,
+      "rentDueDay": 23,
+      "agentFeeLandlord": 1050.0,
+      "agentFeeTenant": 600.0,
+      "totalFee": 1650.0,
+      "manager": "涛",
+      "source": "平台",
+      "notes": "包网络 8.23补押金"
+    },
+    {
+      "date": "2026-07-22",
+      "roomNumber": "1-1714",
+      "landlord": "业主",
+      "unitType": "独立厨房复式",
+      "leaseStart": "2026.8.1",
+      "leaseEnd": "2028.7.31",
+      "leaseDuration": "2年",
+      "rent": 1400.0,
+      "deposit": 2800.0,
+      "prepayment": 0,
+      "rentDueDay": 1,
+      "agentFeeLandlord": 1400.0,
+      "agentFeeTenant": 700.0,
+      "totalFee": 2100.0,
+      "manager": "涛",
+      "source": "视频号",
+      "notes": "管理费700 9.1号交租收 推了宽带 合同交给业主了"
+    },
+    {
+      "date": "2026-07-22",
+      "roomNumber": "1-634下",
+      "landlord": "业主",
+      "unitType": "单间下层",
+      "leaseStart": "2026.7.27",
+      "leaseEnd": "2026.8.27",
+      "leaseDuration": "1月",
+      "rent": 900.0,
+      "deposit": 1200.0,
+      "prepayment": 0,
+      "rentDueDay": null,
+      "agentFeeLandlord": 0,
+      "agentFeeTenant": 134.0,
+      "totalFee": 134.0,
+      "manager": "涛",
+      "source": "老租客",
+      "notes": "1420租客短租一个月 1200给900业主 166给康康"
+    },
+    {
+      "date": "2026-07-24",
+      "roomNumber": "1-1609下",
+      "landlord": "业主",
+      "unitType": "独立厨房下层",
+      "leaseStart": "2026.7.25",
+      "leaseEnd": "20227.7.25",
+      "leaseDuration": "1年",
+      "rent": 900.0,
+      "deposit": 900.0,
+      "prepayment": 0,
+      "rentDueDay": null,
+      "agentFeeLandlord": 450.0,
+      "agentFeeTenant": 88.0,
+      "totalFee": 538.0,
+      "manager": "业主",
+      "source": "平台",
+      "notes": ""
+    },
+    {
+      "date": "2026-07-25",
+      "roomNumber": "1-411",
+      "landlord": "汇",
+      "unitType": "复式",
+      "leaseStart": "2026.8.1",
+      "leaseEnd": "2027.7.31",
+      "leaseDuration": "1年",
+      "rent": 1300.0,
+      "deposit": 1300.0,
+      "prepayment": 0,
+      "rentDueDay": 1,
+      "agentFeeLandlord": 650.0,
+      "agentFeeTenant": 0,
+      "totalFee": 650.0,
+      "manager": "涛",
+      "source": "转介绍",
+      "notes": "一个找复式的女老乡介绍的"
+    },
+    {
+      "date": "2026-07-25",
+      "roomNumber": "1-2131上",
+      "landlord": "业主",
+      "unitType": "单间上层",
+      "leaseStart": "2026.7.27",
+      "leaseEnd": "2027.7.31",
+      "leaseDuration": "1年",
+      "rent": 850.0,
+      "deposit": 850.0,
+      "prepayment": 0,
+      "rentDueDay": null,
+      "agentFeeLandlord": 425.0,
+      "agentFeeTenant": 0,
+      "totalFee": 425.0,
+      "manager": "业主",
+      "source": "转介绍",
+      "notes": "1518下层租客介绍的"
+    },
+    {
+      "date": "2026-07-28",
+      "roomNumber": "1-1028下",
+      "landlord": "业主",
+      "unitType": "单间下层",
+      "leaseStart": "2026.8.10",
+      "leaseEnd": "2027.8.10",
+      "leaseDuration": "1年",
+      "rent": 700.0,
+      "deposit": 700.0,
+      "prepayment": 0,
+      "rentDueDay": null,
+      "agentFeeLandlord": 350.0,
+      "agentFeeTenant": 0,
+      "totalFee": 350.0,
+      "manager": "业主",
+      "source": "视频号",
+      "notes": ""
+    },
+    {
+      "date": "2026-07-30",
+      "roomNumber": "1-434下",
+      "landlord": "业主",
+      "unitType": "单间下层",
+      "leaseStart": "2026.8.1",
+      "leaseEnd": "2027.1.31",
+      "leaseDuration": "半年",
+      "rent": 750.0,
+      "deposit": 1500.0,
+      "prepayment": 0,
+      "rentDueDay": null,
+      "agentFeeLandlord": 375.0,
+      "agentFeeTenant": 300.0,
+      "totalFee": 675.0,
+      "manager": "业主",
+      "source": "平台",
+      "notes": "业主自己签合同"
+    },
+    {
+      "date": "2026-08-03",
+      "roomNumber": "1-2323上",
+      "landlord": "康",
+      "unitType": "单间上层",
+      "leaseStart": "2026.8.5",
+      "leaseEnd": "2027.7.31",
+      "leaseDuration": "1年",
+      "rent": 850.0,
+      "deposit": 850.0,
+      "prepayment": 300.0,
+      "rentDueDay": 1,
+      "agentFeeLandlord": 425.0,
+      "agentFeeTenant": 425.0,
+      "totalFee": 850.0,
+      "manager": "涛",
+      "source": "平台",
+      "notes": ""
+    },
+    {
+      "date": "2026-08-04",
+      "roomNumber": "1-1136",
+      "landlord": "业主",
+      "unitType": "复式",
+      "leaseStart": "2026.8.5",
+      "leaseEnd": "2027.2.5",
+      "leaseDuration": "半年",
+      "rent": 1400.0,
+      "deposit": 2100.0,
+      "prepayment": 0,
+      "rentDueDay": null,
+      "agentFeeLandlord": 500.0,
+      "agentFeeTenant": 0,
+      "totalFee": 500.0,
+      "manager": "何",
+      "source": "平台",
+      "notes": "何生管理的房"
+    },
+    {
+      "date": "2026-08-04",
+      "roomNumber": "2-613",
+      "landlord": "康",
+      "unitType": "平层",
+      "leaseStart": "2026.8.5",
+      "leaseEnd": "2027.3.31",
+      "leaseDuration": "8月",
+      "rent": 1000.0,
+      "deposit": 2200.0,
+      "prepayment": 0,
+      "rentDueDay": 1,
+      "agentFeeLandlord": 618.0,
+      "agentFeeTenant": 0,
+      "totalFee": 618.0,
+      "manager": "涛",
+      "source": "转介绍",
+      "notes": "金沐技师房经理推荐的 发了88红包"
+    },
+    {
+      "date": "2026-08-05",
+      "roomNumber": "2-1719",
+      "landlord": "汇",
+      "unitType": "单间上层",
+      "leaseStart": "2026.8.6",
+      "leaseEnd": "2027.8.5",
+      "leaseDuration": "1年",
+      "rent": 850.0,
+      "deposit": 850.0,
+      "prepayment": 300.0,
+      "rentDueDay": 1,
+      "agentFeeLandlord": 425.0,
+      "agentFeeTenant": 0,
+      "totalFee": 425.0,
+      "manager": "涛",
+      "source": "平台",
+      "notes": "养猫"
+    },
+    {
+      "date": "2026-08-05",
+      "roomNumber": "1-2023",
+      "landlord": "业主",
+      "unitType": "双钥匙一套",
+      "leaseStart": "2026.8.7",
+      "leaseEnd": "2027.8.7",
+      "leaseDuration": "1年",
+      "rent": 1600.0,
+      "deposit": 1600.0,
+      "prepayment": 0,
+      "rentDueDay": null,
+      "agentFeeLandlord": 800.0,
+      "agentFeeTenant": 22.0,
+      "totalFee": 822.0,
+      "manager": "业主",
+      "source": "转介绍",
+      "notes": "1304租客介绍的 给了66红包"
+    },
+    {
+      "date": "2026-08-05",
+      "roomNumber": "1-1304",
+      "landlord": "业主",
+      "unitType": "复式",
+      "leaseStart": "2026.8.6",
+      "leaseEnd": "2027.8.6",
+      "leaseDuration": "1年",
+      "rent": 1350.0,
+      "deposit": 1350.0,
+      "prepayment": 0,
+      "rentDueDay": null,
+      "agentFeeLandlord": 650.0,
+      "agentFeeTenant": 88.0,
+      "totalFee": 738.0,
+      "manager": "业主",
+      "source": "平台",
+      "notes": "包网络"
+    },
+    {
+      "date": "2026-08-09",
+      "roomNumber": "1-2138上",
+      "landlord": "业主",
+      "unitType": "单间上层",
+      "leaseStart": "2026.8.9",
+      "leaseEnd": "2027.2.9",
+      "leaseDuration": "半年",
+      "rent": 900.0,
+      "deposit": 900.0,
+      "prepayment": 0,
+      "rentDueDay": null,
+      "agentFeeLandlord": 450.0,
+      "agentFeeTenant": 194.0,
+      "totalFee": 644.0,
+      "manager": "业主",
+      "source": "转介绍",
+      "notes": "1908租客介绍，中介费优惠90，给1908发166红包"
+    },
+    {
+      "date": "2026-08-10",
+      "roomNumber": "1-2031上",
+      "landlord": "业主",
+      "unitType": "单间上层",
+      "leaseStart": "2026.8.10",
+      "leaseEnd": "2027.8.10",
+      "leaseDuration": "1年",
+      "rent": 850.0,
+      "deposit": 850.0,
+      "prepayment": 0,
+      "rentDueDay": null,
+      "agentFeeLandlord": 425.0,
+      "agentFeeTenant": 425.0,
+      "totalFee": 850.0,
+      "manager": "业主",
+      "source": "平台",
+      "notes": ""
+    },
+    {
+      "date": "2026-08-12",
+      "roomNumber": "1-1556",
+      "landlord": "业主",
+      "unitType": "双钥匙一套",
+      "leaseStart": "2026.8.10",
+      "leaseEnd": "2027.8.10",
+      "leaseDuration": "1年",
+      "rent": 1800.0,
+      "deposit": 1800.0,
+      "prepayment": 0,
+      "rentDueDay": null,
+      "agentFeeLandlord": 1200.0,
+      "agentFeeTenant": 600.0,
+      "totalFee": 1800.0,
+      "manager": "业主",
+      "source": "平台",
+      "notes": "推了宽带"
+    },
+    {
+      "date": "2026-08-14",
+      "roomNumber": "1-634",
+      "landlord": "业主",
+      "unitType": "双钥匙一套",
+      "leaseStart": "月租",
+      "leaseEnd": "",
+      "leaseDuration": "",
+      "rent": 2200.0,
+      "deposit": 2200.0,
+      "prepayment": 0,
+      "rentDueDay": 15,
+      "agentFeeLandlord": 200.0,
+      "agentFeeTenant": 0,
+      "totalFee": 200.0,
+      "manager": "涛",
+      "source": "转介绍",
+      "notes": "15楼阿姨介绍 推了宽带 业主1700/月"
+    },
+    {
+      "date": "2026-08-15",
+      "roomNumber": "1-2340",
+      "landlord": "康",
+      "unitType": "复式",
+      "leaseStart": "2026.8.15",
+      "leaseEnd": "2027.8.15",
+      "leaseDuration": "1年",
+      "rent": 1400.0,
+      "deposit": 1400.0,
+      "prepayment": 0,
+      "rentDueDay": 15,
+      "agentFeeLandlord": 500.0,
+      "agentFeeTenant": 0,
+      "totalFee": 500.0,
+      "manager": "涛",
+      "source": "康",
+      "notes": "康康台球室租客介绍的"
+    },
+    {
+      "date": "2026-08-15",
+      "roomNumber": "万洋",
+      "landlord": "",
+      "unitType": "单间平层",
+      "leaseStart": "",
+      "leaseEnd": "",
+      "leaseDuration": "",
+      "rent": 0,
+      "deposit": 0,
+      "prepayment": 0,
+      "rentDueDay": null,
+      "agentFeeLandlord": 0,
+      "agentFeeTenant": 0,
+      "totalFee": 0,
+      "manager": "",
+      "source": "平台",
+      "notes": "转给焕庭成交了 2个月后结算"
+    },
+    {
+      "date": "2026-08-22",
+      "roomNumber": "1-1221下",
+      "landlord": "业主",
+      "unitType": "单间下层",
+      "leaseStart": "2026.8.23",
+      "leaseEnd": "2027.8.23",
+      "leaseDuration": "1年",
+      "rent": 750.0,
+      "deposit": 750.0,
+      "prepayment": 0,
+      "rentDueDay": null,
+      "agentFeeLandlord": 375.0,
+      "agentFeeTenant": 300.0,
+      "totalFee": 675.0,
+      "manager": "业主",
+      "source": "平台",
+      "notes": ""
+    },
+    {
+      "date": "2026-08-24",
+      "roomNumber": "1-1620下",
+      "landlord": "业主",
+      "unitType": "单间下层",
+      "leaseStart": "2026.8.25",
+      "leaseEnd": "2027.2.25",
+      "leaseDuration": "半年",
+      "rent": 750.0,
+      "deposit": 750.0,
+      "prepayment": 0,
+      "rentDueDay": null,
+      "agentFeeLandlord": 375.0,
+      "agentFeeTenant": 375.0,
+      "totalFee": 750.0,
+      "manager": "业主",
+      "source": "平台",
+      "notes": ""
+    },
+    {
+      "date": "2026-08-24",
+      "roomNumber": "1-1748",
+      "landlord": "业主",
+      "unitType": "复式",
+      "leaseStart": "2026.8.25",
+      "leaseEnd": "2027.8.25",
+      "leaseDuration": "1年",
+      "rent": 1350.0,
+      "deposit": 1350.0,
+      "prepayment": 0,
+      "rentDueDay": 25,
+      "agentFeeLandlord": 675.0,
+      "agentFeeTenant": 675.0,
+      "totalFee": 1350.0,
+      "manager": "涛",
+      "source": "平台",
+      "notes": "推了宽带"
+    },
+    {
+      "date": "2026-08-25",
+      "roomNumber": "1-1321下",
+      "landlord": "汇",
+      "unitType": "单间下层",
+      "leaseStart": "2026.9.1",
+      "leaseEnd": "2027.9.1",
+      "leaseDuration": "1年",
+      "rent": 850.0,
+      "deposit": 850.0,
+      "prepayment": 0,
+      "rentDueDay": 1,
+      "agentFeeLandlord": 425.0,
+      "agentFeeTenant": 0,
+      "totalFee": 425.0,
+      "manager": "涛",
+      "source": "平台",
+      "notes": "包网络 未入住违约退租"
+    },
+    {
+      "date": "2026-08-27",
+      "roomNumber": "1-1621下",
+      "landlord": "业主",
+      "unitType": "单间下层",
+      "leaseStart": "2026.8.28",
+      "leaseEnd": "2027.8.28",
+      "leaseDuration": "1年",
+      "rent": 750.0,
+      "deposit": 750.0,
+      "prepayment": 0,
+      "rentDueDay": null,
+      "agentFeeLandlord": 350.0,
+      "agentFeeTenant": 0,
+      "totalFee": 350.0,
+      "manager": "业主",
+      "source": "康",
+      "notes": "康康的客 推了宽带"
+    },
+    {
+      "date": "2026-08-29",
+      "roomNumber": "1-903",
+      "landlord": "业主",
+      "unitType": "复式",
+      "leaseStart": "2026.9.1",
+      "leaseEnd": "2027.8.31",
+      "leaseDuration": "1年",
+      "rent": 1300.0,
+      "deposit": 1300.0,
+      "prepayment": 0,
+      "rentDueDay": null,
+      "agentFeeLandlord": 1000.0,
+      "agentFeeTenant": 650.0,
+      "totalFee": 1650.0,
+      "manager": "业主",
+      "source": "平台",
+      "notes": "推了宽带 养猫"
+    },
+    {
+      "date": "2026-08-29",
+      "roomNumber": "1-2318",
+      "landlord": "康",
+      "unitType": "双钥匙一套",
+      "leaseStart": "2026.9.1",
+      "leaseEnd": "2027.8.31",
+      "leaseDuration": "1年",
+      "rent": 1650.0,
+      "deposit": 1650.0,
+      "prepayment": 0,
+      "rentDueDay": 1,
+      "agentFeeLandlord": 288.0,
+      "agentFeeTenant": 0,
+      "totalFee": 288.0,
+      "manager": "康",
+      "source": "康",
+      "notes": "帮康康签的"
+    },
+    {
+      "date": "2026-08-30",
+      "roomNumber": "1-2335下",
+      "landlord": "康",
+      "unitType": "单间下层",
+      "leaseStart": "2026.9.5",
+      "leaseEnd": "2027.2.28",
+      "leaseDuration": "半年",
+      "rent": 880.0,
+      "deposit": 880.0,
+      "prepayment": 300.0,
+      "rentDueDay": 1,
+      "agentFeeLandlord": 220.0,
+      "agentFeeTenant": 220.0,
+      "totalFee": 440.0,
+      "manager": "涛",
+      "source": "平台",
+      "notes": ""
+    },
+    {
+      "date": "2026-09-07",
+      "roomNumber": "1-1718下",
+      "landlord": "罗",
+      "unitType": "单间下层",
+      "leaseStart": "2026.9.7",
+      "leaseEnd": "2027.8.31",
+      "leaseDuration": "1年",
+      "rent": 750.0,
+      "deposit": 750.0,
+      "prepayment": 300.0,
+      "rentDueDay": null,
+      "agentFeeLandlord": 187.0,
+      "agentFeeTenant": 0,
+      "totalFee": 187.0,
+      "manager": "大柱",
+      "source": "大柱",
+      "notes": "大柱的客，只带看了一下1718下层"
+    },
+    {
+      "date": "2026-09-10",
+      "roomNumber": "1-2319",
+      "landlord": "康",
+      "unitType": "复式",
+      "leaseStart": "2026.9.11",
+      "leaseEnd": "2027.8.31",
+      "leaseDuration": "1年",
+      "rent": 1400.0,
+      "deposit": 1400.0,
+      "prepayment": 0,
+      "rentDueDay": 1,
+      "agentFeeLandlord": 700.0,
+      "agentFeeTenant": 500.0,
+      "totalFee": 1200.0,
+      "manager": "涛",
+      "source": "平台",
+      "notes": ""
+    },
+    {
+      "date": "2026-09-11",
+      "roomNumber": "1-2320下",
+      "landlord": "康",
+      "unitType": "单间下层",
+      "leaseStart": "2026.9.11",
+      "leaseEnd": "2027.8.31",
+      "leaseDuration": "1年",
+      "rent": 850.0,
+      "deposit": 850.0,
+      "prepayment": 300.0,
+      "rentDueDay": 1,
+      "agentFeeLandlord": 425.0,
+      "agentFeeTenant": 290.0,
+      "totalFee": 715.0,
+      "manager": "涛",
+      "source": "平台",
+      "notes": "一个女的住，另一个男的交租"
+    }
+  ],
+  "incomes": [
+    {
+      "date": "2026-05-20",
+      "item": "1359租金+押金",
+      "amount": 2800.0,
+      "notes": "押一付一 1400"
+    },
+    {
+      "date": "2026-05-23",
+      "item": "1748管理费",
+      "amount": 800.0,
+      "notes": ""
+    },
+    {
+      "date": "2026-06-01",
+      "item": "1119违约押金",
+      "amount": 2313.6,
+      "notes": ""
+    },
+    {
+      "date": "2026-06-03",
+      "item": "1748宽带",
+      "amount": 150.0,
+      "notes": "移动1000M"
+    },
+    {
+      "date": "2026-06-20",
+      "item": "1359租金",
+      "amount": 1400.0,
+      "notes": ""
+    },
+    {
+      "date": "2026-06-28",
+      "item": "2-1006租金+押金",
+      "amount": 2600.0,
+      "notes": "押一付一 1300"
+    },
+    {
+      "date": "2026-06-30",
+      "item": "2-1006执照押金",
+      "amount": 1000.0,
+      "notes": ""
+    },
+    {
+      "date": "2026-07-23",
+      "item": "1761管理费",
+      "amount": 800.0,
+      "notes": ""
+    },
+    {
+      "date": "2026-07-20",
+      "item": "1359租金",
+      "amount": 1400.0,
+      "notes": ""
+    },
+    {
+      "date": "2026-07-26",
+      "item": "1511宽带",
+      "amount": 100.0,
+      "notes": "移动300M"
+    },
+    {
+      "date": "2026-07-28",
+      "item": "2341下层宽带",
+      "amount": 300.0,
+      "notes": "存量移动"
+    },
+    {
+      "date": "2026-07-28",
+      "item": "1714修洗衣机水管",
+      "amount": 68.0,
+      "notes": "进，出水管"
+    },
+    {
+      "date": "2026-07-30",
+      "item": "2-1006租金",
+      "amount": 1300.0,
+      "notes": ""
+    },
+    {
+      "date": "2026-08-08",
+      "item": "411宽带",
+      "amount": 600.0,
+      "notes": "联通1000M"
+    },
+    {
+      "date": "2026-08-13",
+      "item": "1416上修空调",
+      "amount": 180.0,
+      "notes": "保质期修"
+    },
+    {
+      "date": "2026-08-14",
+      "item": "634下层退租",
+      "amount": 160.0,
+      "notes": "扣了4天租期"
+    },
+    {
+      "date": "2026-08-14",
+      "item": "634卫生费",
+      "amount": 100.0,
+      "notes": ""
+    },
+    {
+      "date": "2026-08-19",
+      "item": "1359租金",
+      "amount": 1400.0,
+      "notes": ""
+    },
+    {
+      "date": "2026-08-22",
+      "item": "1416上层卫生费",
+      "amount": 100.0,
+      "notes": "租客代找"
+    },
+    {
+      "date": "2026-08-23",
+      "item": "1748水费+卫生费",
+      "amount": 188.0,
+      "notes": "水表坏了 换了新的"
+    },
+    {
+      "date": "2026-08-26",
+      "item": "1748宽带",
+      "amount": 300.0,
+      "notes": "移动存量"
+    },
+    {
+      "date": "2026-08-26",
+      "item": "1761换锁",
+      "amount": 60.0,
+      "notes": "差价60"
+    },
+    {
+      "date": "2026-08-30",
+      "item": "2-1006租金",
+      "amount": 1300.0,
+      "notes": "9月份租金"
+    },
+    {
+      "date": "2026-09-01",
+      "item": "1714管理费",
+      "amount": 700.0,
+      "notes": ""
+    },
+    {
+      "date": "2026-09-01",
+      "item": "1908燃气费",
+      "amount": 102.0,
+      "notes": ""
+    },
+    {
+      "date": "2026-09-02",
+      "item": "1621下层宽带",
+      "amount": 200.0,
+      "notes": ""
+    },
+    {
+      "date": "2026-09-03",
+      "item": "2450转租中介费",
+      "amount": 413.0,
+      "notes": "含213电费"
+    },
+    {
+      "date": "2026-09-04",
+      "item": "903宽带",
+      "amount": 500.0,
+      "notes": "联通500M"
+    }
+  ],
+  "expenses": [
+    {
+      "date": "2026-02-26",
+      "item": "端口",
+      "amount": 2030.0,
+      "notes": "季度"
+    },
+    {
+      "date": "2026-04-01",
+      "item": "2348房租",
+      "amount": 1000.0,
+      "notes": ""
+    },
+    {
+      "date": "2026-05-01",
+      "item": "2348房租",
+      "amount": 1100.0,
+      "notes": ""
+    },
+    {
+      "date": "2026-05-10",
+      "item": "1359房租金+押金",
+      "amount": 2650.0,
+      "notes": "5.6.7三个月租金+押金"
+    },
+    {
+      "date": "2026-05-30",
+      "item": "端口",
+      "amount": 1827.0,
+      "notes": "季度"
+    },
+    {
+      "date": "2026-06-01",
+      "item": "2348房租",
+      "amount": 1000.0,
+      "notes": ""
+    },
+    {
+      "date": "2026-06-28",
+      "item": "2-1006租金",
+      "amount": 1500.0,
+      "notes": "7.8.9三个月租金"
+    },
+    {
+      "date": "2026-07-01",
+      "item": "2348房租",
+      "amount": 1000.0,
+      "notes": ""
+    },
+    {
+      "date": "2026-08-01",
+      "item": "2348房租",
+      "amount": 1000.0,
+      "notes": ""
+    },
+    {
+      "date": "2026-08-10",
+      "item": "1359租金",
+      "amount": 1000.0,
+      "notes": ""
+    },
+    {
+      "date": "2026-08-27",
+      "item": "车位",
+      "amount": 0,
+      "notes": ""
+    },
+    {
+      "date": "2026-08-28",
+      "item": "端口",
+      "amount": 3240.0,
+      "notes": "半年"
+    },
+    {
+      "date": "2026-09-02",
+      "item": "2348房租",
+      "amount": 1000.0,
+      "notes": ""
+    },
+    {
+      "date": "2026-09-10",
+      "item": "1359租金",
+      "amount": 1000.0,
+      "notes": ""
+    }
+  ],
+  "properties": [
+    {
+      "roomNumber": "1-2254下",
+      "landlord": "康",
+      "unitType": "独立厨房下层",
+      "rent": 1050.0,
+      "deposit": 1050.0,
+      "prepayment": 300.0,
+      "leaseStart": "2025.11.25",
+      "leaseEnd": "2026.11.30",
+      "leaseDuration": "1年",
+      "rentDueDay": 1,
+      "waterMeterBase": -79,
+      "electricMeterBase": 7042,
+      "propertyType": "管理",
+      "notes": "9月份欠295",
+      "monthlyRentRecords": [
+        {
+          "month": 1,
+          "amount": 1350.0,
+          "isPaid": true
+        },
+        {
+          "month": 2,
+          "amount": 1350.0,
+          "isPaid": true
+        },
+        {
+          "month": 3,
+          "amount": 600.0,
+          "isPaid": true
+        },
+        {
+          "month": 4,
+          "amount": 1350.0,
+          "isPaid": true
+        },
+        {
+          "month": 5,
+          "amount": 1350.0,
+          "isPaid": true
+        },
+        {
+          "month": 6,
+          "amount": 864.0,
+          "isPaid": true
+        },
+        {
+          "month": 7,
+          "amount": 1350.0,
+          "isPaid": true
+        },
+        {
+          "month": 8,
+          "amount": 1350.0,
+          "isPaid": true
+        },
+        {
+          "month": 9,
+          "amount": 1000.0,
+          "isPaid": true
+        },
+        {
+          "month": 12,
+          "amount": 1560.0,
+          "isPaid": true
+        }
+      ],
+      "quarterlyUtilityRecords": [
+        {
+          "quarter": 1,
+          "electricAmount": 0,
+          "waterAmount": 150.0,
+          "isSettled": true
+        },
+        {
+          "quarter": 2,
+          "electricAmount": 0,
+          "waterAmount": 336.0,
+          "isSettled": true
+        },
+        {
+          "quarter": 3,
+          "electricAmount": 0,
+          "waterAmount": 845.0,
+          "isSettled": true
+        }
+      ]
+    },
+    {
+      "roomNumber": "1-2338上",
+      "landlord": "康",
+      "unitType": "单间上层",
+      "rent": 1050.0,
+      "deposit": 2100.0,
+      "prepayment": 300.0,
+      "leaseStart": "2026.3.7",
+      "leaseEnd": "2027.3.7",
+      "leaseDuration": "1年",
+      "rentDueDay": 1,
+      "waterMeterBase": 119,
+      "electricMeterBase": 2272,
+      "propertyType": "管理",
+      "notes": "",
+      "monthlyRentRecords": [
+        {
+          "month": 3,
+          "amount": 1140.0,
+          "isPaid": true
+        },
+        {
+          "month": 4,
+          "amount": 1350.0,
+          "isPaid": true
+        },
+        {
+          "month": 5,
+          "amount": 1350.0,
+          "isPaid": true
+        },
+        {
+          "month": 6,
+          "amount": 687.0,
+          "isPaid": true
+        },
+        {
+          "month": 7,
+          "amount": 1350.0,
+          "isPaid": true
+        },
+        {
+          "month": 8,
+          "amount": 1350.0,
+          "isPaid": true
+        },
+        {
+          "month": 9,
+          "amount": 975.0,
+          "isPaid": true
+        }
+      ],
+      "quarterlyUtilityRecords": [
+        {
+          "quarter": 1,
+          "electricAmount": 0,
+          "waterAmount": 237.0,
+          "isSettled": true
+        },
+        {
+          "quarter": 2,
+          "electricAmount": 0,
+          "waterAmount": 525.0,
+          "isSettled": true
+        }
+      ]
+    },
+    {
+      "roomNumber": "2-1222上",
+      "landlord": "汇",
+      "unitType": "单间上层",
+      "rent": 1000.0,
+      "deposit": 2000.0,
+      "prepayment": 300.0,
+      "leaseStart": "2026.3.5",
+      "leaseEnd": "2027.3.5",
+      "leaseDuration": "1年",
+      "rentDueDay": 1,
+      "waterMeterBase": 197,
+      "electricMeterBase": 10516,
+      "propertyType": "管理",
+      "notes": "",
+      "monthlyRentRecords": [
+        {
+          "month": 3,
+          "amount": 1133.0,
+          "isPaid": true
+        },
+        {
+          "month": 4,
+          "amount": 1300.0,
+          "isPaid": true
+        },
+        {
+          "month": 5,
+          "amount": 1300.0,
+          "isPaid": true
+        },
+        {
+          "month": 6,
+          "amount": 966.0,
+          "isPaid": true
+        },
+        {
+          "month": 7,
+          "amount": 1300.0,
+          "isPaid": true
+        },
+        {
+          "month": 8,
+          "amount": 1300.0,
+          "isPaid": true
+        },
+        {
+          "month": 9,
+          "amount": 1533.0,
+          "isPaid": true
+        }
+      ],
+      "quarterlyUtilityRecords": [
+        {
+          "quarter": 1,
+          "electricAmount": 0,
+          "waterAmount": 566.0,
+          "isSettled": true
+        },
+        {
+          "quarter": 2,
+          "electricAmount": 0,
+          "waterAmount": 1133.0,
+          "isSettled": true
+        }
+      ]
+    },
+    {
+      "roomNumber": "2-518",
+      "landlord": "康",
+      "unitType": "平层",
+      "rent": 1100.0,
+      "deposit": 2200.0,
+      "prepayment": 0,
+      "leaseStart": "2026.3.11",
+      "leaseEnd": "2027.3.11",
+      "leaseDuration": "1年",
+      "rentDueDay": 1,
+      "waterMeterBase": 131,
+      "electricMeterBase": 0,
+      "propertyType": "管理",
+      "notes": "",
+      "monthlyRentRecords": [
+        {
+          "month": 3,
+          "amount": 696.0,
+          "isPaid": true
+        },
+        {
+          "month": 4,
+          "amount": 1100.0,
+          "isPaid": true
+        },
+        {
+          "month": 5,
+          "amount": 1100.0,
+          "isPaid": true
+        },
+        {
+          "month": 6,
+          "amount": 1150.0,
+          "isPaid": true
+        },
+        {
+          "month": 7,
+          "amount": 1100.0,
+          "isPaid": true
+        },
+        {
+          "month": 8,
+          "amount": 1100.0,
+          "isPaid": true
+        },
+        {
+          "month": 9,
+          "amount": 1155.0,
+          "isPaid": true
+        }
+      ],
+      "quarterlyUtilityRecords": [
+        {
+          "quarter": 1,
+          "electricAmount": 0,
+          "waterAmount": 50.0,
+          "isSettled": true
+        },
+        {
+          "quarter": 2,
+          "electricAmount": 0,
+          "waterAmount": 55.0,
+          "isSettled": true
+        }
+      ]
+    },
+    {
+      "roomNumber": "1-2317上",
+      "landlord": "康",
+      "unitType": "单间上层",
+      "rent": 900.0,
+      "deposit": 1800.0,
+      "prepayment": 300.0,
+      "leaseStart": "2026.3.23",
+      "leaseEnd": "2027.3.23",
+      "leaseDuration": "1年",
+      "rentDueDay": 1,
+      "waterMeterBase": 190,
+      "electricMeterBase": 4318,
+      "propertyType": "管理",
+      "notes": "",
+      "monthlyRentRecords": [
+        {
+          "month": 4,
+          "amount": 1440.0,
+          "isPaid": true
+        },
+        {
+          "month": 5,
+          "amount": 1200.0,
+          "isPaid": true
+        },
+        {
+          "month": 6,
+          "amount": 1200.0,
+          "isPaid": true
+        },
+        {
+          "month": 7,
+          "amount": 606.0,
+          "isPaid": true
+        },
+        {
+          "month": 8,
+          "amount": 1200.0,
+          "isPaid": true
+        },
+        {
+          "month": 9,
+          "amount": 1200.0,
+          "isPaid": true
+        }
+      ],
+      "quarterlyUtilityRecords": [
+        {
+          "quarter": 1,
+          "electricAmount": 0,
+          "waterAmount": 306.0,
+          "isSettled": true
+        }
+      ]
+    },
+    {
+      "roomNumber": "1-2343上",
+      "landlord": "康",
+      "unitType": "单间上层",
+      "rent": 950.0,
+      "deposit": 1900.0,
+      "prepayment": 300.0,
+      "leaseStart": "2026.3.27",
+      "leaseEnd": "2027.3.27",
+      "leaseDuration": "1年",
+      "rentDueDay": 1,
+      "waterMeterBase": 96,
+      "electricMeterBase": 2084,
+      "propertyType": "管理",
+      "notes": "",
+      "monthlyRentRecords": [
+        {
+          "month": 4,
+          "amount": 1408.0,
+          "isPaid": true
+        },
+        {
+          "month": 5,
+          "amount": 1250.0,
+          "isPaid": true
+        },
+        {
+          "month": 6,
+          "amount": 1250.0,
+          "isPaid": true
+        },
+        {
+          "month": 7,
+          "amount": 725.0,
+          "isPaid": true
+        },
+        {
+          "month": 8,
+          "amount": 1250.0,
+          "isPaid": true
+        },
+        {
+          "month": 9,
+          "amount": 1250.0,
+          "isPaid": true
+        }
+      ],
+      "quarterlyUtilityRecords": [
+        {
+          "quarter": 1,
+          "electricAmount": 0,
+          "waterAmount": 375.0,
+          "isSettled": true
+        }
+      ]
+    },
+    {
+      "roomNumber": "1-2101上",
+      "landlord": "汇",
+      "unitType": "独立厨房上层",
+      "rent": 1150.0,
+      "deposit": 2300.0,
+      "prepayment": 300.0,
+      "leaseStart": "2026.4.7",
+      "leaseEnd": "2027.4.7",
+      "leaseDuration": "1年",
+      "rentDueDay": 1,
+      "waterMeterBase": 415,
+      "electricMeterBase": 4420,
+      "propertyType": "管理",
+      "notes": "",
+      "monthlyRentRecords": [
+        {
+          "month": 4,
+          "amount": 1220.0,
+          "isPaid": true
+        },
+        {
+          "month": 5,
+          "amount": 1450.0,
+          "isPaid": true
+        },
+        {
+          "month": 6,
+          "amount": 1450.0,
+          "isPaid": true
+        },
+        {
+          "month": 7,
+          "amount": 839.0,
+          "isPaid": true
+        },
+        {
+          "month": 8,
+          "amount": 1450.0,
+          "isPaid": true
+        },
+        {
+          "month": 9,
+          "amount": 1450.0,
+          "isPaid": true
+        }
+      ],
+      "quarterlyUtilityRecords": [
+        {
+          "quarter": 1,
+          "electricAmount": 0,
+          "waterAmount": 289.0,
+          "isSettled": true
+        }
+      ]
+    },
+    {
+      "roomNumber": "1-1908下",
+      "landlord": "汇",
+      "unitType": "独立厨房下层",
+      "rent": 1000.0,
+      "deposit": 1500.0,
+      "prepayment": 300.0,
+      "leaseStart": "2026.4.9",
+      "leaseEnd": "2027.4.9",
+      "leaseDuration": "1年",
+      "rentDueDay": 1,
+      "waterMeterBase": 410,
+      "electricMeterBase": 13886,
+      "propertyType": "管理",
+      "notes": "",
+      "monthlyRentRecords": [
+        {
+          "month": 4,
+          "amount": 1000.0,
+          "isPaid": true
+        },
+        {
+          "month": 5,
+          "amount": 1300.0,
+          "isPaid": true
+        },
+        {
+          "month": 6,
+          "amount": 1300.0,
+          "isPaid": true
+        },
+        {
+          "month": 7,
+          "amount": 1287.0,
+          "isPaid": true
+        },
+        {
+          "month": 8,
+          "amount": 1300.0,
+          "isPaid": true
+        },
+        {
+          "month": 9,
+          "amount": 1300.0,
+          "isPaid": true
+        }
+      ],
+      "quarterlyUtilityRecords": [
+        {
+          "quarter": 1,
+          "electricAmount": 0,
+          "waterAmount": 887.0,
+          "isSettled": true
+        }
+      ]
+    },
+    {
+      "roomNumber": "1-1443A下",
+      "landlord": "康",
+      "unitType": "单间下层",
+      "rent": 900.0,
+      "deposit": 900.0,
+      "prepayment": 300.0,
+      "leaseStart": "2026.4.20",
+      "leaseEnd": "2027.4.20",
+      "leaseDuration": "1年",
+      "rentDueDay": 1,
+      "waterMeterBase": 302,
+      "electricMeterBase": 10803,
+      "propertyType": "管理",
+      "notes": "一季度水费没算",
+      "monthlyRentRecords": [
+        {
+          "month": 5,
+          "amount": 1500.0,
+          "isPaid": true
+        },
+        {
+          "month": 6,
+          "amount": 1200.0,
+          "isPaid": true
+        },
+        {
+          "month": 7,
+          "amount": 1200.0,
+          "isPaid": true
+        },
+        {
+          "month": 8,
+          "amount": 1004.0,
+          "isPaid": true
+        },
+        {
+          "month": 9,
+          "amount": 1200.0,
+          "isPaid": true
+        }
+      ],
+      "quarterlyUtilityRecords": [
+        {
+          "quarter": 1,
+          "electricAmount": 0,
+          "waterAmount": 704.0,
+          "isSettled": true
+        }
+      ]
+    },
+    {
+      "roomNumber": "1-2343下",
+      "landlord": "康",
+      "unitType": "单间下层",
+      "rent": 850.0,
+      "deposit": 1700.0,
+      "prepayment": 300.0,
+      "leaseStart": "2026.5.1",
+      "leaseEnd": "2027.5.1",
+      "leaseDuration": "1年",
+      "rentDueDay": 1,
+      "waterMeterBase": 33,
+      "electricMeterBase": 577,
+      "propertyType": "管理",
+      "notes": "",
+      "monthlyRentRecords": [
+        {
+          "month": 5,
+          "amount": 1150.0,
+          "isPaid": true
+        },
+        {
+          "month": 6,
+          "amount": 1150.0,
+          "isPaid": true
+        },
+        {
+          "month": 7,
+          "amount": 935.0,
+          "isPaid": true
+        },
+        {
+          "month": 8,
+          "amount": 1150.0,
+          "isPaid": true
+        },
+        {
+          "month": 9,
+          "amount": 1150.0,
+          "isPaid": true
+        }
+      ],
+      "quarterlyUtilityRecords": [
+        {
+          "quarter": 1,
+          "electricAmount": 0,
+          "waterAmount": 385.0,
+          "isSettled": true
+        }
+      ]
+    },
+    {
+      "roomNumber": "1-1062下",
+      "landlord": "汇",
+      "unitType": "独立厨房下层",
+      "rent": 1000.0,
+      "deposit": 1000.0,
+      "prepayment": 300.0,
+      "leaseStart": "2026.5.26",
+      "leaseEnd": "2027.5.31",
+      "leaseDuration": "1年",
+      "rentDueDay": 1,
+      "waterMeterBase": 346,
+      "electricMeterBase": 17963,
+      "propertyType": "管理",
+      "notes": "",
+      "monthlyRentRecords": [
+        {
+          "month": 6,
+          "amount": 1466.0,
+          "isPaid": true
+        },
+        {
+          "month": 7,
+          "amount": 1300.0,
+          "isPaid": true
+        },
+        {
+          "month": 8,
+          "amount": 1300.0,
+          "isPaid": true
+        },
+        {
+          "month": 9,
+          "amount": 1702.0,
+          "isPaid": true
+        }
+      ],
+      "quarterlyUtilityRecords": [
+        {
+          "quarter": 1,
+          "electricAmount": 0,
+          "waterAmount": 1302.0,
+          "isSettled": true
+        }
+      ]
+    },
+    {
+      "roomNumber": "1-2246",
+      "landlord": "康",
+      "unitType": "复式",
+      "rent": 1350.0,
+      "deposit": 2700.0,
+      "prepayment": 0,
+      "leaseStart": "2026.6.1",
+      "leaseEnd": "2027.5.31",
+      "leaseDuration": "1年",
+      "rentDueDay": 1,
+      "waterMeterBase": 197,
+      "electricMeterBase": 0,
+      "propertyType": "管理",
+      "notes": "",
+      "monthlyRentRecords": [
+        {
+          "month": 6,
+          "amount": 1350.0,
+          "isPaid": true
+        },
+        {
+          "month": 7,
+          "amount": 1350.0,
+          "isPaid": true
+        },
+        {
+          "month": 8,
+          "amount": 2700.0,
+          "isPaid": true
+        },
+        {
+          "month": 9,
+          "amount": 1471.0,
+          "isPaid": true
+        }
+      ],
+      "quarterlyUtilityRecords": [
+        {
+          "quarter": 1,
+          "electricAmount": 0,
+          "waterAmount": 121.0,
+          "isSettled": true
+        }
+      ]
+    },
+    {
+      "roomNumber": "1-2317下",
+      "landlord": "康",
+      "unitType": "单间下层",
+      "rent": 800.0,
+      "deposit": 1600.0,
+      "prepayment": 300.0,
+      "leaseStart": "2026.6.8",
+      "leaseEnd": "2027.5.31",
+      "leaseDuration": "1年",
+      "rentDueDay": 1,
+      "waterMeterBase": 56,
+      "electricMeterBase": 4001,
+      "propertyType": "管理",
+      "notes": "",
+      "monthlyRentRecords": [
+        {
+          "month": 6,
+          "amount": 913.0,
+          "isPaid": true
+        },
+        {
+          "month": 7,
+          "amount": 1100.0,
+          "isPaid": true
+        },
+        {
+          "month": 8,
+          "amount": 1100.0,
+          "isPaid": true
+        },
+        {
+          "month": 9,
+          "amount": 310.0,
+          "isPaid": true
+        }
+      ],
+      "quarterlyUtilityRecords": [
+        {
+          "quarter": 1,
+          "electricAmount": 0,
+          "waterAmount": 110.0,
+          "isSettled": true
+        }
+      ]
+    },
+    {
+      "roomNumber": "2-1006",
+      "landlord": "涛",
+      "unitType": "复式",
+      "rent": 1300.0,
+      "deposit": 1300.0,
+      "prepayment": 0,
+      "leaseStart": "2026.7.1",
+      "leaseEnd": "2027.6.30",
+      "leaseDuration": "1年",
+      "rentDueDay": 1,
+      "waterMeterBase": 269,
+      "electricMeterBase": 0,
+      "propertyType": "管理",
+      "notes": "",
+      "monthlyRentRecords": [
+        {
+          "month": 7,
+          "amount": 1300.0,
+          "isPaid": true
+        },
+        {
+          "month": 8,
+          "amount": 1300.0,
+          "isPaid": true
+        },
+        {
+          "month": 9,
+          "amount": 1300.0,
+          "isPaid": true
+        }
+      ],
+      "quarterlyUtilityRecords": []
+    },
+    {
+      "roomNumber": "1-1102上",
+      "landlord": "汇",
+      "unitType": "独立厨房上层",
+      "rent": 1000.0,
+      "deposit": 1000.0,
+      "prepayment": 300.0,
+      "leaseStart": "2026.7.1",
+      "leaseEnd": "2027.6.30",
+      "leaseDuration": "1年",
+      "rentDueDay": 1,
+      "waterMeterBase": 280,
+      "electricMeterBase": 14893,
+      "propertyType": "管理",
+      "notes": "",
+      "monthlyRentRecords": [
+        {
+          "month": 7,
+          "amount": 1300.0,
+          "isPaid": true
+        },
+        {
+          "month": 8,
+          "amount": 1300.0,
+          "isPaid": true
+        },
+        {
+          "month": 9,
+          "amount": 1300.0,
+          "isPaid": true
+        }
+      ],
+      "quarterlyUtilityRecords": []
+    },
+    {
+      "roomNumber": "1-1043A下",
+      "landlord": "康",
+      "unitType": "单间下层",
+      "rent": 700.0,
+      "deposit": 700.0,
+      "prepayment": 300.0,
+      "leaseStart": "2026.7.16",
+      "leaseEnd": "2027.7.15",
+      "leaseDuration": "1年",
+      "rentDueDay": 1,
+      "waterMeterBase": 40,
+      "electricMeterBase": 9594,
+      "propertyType": "管理",
+      "notes": "首月预存只有150元，每月结算电费，季度结算水费",
+      "monthlyRentRecords": [
+        {
+          "month": 7,
+          "amount": 500.0,
+          "isPaid": true
+        },
+        {
+          "month": 8,
+          "amount": 929.0,
+          "isPaid": true
+        },
+        {
+          "month": 9,
+          "amount": 885.0,
+          "isPaid": true
+        }
+      ],
+      "quarterlyUtilityRecords": [
+        {
+          "quarter": 1,
+          "electricAmount": 0,
+          "waterAmount": 234.0,
+          "isSettled": true
+        }
+      ]
+    },
+    {
+      "roomNumber": "1-2341下",
+      "landlord": "康",
+      "unitType": "单间下层",
+      "rent": 800.0,
+      "deposit": 1600.0,
+      "prepayment": 300.0,
+      "leaseStart": "2026.7",
+      "leaseEnd": "22",
+      "leaseDuration": "1年",
+      "rentDueDay": 1,
+      "waterMeterBase": 202,
+      "electricMeterBase": 2578,
+      "propertyType": "管理",
+      "notes": "",
+      "monthlyRentRecords": [
+        {
+          "month": 8,
+          "amount": 1366.0,
+          "isPaid": true
+        },
+        {
+          "month": 9,
+          "amount": 1100.0,
+          "isPaid": true
+        }
+      ],
+      "quarterlyUtilityRecords": []
+    },
+    {
+      "roomNumber": "1-1714",
+      "landlord": "业主",
+      "unitType": "独立厨房复式",
+      "rent": 1400.0,
+      "deposit": 2800.0,
+      "prepayment": 0,
+      "leaseStart": "2026.8.1",
+      "leaseEnd": "2028.7.31",
+      "leaseDuration": "2年",
+      "rentDueDay": 1,
+      "waterMeterBase": 341,
+      "electricMeterBase": 0,
+      "propertyType": "管理",
+      "notes": "",
+      "monthlyRentRecords": [
+        {
+          "month": 8,
+          "amount": 1400.0,
+          "isPaid": true
+        },
+        {
+          "month": 9,
+          "amount": 1400.0,
+          "isPaid": true
+        }
+      ],
+      "quarterlyUtilityRecords": []
+    },
+    {
+      "roomNumber": "1-411",
+      "landlord": "汇",
+      "unitType": "复式",
+      "rent": 1300.0,
+      "deposit": 1300.0,
+      "prepayment": 0,
+      "leaseStart": "2026.8.1",
+      "leaseEnd": "2027.7.31",
+      "leaseDuration": "1年",
+      "rentDueDay": 1,
+      "waterMeterBase": 0,
+      "electricMeterBase": 0,
+      "propertyType": "管理",
+      "notes": "",
+      "monthlyRentRecords": [
+        {
+          "month": 8,
+          "amount": 1300.0,
+          "isPaid": true
+        },
+        {
+          "month": 9,
+          "amount": 1300.0,
+          "isPaid": true
+        }
+      ],
+      "quarterlyUtilityRecords": []
+    },
+    {
+      "roomNumber": "1-2323上",
+      "landlord": "康",
+      "unitType": "单间上层",
+      "rent": 850.0,
+      "deposit": 850.0,
+      "prepayment": 300.0,
+      "leaseStart": "2026.8.5",
+      "leaseEnd": "2027.7.31",
+      "leaseDuration": "1年",
+      "rentDueDay": 1,
+      "waterMeterBase": 118,
+      "electricMeterBase": 2940,
+      "propertyType": "管理",
+      "notes": "",
+      "monthlyRentRecords": [
+        {
+          "month": 8,
+          "amount": 1065.0,
+          "isPaid": true
+        },
+        {
+          "month": 9,
+          "amount": 1150.0,
+          "isPaid": true
+        }
+      ],
+      "quarterlyUtilityRecords": []
+    },
+    {
+      "roomNumber": "2-613",
+      "landlord": "康",
+      "unitType": "平层",
+      "rent": 1000.0,
+      "deposit": 2200.0,
+      "prepayment": 0,
+      "leaseStart": "2026.8.5",
+      "leaseEnd": "2027.3.31",
+      "leaseDuration": "8月",
+      "rentDueDay": 1,
+      "waterMeterBase": 0,
+      "electricMeterBase": 0,
+      "propertyType": "管理",
+      "notes": "",
+      "monthlyRentRecords": [
+        {
+          "month": 8,
+          "amount": 866.0,
+          "isPaid": true
+        },
+        {
+          "month": 9,
+          "amount": 1000.0,
+          "isPaid": true
+        }
+      ],
+      "quarterlyUtilityRecords": []
+    },
+    {
+      "roomNumber": "2-1719上",
+      "landlord": "汇",
+      "unitType": "单间上层",
+      "rent": 850.0,
+      "deposit": 850.0,
+      "prepayment": 300.0,
+      "leaseStart": "2026.8.6",
+      "leaseEnd": "2027.8.5",
+      "leaseDuration": "1年",
+      "rentDueDay": 1,
+      "waterMeterBase": 201,
+      "electricMeterBase": 13163,
+      "propertyType": "管理",
+      "notes": "",
+      "monthlyRentRecords": [
+        {
+          "month": 8,
+          "amount": 1036.0,
+          "isPaid": true
+        },
+        {
+          "month": 9,
+          "amount": 1150.0,
+          "isPaid": true
+        }
+      ],
+      "quarterlyUtilityRecords": []
+    },
+    {
+      "roomNumber": "1-2335下",
+      "landlord": "康",
+      "unitType": "单间下层",
+      "rent": 880.0,
+      "deposit": 880.0,
+      "prepayment": 300.0,
+      "leaseStart": "2026.9.5",
+      "leaseEnd": "2027.2.28",
+      "leaseDuration": "半年",
+      "rentDueDay": 1,
+      "waterMeterBase": 0,
+      "electricMeterBase": 3152,
+      "propertyType": "管理",
+      "notes": "",
+      "monthlyRentRecords": [
+        {
+          "month": 9,
+          "amount": 1033.0,
+          "isPaid": true
+        }
+      ],
+      "quarterlyUtilityRecords": []
+    },
+    {
+      "roomNumber": "1-2319",
+      "landlord": "康",
+      "unitType": "复式",
+      "rent": 1400.0,
+      "deposit": 1400.0,
+      "prepayment": 0,
+      "leaseStart": "2026.9.11",
+      "leaseEnd": "2027.8.31",
+      "leaseDuration": "1年",
+      "rentDueDay": 1,
+      "waterMeterBase": 129,
+      "electricMeterBase": 0,
+      "propertyType": "管理",
+      "notes": "",
+      "monthlyRentRecords": [
+        {
+          "month": 9,
+          "amount": 886.0,
+          "isPaid": true
+        }
+      ],
+      "quarterlyUtilityRecords": []
+    },
+    {
+      "roomNumber": "1-2320下",
+      "landlord": "康",
+      "unitType": "单间下层",
+      "rent": 850.0,
+      "deposit": 850.0,
+      "prepayment": 300.0,
+      "leaseStart": "2026.9.11",
+      "leaseEnd": "2027.8.31",
+      "leaseDuration": "1年",
+      "rentDueDay": 1,
+      "waterMeterBase": 66,
+      "electricMeterBase": 2620,
+      "propertyType": "管理",
+      "notes": "",
+      "monthlyRentRecords": [
+        {
+          "month": 9,
+          "amount": 838.0,
+          "isPaid": true
+        }
+      ],
+      "quarterlyUtilityRecords": []
+    },
+    {
+      "roomNumber": "1-1546",
+      "landlord": "业主",
+      "unitType": "复式",
+      "rent": 1500.0,
+      "deposit": 3000.0,
+      "prepayment": 0,
+      "leaseStart": "2026.3.13",
+      "leaseEnd": "2027.3.13",
+      "leaseDuration": "1年",
+      "rentDueDay": 13,
+      "waterMeterBase": 450,
+      "electricMeterBase": 0,
+      "propertyType": "管理",
+      "notes": "",
+      "monthlyRentRecords": [
+        {
+          "month": 3,
+          "amount": 1500.0,
+          "isPaid": true
+        },
+        {
+          "month": 4,
+          "amount": 1500.0,
+          "isPaid": true
+        },
+        {
+          "month": 5,
+          "amount": 1500.0,
+          "isPaid": true
+        },
+        {
+          "month": 6,
+          "amount": 1561.0,
+          "isPaid": true
+        },
+        {
+          "month": 7,
+          "amount": 1500.0,
+          "isPaid": true
+        },
+        {
+          "month": 8,
+          "amount": 1350.0,
+          "isPaid": true
+        }
+      ],
+      "quarterlyUtilityRecords": [
+        {
+          "quarter": 1,
+          "electricAmount": 0,
+          "waterAmount": 60.5,
+          "isSettled": true
+        }
+      ]
+    },
+    {
+      "roomNumber": "1-1747",
+      "landlord": "汇",
+      "unitType": "复式",
+      "rent": 1500.0,
+      "deposit": 3000.0,
+      "prepayment": 0,
+      "leaseStart": "2026.4.19",
+      "leaseEnd": "2027.4.19",
+      "leaseDuration": "1年",
+      "rentDueDay": 15,
+      "waterMeterBase": 291,
+      "electricMeterBase": 0,
+      "propertyType": "管理",
+      "notes": "",
+      "monthlyRentRecords": [
+        {
+          "month": 4,
+          "amount": 1350.0,
+          "isPaid": true
+        },
+        {
+          "month": 6,
+          "amount": 1500.0,
+          "isPaid": true
+        },
+        {
+          "month": 7,
+          "amount": 1500.0,
+          "isPaid": true
+        },
+        {
+          "month": 8,
+          "amount": 1500.0,
+          "isPaid": true
+        }
+      ],
+      "quarterlyUtilityRecords": []
+    },
+    {
+      "roomNumber": "2-1613",
+      "landlord": "康",
+      "unitType": "双钥匙一套",
+      "rent": 2000.0,
+      "deposit": 3000.0,
+      "prepayment": 0,
+      "leaseStart": "2026.6.4",
+      "leaseEnd": "2027.5.31",
+      "leaseDuration": "1年",
+      "rentDueDay": 15,
+      "waterMeterBase": 472,
+      "electricMeterBase": 0,
+      "propertyType": "管理",
+      "notes": "",
+      "monthlyRentRecords": [
+        {
+          "month": 5,
+          "amount": 792.0,
+          "isPaid": true
+        },
+        {
+          "month": 6,
+          "amount": 2000.0,
+          "isPaid": true
+        },
+        {
+          "month": 7,
+          "amount": 2000.0,
+          "isPaid": true
+        },
+        {
+          "month": 8,
+          "amount": 2000.0,
+          "isPaid": true
+        }
+      ],
+      "quarterlyUtilityRecords": []
+    },
+    {
+      "roomNumber": "1-634",
+      "landlord": "业主",
+      "unitType": "双钥匙一套",
+      "rent": 2200.0,
+      "deposit": 2200.0,
+      "prepayment": 0,
+      "leaseStart": "月租",
+      "leaseEnd": "",
+      "leaseDuration": "",
+      "rentDueDay": 15,
+      "waterMeterBase": 466,
+      "electricMeterBase": 0,
+      "propertyType": "管理",
+      "notes": "",
+      "monthlyRentRecords": [
+        {
+          "month": 8,
+          "amount": 2200.0,
+          "isPaid": true
+        }
+      ],
+      "quarterlyUtilityRecords": []
+    },
+    {
+      "roomNumber": "1-2340",
+      "landlord": "康",
+      "unitType": "复式",
+      "rent": 1400.0,
+      "deposit": 1400.0,
+      "prepayment": 0,
+      "leaseStart": "2026.8.15",
+      "leaseEnd": "2027.8.15",
+      "leaseDuration": "1年",
+      "rentDueDay": 15,
+      "waterMeterBase": 118,
+      "electricMeterBase": 0,
+      "propertyType": "管理",
+      "notes": "",
+      "monthlyRentRecords": [
+        {
+          "month": 8,
+          "amount": 1400.0,
+          "isPaid": true
+        }
+      ],
+      "quarterlyUtilityRecords": []
+    },
+    {
+      "roomNumber": "1-2423",
+      "landlord": "何",
+      "unitType": "中空复式",
+      "rent": 1750.0,
+      "deposit": 3500.0,
+      "prepayment": 0,
+      "leaseStart": "2026.7.23",
+      "leaseEnd": "2027.7",
+      "leaseDuration": "1年",
+      "rentDueDay": 23,
+      "waterMeterBase": 334,
+      "electricMeterBase": 0,
+      "propertyType": "管理",
+      "notes": "",
+      "monthlyRentRecords": [
+        {
+          "month": 7,
+          "amount": 1750.0,
+          "isPaid": true
+        },
+        {
+          "month": 8,
+          "amount": 1750.0,
+          "isPaid": true
+        }
+      ],
+      "quarterlyUtilityRecords": []
+    },
+    {
+      "roomNumber": "1-1748",
+      "landlord": "业主",
+      "unitType": "复式",
+      "rent": 1350.0,
+      "deposit": 1350.0,
+      "prepayment": 1350.0,
+      "leaseStart": "2026.8.25",
+      "leaseEnd": "2027.8.25",
+      "leaseDuration": "1年",
+      "rentDueDay": 25,
+      "waterMeterBase": 1,
+      "electricMeterBase": 0,
+      "propertyType": "管理",
+      "notes": "",
+      "monthlyRentRecords": [
+        {
+          "month": 8,
+          "amount": 1350.0,
+          "isPaid": true
+        }
+      ],
+      "quarterlyUtilityRecords": []
+    }
+  ]
+}
