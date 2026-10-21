@@ -1652,7 +1652,7 @@ struct RentBillShareView: View {
 
     var body: some View {
         ZStack {
-            LinearGradient(colors: [Color(hex: "F0F7F4"), Color(hex: "E8F2EF")], startPoint: .top, endPoint: .bottom)
+            LinearGradient(colors: [Color(hex: "FAF5ED"), Color(hex: "F3E9D9")], startPoint: .top, endPoint: .bottom)
             VStack(spacing: 12) {
                 VStack(spacing:3){Text(issueDateText).font(.system(size:15,weight:.bold)).foregroundColor(.black).lineLimit(1);Text(billFixedTip).font(.system(size:10,weight:.bold)).lineLimit(1).minimumScaleFactor(0.7)}.padding(.top,18)
                 if let utility, !utility.statement.isEmpty {
@@ -1692,7 +1692,7 @@ struct RentBillShareView: View {
 
     private func bubble<Content: View>(@ViewBuilder content: () -> Content) -> some View {
         content().font(.system(size:13)).frame(maxWidth: .infinity, alignment: .leading).padding(14).background(Color.white).cornerRadius(16)
-            .shadow(color: Color(hex: "099B6C").opacity(0.06), radius: 6)
+            .shadow(color: Color(hex: "DE8C38").opacity(0.06), radius: 6)
     }
 
     private func amountLine(_ title: String, _ value: Double) -> some View {

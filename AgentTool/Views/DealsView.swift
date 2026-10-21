@@ -712,7 +712,7 @@ struct MiscRow: View {
             // 左边圆形图标 - 收入红色，支出绿色
             ZStack {
                 Circle()
-                    .fill(isIncome ? Color(hex: "E05555") : Color(hex: "0FA48B"))
+                    .fill(isIncome ? Color(hex: "E05555") : Color(hex: "DE8C38"))
                     .frame(width: 48, height: 48)
                 Text(isIncome ? "收" : "支")
                     .font(.system(size: 18, weight: .bold))
@@ -744,7 +744,7 @@ struct MiscRow: View {
                     .font(.system(size: 16, weight: .bold))
                     .padding(.horizontal, 12)
                     .padding(.vertical, 5)
-                    .background(isIncome ? Color(hex: "FDECEC") : Color(hex: "E2F4EF"))
+                    .background(isIncome ? Color(hex: "FDECEC") : Color(hex: "FBF0E0"))
                     .cornerRadius(.infinity)
                 Text(date, style: .date)
                     .font(.system(size: 11))
@@ -1143,7 +1143,7 @@ struct ExportTableView: View {
                         .padding(.vertical, 8)
                 }
             }
-            .background(Color(hex: "143B34"))
+            .background(Color(hex: "334766"))
 
             // 数据行
             ForEach(rows.indices, id: \.self) { rowIdx in

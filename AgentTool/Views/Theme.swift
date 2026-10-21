@@ -1,20 +1,21 @@
 import SwiftUI
 
-// MARK: - 主题配色（参考房源管理软件深绿色主题）
+// MARK: - 主题配色（v1.5 阶段二：全 App 统一为房源管家风格——暖白背景 + 深墨蓝主色 + 琥珀强调）
+// 与房源板块 AppTheme（HouseComponents.swift）同源，消除双皮肤
 extension Color {
-    static let themeSidebar = Color(hex: "143B34")
-    static let themeSidebarDark = Color(hex: "0E2B26")
-    static let themeAccent = Color(hex: "0FA48B")
-    static let themeAccentDark = Color(hex: "0B7A66")
-    static let themeAccentWeak = Color(hex: "E2F4EF")
-    static let themeBg = Color(hex: "F4F6F3")
+    static let themeSidebar = Color(hex: "334766")      // 深墨蓝（AppTheme.primary）
+    static let themeSidebarDark = Color(hex: "263551")
+    static let themeAccent = Color(hex: "DE8C38")       // 琥珀（AppTheme.accent）
+    static let themeAccentDark = Color(hex: "C4732A")
+    static let themeAccentWeak = Color(hex: "FBF0E0")
+    static let themeBg = Color(hex: "FAF5ED")           // 暖白（AppTheme.background）
     static let themePanel = Color.white
-    static let themeText = Color(hex: "1C2D29")
-    static let themeText2 = Color(hex: "5F716C")
-    static let themeText3 = Color(hex: "97A49F")
-    static let themeBorder = Color(hex: "E3EAE6")
+    static let themeText = Color(hex: "22303C")
+    static let themeText2 = Color(hex: "5C6B7A")
+    static let themeText3 = Color(hex: "93A0AE")
+    static let themeBorder = Color(hex: "E5E8EC")
     static let themeBlue = Color(hex: "3E7BFA")
-    static let themeAmber = Color(hex: "E09A2F")
+    static let themeAmber = Color(hex: "DE8C38")
     static let themeRed = Color(hex: "DF5555")
 }
 
@@ -209,13 +210,12 @@ struct ThemeCard<Content: View>: View {
         content
             .padding(padding)
             .background(Color.themePanel)
-            .cornerRadius(14)
+            .cornerRadius(12)
             .overlay(
-                RoundedRectangle(cornerRadius: 14)
+                RoundedRectangle(cornerRadius: 12)
                     .stroke(Color.themeBorder, lineWidth: 1)
             )
-            .shadow(color: Color.themeSidebar.opacity(0.05), radius: 2, x: 0, y: 1)
-            .shadow(color: Color.themeSidebar.opacity(0.07), radius: 14, x: 0, y: 5)
+            .shadow(color: Color.black.opacity(0.05), radius: 3, x: 0, y: 1)
     }
 }
 
@@ -536,7 +536,7 @@ func makeExcelHTML(title: String, headers: [String], rows: [[String]]) -> String
     <style>
     table { border-collapse: collapse; }
     td, th { border: 1px solid #999; padding: 4px 8px; font-family: Arial; font-size: 12px; mso-number-format:'\\@'; white-space: nowrap; }
-    th { background-color: #143B34; color: white; font-weight: bold; }
+    th { background-color: #334766; color: white; font-weight: bold; }
     tr:nth-child(even) td { background-color: #F5F7F5; }
     </style>
     </head>

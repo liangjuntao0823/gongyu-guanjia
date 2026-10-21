@@ -100,8 +100,8 @@ final class Property {
     var typeColor: Color {
         switch typeDisplayName {
         case "包租": return Color(hex: "7B61FF")
-        case "托管": return Color(hex: "E09A2F")
-        default: return Color(hex: "0FA48B")
+        case "托管": return Color(hex: "C4732A")
+        default: return Color(hex: "DE8C38")
         }
     }
 
@@ -110,7 +110,7 @@ final class Property {
         switch typeDisplayName {
         case "包租": return Color(hex: "F0EDFF")
         case "托管": return Color(hex: "FBF1DE")
-        default: return Color(hex: "E2F4EF")
+        default: return Color(hex: "FBF0E0")
         }
     }
 }
