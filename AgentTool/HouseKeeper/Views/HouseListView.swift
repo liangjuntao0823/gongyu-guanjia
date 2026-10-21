@@ -3,7 +3,11 @@ import SwiftData
 
 struct HouseListView: View {
     @Environment(\.modelContext) private var modelContext
-    @Query(sort: \House.createdAt, order: .reverse) private var houses: [House]
+    /// 房源 store 是独立 ModelConfiguration（HouseStore），@Query 在部分 iOS 17 版本上
+    /// 对多配置容器会崩溃，这里改为手动 fetch + 数据变更通知刷新（行为与 @Query 一致）
+    @State private var houses: [House] = []
+
+    static let houseStoreChanged = Notification.Name("houseStoreChanged")
 
     @State private var searchText = ""
     @State private var towerFilter: Int? = nil      // nil = 全部
@@ -151,6 +155,18 @@ struct HouseListView: View {
                 Text(shareError ?? "")
             }
         }
+        .onAppear {
+            reloadHouses()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: Self.houseStoreChanged)) { _ in
+            reloadHouses()
+        }
+    }
+
+    /// 从独立 HouseStore 配置拉取房源（按创建时间倒序，与原来 @Query 一致）
+    private func reloadHouses() {
+        var descriptor = FetchDescriptor<House>(sortBy: [SortDescriptor(\House.createdAt, order: .reverse)])
+        houses = (try? modelContext.fetch(descriptor)) ?? []
     }
 
     // MARK: - 统计（动态跟随当前筛选；v1.31：恢复 v1.29 显示方式 + 修复统计栏下沉）

@@ -9,7 +9,7 @@ import WidgetKit
 import SwiftUI
 
 // MARK: - App Group 常量
-let appGroupID = "group.com.agenttool.shared"
+let appGroupID = "group.com.gj.tg.shared"
 
 // MARK: - 小组件数据模型
 struct WidgetData {

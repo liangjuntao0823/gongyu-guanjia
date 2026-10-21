@@ -90,7 +90,7 @@ final class LocalNotificationManager: NSObject, UNUserNotificationCenterDelegate
                     let days = calendar.dateComponents([.day], from: day, to: due).day ?? 99
                     if days <= 3 {
                         let body = days >= 0 ? "🟢\(p.roomNumber)房\(p.rentDueDay)号交租，还剩\(days)天，请关注！" : "🔴\(p.roomNumber)房\(p.rentDueDay)号交租，已逾期\(-days)天，请关注！"
-                        result.append(request(id: "zfgj-rent-\(dateKey(day))-\(p.id)", title: "收租提醒", body: body, date: fire, tab: 2))
+                        result.append(request(id: "zfgj-rent-\(dateKey(day))-\(p.id)", title: "收租提醒", body: body, date: fire, tab: 3))
                     }
                 }
                 if let end = parseLeaseEnd(p.leaseEnd) {
@@ -98,7 +98,7 @@ final class LocalNotificationManager: NSObject, UNUserNotificationCenterDelegate
                     if days <= 7 {
                         let dueDay = calendar.component(.day, from: end)
                         let body = days >= 0 ? "🟢\(p.roomNumber)房\(dueDay)号到期，房东\(p.landlord)，还剩\(days)天，请关注！" : "🔴\(p.roomNumber)房\(dueDay)号到期，房东\(p.landlord)，已超期\(-days)天，请关注！"
-                        result.append(request(id: "zfgj-expiry-\(dateKey(day))-\(p.id)", title: "租期到期提醒", body: body, date: fire, tab: 2))
+                        result.append(request(id: "zfgj-expiry-\(dateKey(day))-\(p.id)", title: "租期到期提醒", body: body, date: fire, tab: 3))
                     }
                 }
             }
@@ -108,7 +108,7 @@ final class LocalNotificationManager: NSObject, UNUserNotificationCenterDelegate
                     if days <= 3 {
                         let dueDay = calendar.component(.day, from: due)
                         let body = days >= 0 ? "🟢\(payout.roomNumber)包租房\(dueDay)号付租，还剩\(days)天，请关注！" : "🔴\(payout.roomNumber)包租房\(dueDay)号付租，已逾期\(-days)天，请关注！"
-                        result.append(request(id: "zfgj-payout-\(dateKey(day))-\(payout.id)", title: "包租付租提醒", body: body, date: fire, tab: 3))
+                        result.append(request(id: "zfgj-payout-\(dateKey(day))-\(payout.id)", title: "包租付租提醒", body: body, date: fire, tab: 4))
                     }
                 }
             }

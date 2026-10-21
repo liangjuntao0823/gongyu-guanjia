@@ -4,7 +4,7 @@
 <dict>
 	<key>com.apple.security.application-groups</key>
 	<array>
-		<string>group.com.agenttool.shared</string>
+		<string>group.com.gj.tg.shared</string>
 	</array>
 </dict>
 </plist>

@@ -318,6 +318,7 @@ struct HouseEditView: View {
         }
 
         try? modelContext.save()
+        NotificationCenter.default.post(name: HouseListView.houseStoreChanged, object: nil)
         dismiss()
     }
 

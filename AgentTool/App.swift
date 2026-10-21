@@ -129,11 +129,11 @@ struct MainTabView: View {
 
     private let tabs = [
         (title: "工作台", icon: "house.fill"),
+        (title: "房源", icon: "building.2.fill"),
         (title: "成交", icon: "doc.text.fill"),
         (title: "收租", icon: "creditcard.fill"),
         (title: "包租", icon: "arrow.up.circle.fill"),
         (title: "汇总", icon: "chart.pie.fill"),
-        (title: "房源", icon: "building.2.fill"),
         (title: "设置", icon: "gearshape.fill")
     ]
 
@@ -162,27 +162,27 @@ struct MainTabView: View {
                         .disabled(tabRouter.selectedTab != 0)
                 }
                 if visitedTabs.contains(1) {
-                    DealsView()
+                    HouseListView()
                         .opacity(tabRouter.selectedTab == 1 ? 1 : 0)
                         .disabled(tabRouter.selectedTab != 1)
                 }
                 if visitedTabs.contains(2) {
-                    RentCollectionView()
+                    DealsView()
                         .opacity(tabRouter.selectedTab == 2 ? 1 : 0)
                         .disabled(tabRouter.selectedTab != 2)
                 }
                 if visitedTabs.contains(3) {
-                    PayoutView()
+                    RentCollectionView()
                         .opacity(tabRouter.selectedTab == 3 ? 1 : 0)
                         .disabled(tabRouter.selectedTab != 3)
                 }
                 if visitedTabs.contains(4) {
-                    ProfitView()
+                    PayoutView()
                         .opacity(tabRouter.selectedTab == 4 ? 1 : 0)
                         .disabled(tabRouter.selectedTab != 4)
                 }
                 if visitedTabs.contains(5) {
-                    HouseListView()
+                    ProfitView()
                         .opacity(tabRouter.selectedTab == 5 ? 1 : 0)
                         .disabled(tabRouter.selectedTab != 5)
                 }

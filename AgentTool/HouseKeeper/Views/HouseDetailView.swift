@@ -418,6 +418,7 @@ struct HouseDetailView: View {
         house.status = newStatus
         house.updatedAt = Date()
         try? modelContext.save()
+        NotificationCenter.default.post(name: HouseListView.houseStoreChanged, object: nil)
     }
 
     private func deleteHouse() {
@@ -425,6 +426,7 @@ struct HouseDetailView: View {
         MediaStore.deleteHouseDirectory(roomKey: house.mediaRoomKey)
         modelContext.delete(house)
         try? modelContext.save()
+        NotificationCenter.default.post(name: HouseListView.houseStoreChanged, object: nil)
         dismiss()
     }
 
