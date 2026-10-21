@@ -14,8 +14,6 @@ struct HouseListView: View {
     @State private var statusFilter: HouseStatus? = .available   // 首页默认显示待租房源
     @State private var layoutFilters: Set<String> = []   // v1.3：户型筛选支持多选，空 = 全部户型
     @State private var showAdd = false
-    /// v1.3：工作台「新增房源」跳转——切到本 Tab 后弹出新增表单
-    @AppStorage("pendingHouseAdd") private var pendingHouseAdd = false
 
     // v1.22：首页多选分享——一次选多套，生成【一个合集分享卡片】（好友点开链接即可查看全部 N 套），
     // 不再逐套生成链接逐次弹微信，避免 App 与微信来回跳转
@@ -159,11 +157,6 @@ struct HouseListView: View {
         }
         .onAppear {
             reloadHouses()
-            // v1.3：工作台「新增房源」跳转——切到本 Tab 后自动弹出新增表单
-            if pendingHouseAdd {
-                pendingHouseAdd = false
-                showAdd = true
-            }
         }
         .onReceive(NotificationCenter.default.publisher(for: Self.houseStoreChanged)) { _ in
             reloadHouses()

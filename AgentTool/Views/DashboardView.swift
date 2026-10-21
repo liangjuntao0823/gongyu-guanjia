@@ -37,8 +37,8 @@ struct DashboardView: View {
     @State private var quickPayMonth = 0
     @State private var quickPayRecordMonth = 0
     @State private var showRefreshTip = false
-    /// v1.3：工作台「新增房源」→ 切到房源 Tab 后自动弹出新增表单
-    @AppStorage("pendingHouseAdd") private var pendingHouseAdd = false
+    /// v1.3：工作台「新增房源」→ 直接弹出登记表单（保存后房源列表自动刷新）
+    @State private var showAddHouse = false
     @State private var viewingProperty: Property?
     @State private var viewingPayout: PayoutRecord?
 
@@ -400,10 +400,9 @@ struct DashboardView: View {
                                 QuickActionItem(icon: "checklist", label: "新增待办", color: .themeAccentDark) { showAddTodo = true }
                                 QuickActionItem(icon: "creditcard.fill", label: "新增收租", color: .themeBlue) { showAddRent = true }
                                 QuickActionItem(icon: "bolt.fill", label: "水电结算", color: .themeAmber) { showUtility = true }
-                                // v1.3：回收站已移至「设置 → 数据管理」；空位改为「新增房源」，跳转房源板块并弹出新增表单
+                                // v1.3：回收站已移至设置页右上角；空位改为「新增房源」——直接弹出登记表单
                                 QuickActionItem(icon: "building.2.fill", label: "新增房源", color: AppTheme.primary) {
-                                    pendingHouseAdd = true
-                                    tabRouter.selectedTab = 1
+                                    showAddHouse = true
                                 }
                             }
                         }
@@ -613,6 +612,9 @@ struct DashboardView: View {
         }
         .sheet(isPresented: $showAddDeal) {
             NavigationStack { AddDealView() }
+        }
+        .sheet(isPresented: $showAddHouse) {
+            HouseEditView(house: nil)
         }
         .sheet(isPresented: $showAddRent) {
             NavigationStack { AddPropertyView() }
