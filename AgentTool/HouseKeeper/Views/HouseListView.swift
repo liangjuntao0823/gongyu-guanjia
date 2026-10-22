@@ -192,11 +192,13 @@ struct HouseListView: View {
     }
 
     /// 从独立 HouseStore 配置拉取房源（按创建时间倒序，与原来 @Query 一致；v1.7：排除已进回收站的软删除房源）
+    /// v1.9：isDeleted 为可选属性，SwiftData #Predicate 对「可选 Bool」在 iOS 17 会触发翻译崩溃（点进房源板块闪退的根因），
+    /// 改为全量拉取 + 内存过滤（房源数量级小，性能无影响）
     private func reloadHouses() {
         guard let ctx = houseModelContext else { return }
-        var descriptor = FetchDescriptor<House>(sortBy: [SortDescriptor(\House.createdAt, order: .reverse)])
-        descriptor.predicate = #Predicate<House> { $0.isDeleted != true }
-        houses = (try? ctx.fetch(descriptor)) ?? []
+        let descriptor = FetchDescriptor<House>(sortBy: [SortDescriptor(\House.createdAt, order: .reverse)])
+        let all = (try? ctx.fetch(descriptor)) ?? []
+        houses = all.filter { !$0.isTrashed }
     }
 
     // MARK: - 统计（动态跟随当前筛选；v1.31：恢复 v1.29 显示方式 + 修复统计栏下沉）
