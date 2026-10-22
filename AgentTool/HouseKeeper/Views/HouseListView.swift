@@ -15,7 +15,7 @@ struct HouseListView: View {
     @State private var layoutFilters: Set<String> = []   // v1.3：户型筛选支持多选，空 = 全部户型
     @State private var showAdd = false
 
-    // 卡片左滑菜单（编辑 / 分享 / 删除）
+    // 卡片左滑菜单（编辑 / 已租 / 删除）
     @State private var showEditHouse: House?
     @State private var singleShareHouse: House?
     @State private var showSingleSharePicker = false
@@ -375,51 +375,65 @@ struct HouseListView: View {
                     subtitle: "换个搜索词或筛选条件试试"
                 )
             } else {
-                ScrollView {
-                    LazyVStack(spacing: 10) {
-                        ForEach(filteredHouses) { house in
-                            if isSelecting {
-                                // 多选模式：点击整卡切换选中，左上角勾选标记
-                                Button {
-                                    toggleHouseSelect(house)
-                                } label: {
-                                    HouseCardView(house: house)
-                                        .overlay(alignment: .topLeading) {
-                                            Image(systemName: selectedHouseIDs.contains(house.id) ? "checkmark.circle.fill" : "circle")
-                                                .font(.system(size: 22))
-                                                .foregroundColor(selectedHouseIDs.contains(house.id) ? AppTheme.primary : Color.white)
-                                                .shadow(radius: 2)
-                                                .padding(8)
-                                        }
-                                }
-                                .buttonStyle(.plain)
-                            } else {
-                                // v1.7：卡片左滑菜单（编辑 / 分享 / 删除），点击卡片进入详情
-                                SwipeActionRow(
-                                    actions: [
-                                        SwipeActionItem(title: "编辑", icon: "square.and.pencil", color: AppTheme.primary) {
-                                            showEditHouse = house
-                                        },
-                                        SwipeActionItem(title: "分享", icon: "square.and.arrow.up", color: Color.themeAccentDark) {
-                                            singleShareHouse = house
-                                            showSingleSharePicker = true
-                                        },
-                                        SwipeActionItem(title: "删除", icon: "trash", color: Color.themeRed) {
-                                            deleteTarget = house
-                                            showDeleteConfirm = true
-                                        }
-                                    ],
-                                    contentBackground: .clear,
-                                    onTap: { showDetailHouse = house }
-                                ) {
-                                    HouseCardView(house: house)
-                                }
+                // v1.10：列表容器由 ScrollView+自定义 SwipeActionRow 改为 List+原生 swipeActions（与其他板块一致），
+                // 左滑菜单「分享」替换为「已租」（直接切换房源状态为已租）
+                List {
+                    ForEach(filteredHouses) { house in
+                        if isSelecting {
+                            // 多选模式：点击整卡切换选中，左上角勾选标记
+                            Button {
+                                toggleHouseSelect(house)
+                            } label: {
+                                HouseCardView(house: house)
+                                    .overlay(alignment: .topLeading) {
+                                        Image(systemName: selectedHouseIDs.contains(house.id) ? "checkmark.circle.fill" : "circle")
+                                            .font(.system(size: 22))
+                                            .foregroundColor(selectedHouseIDs.contains(house.id) ? AppTheme.primary : Color.white)
+                                            .shadow(radius: 2)
+                                            .padding(8)
+                                    }
                             }
+                            .buttonStyle(.plain)
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                            .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+                        } else {
+                            // 卡片左滑菜单（编辑 / 已租 / 删除），样式与其他板块一致；点击卡片进入详情
+                            HouseCardView(house: house)
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    showDetailHouse = house
+                                }
+                                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                    Button(role: .destructive) {
+                                        deleteTarget = house
+                                        showDeleteConfirm = true
+                                    } label: {
+                                        Label("删除", systemImage: "trash")
+                                    }
+                                    .tint(.red)
+                                    Button {
+                                        markHouseRented(house)
+                                    } label: {
+                                        Label("已租", systemImage: "checkmark.circle")
+                                    }
+                                    .tint(.themeBlue)
+                                    Button {
+                                        showEditHouse = house
+                                    } label: {
+                                        Label("编辑", systemImage: "pencil")
+                                    }
+                                    .tint(.themeBlue)
+                                }
+                                .listRowBackground(Color.clear)
+                                .listRowSeparator(.hidden)
+                                .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
                         }
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, isSelecting ? 76 : 20)
                 }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+                .background(AppTheme.background)
             }
         }
         // v1.21：多选模式底部操作栏
@@ -481,6 +495,15 @@ struct HouseListView: View {
         guard let ctx = houseModelContext else { return }
         house.isDeleted = true
         house.deletedAt = Date()
+        try? ctx.save()
+        NotificationCenter.default.post(name: Self.houseStoreChanged, object: nil)
+    }
+
+    /// v1.10：卡片左滑「已租」→ 直接切换房源状态为已租并保存。
+    /// 首页默认筛选口径为「待租」，切换后该房源会从当前列表消失（可在「已租」筛选或详情页查看）。
+    private func markHouseRented(_ house: House) {
+        guard let ctx = houseModelContext else { return }
+        house.status = .rented
         try? ctx.save()
         NotificationCenter.default.post(name: Self.houseStoreChanged, object: nil)
     }
