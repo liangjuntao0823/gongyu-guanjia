@@ -323,11 +323,12 @@ struct TrashView: View {
     // MARK: - 房源（独立容器）
 
     /// 拉取已软删除的房源（按删除时间倒序）
+    /// v1.9：同 HouseListView——isDeleted 可选属性在 iOS 17 #Predicate 翻译会崩溃，改全量拉取 + 内存过滤
     private func reloadHouses() {
         guard let ctx = houseModelContext else { return }
-        var descriptor = FetchDescriptor<House>(sortBy: [SortDescriptor(\House.deletedAt, order: .reverse)])
-        descriptor.predicate = #Predicate<House> { $0.isDeleted == true }
-        houses = (try? ctx.fetch(descriptor)) ?? []
+        let descriptor = FetchDescriptor<House>(sortBy: [SortDescriptor(\House.deletedAt, order: .reverse)])
+        let all = (try? ctx.fetch(descriptor)) ?? []
+        houses = all.filter { $0.isTrashed }
     }
 
     /// 还原房源：解除软删除标记，照片视频仍在本地

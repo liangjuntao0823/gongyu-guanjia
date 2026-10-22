@@ -270,7 +270,7 @@ struct SummaryCard: View {
             Text(title)
                 .font(.system(size: 11, weight: .medium))
                 .foregroundColor(.themeText2)
-                .frame(minWidth: 56)
+                .fixedSize(horizontal: true, vertical: false)   // v1.9：胶囊宽度随文本自然伸缩，不再受固定最小宽限制
                 .padding(.horizontal, 10)
                 .padding(.vertical, 3)
                 .background(Color(hex: "F0F0F0"))
@@ -280,6 +280,7 @@ struct SummaryCard: View {
                 Text(value)
                     .font(.system(size: 18, weight: .bold))
                     .foregroundColor(color)
+                    .fixedSize(horizontal: true, vertical: false)   // v1.9：数值胶囊随文本长度自适应（如 ¥70447 与 ¥20688 不同宽）
                     .minimumScaleFactor(0.5)
                     .lineLimit(1)
                 Spacer(minLength: 0)

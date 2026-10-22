@@ -3,11 +3,44 @@ import SwiftData
 import UniformTypeIdentifiers
 import PhotosUI
 
-// v1.7：设置页滚动偏移（顶部横线动态显示用，iOS 17 兼容写法）
-private struct SettingsScrollOffsetKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
+// v1.9：设置页滚动偏移监听——用 UIKit KVO 观察 Form 滚动容器的 contentOffset（不再往 Form 里塞标记行，
+// 之前 v1.7/v1.8 用 Color.clear 行做滚动标记，即使行高压到 0 仍残留系统行占位，导致设置页顶部一大块空白）
+private struct SettingsScrollViewReader: UIViewRepresentable {
+    let onScroll: (CGFloat) -> Void
+
+    func makeUIView(context: Context) -> UIView {
+        let probe = UIView(frame: .zero)
+        probe.backgroundColor = .clear
+        DispatchQueue.main.async {
+            // 沿 superview 链找到 Form 的滚动容器（UITableView/UICollectionView 均为 UIScrollView 子类）
+            var view: UIView? = probe
+            while let current = view {
+                if let scroll = current as? UIScrollView {
+                    context.coordinator.attach(scroll, onScroll: onScroll)
+                    break
+                }
+                view = current.superview
+            }
+        }
+        return probe
+    }
+
+    func updateUIView(_ uiView: UIView, context: Context) {
+        context.coordinator.onScroll = onScroll
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    final class Coordinator: NSObject {
+        var onScroll: ((CGFloat) -> Void)?
+        private var observation: NSKeyValueObservation?
+
+        func attach(_ scrollView: UIScrollView, onScroll: @escaping (CGFloat) -> Void) {
+            self.onScroll = onScroll
+            observation = scrollView.observe(\.contentOffset, options: [.new, .initial]) { [weak self] scrollView, _ in
+                self?.onScroll?(scrollView.contentOffset.y)
+            }
+        }
     }
 }
 
@@ -352,22 +385,6 @@ struct SettingsView: View {
     /// v1.7：tint 改为 iOS 原生蓝（房源管家风格设置页配色）；顶部横线随滚动动态显示
     private var settingsForm: some View {
         Form {
-                // v1.7：顶部滚动标记——报告自身在「settingsScroll」坐标系中的 y，
-                // 页面在顶部时 y≈0（不显示横线），向下滚动后 y<0（顶栏固定，显示横线）
-                // v1.8：listRowInsets 清零——之前该行以 Form 行渲染产生顶部空白行，现压掉不可见
-                Color.clear
-                    .frame(height: 0)
-                    .background(
-                        GeometryReader { proxy in
-                            Color.clear.preference(
-                                key: SettingsScrollOffsetKey.self,
-                                value: proxy.frame(in: .named("settingsScroll")).minY
-                            )
-                        }
-                    )
-                    .listRowInsets(EdgeInsets())
-                    .listRowSeparator(.hidden)
-                    .listRowBackground(Color.clear)
                 dataSection
                 syncSection
                 autoBackupSection
@@ -377,10 +394,12 @@ struct SettingsView: View {
                 ringtoneSection
                 aboutSection
             }
-            .coordinateSpace(name: "settingsScroll")
-            .onPreferenceChange(SettingsScrollOffsetKey.self) { value in
-                settingsScrollY = value
-            }
+            // v1.9：背景挂载滚动监听（不占任何 Form 行/间距，顶部不再有空白行）
+            .background(
+                SettingsScrollViewReader { y in
+                    settingsScrollY = y
+                }
+            )
             .tint(Color(red: 0.0, green: 0.478, blue: 1.0))   // iOS 系统蓝 #007AFF
             .overlay(alignment: .top) {
                 // v1.7：页面在顶部时不显示横线；向下滑动（顶栏固定）才出现分隔线
@@ -557,6 +576,7 @@ struct SettingsView: View {
 // MARK: - 版本更新介绍
 struct VersionHistoryView: View {
     let versions: [(version: String, date: String, changes: [String])] = [
+        ("v1.9", "2026-10-23", ["设置页顶部空白彻底移除：滚动检测不再用占位行（v1.7/v1.8 残留行占位），改为 UIKit 监听滚动容器偏移，不占任何布局", "修复点「房源」板块闪退：房源软删除字段为可选属性，iOS 17 SwiftData 谓词翻译可选 Bool 会崩溃；改为全量拉取 + 内存过滤，兼容旧库且不再走有风险的谓词", "汇总页 KPI 胶囊改为动态宽度：标题/数值胶囊随文本长度自适应（¥70447 与 ¥20688 宽度不同，不再固定最小宽/被压缩）"]),
         ("v1.8", "2026-10-23", ["修复存储异常：房源模型软删除字段改为可选属性（v1.7 加非可选字段触发 iOS 17 SwiftData 自动迁移失败，打不开旧房源库导致整 App 进入临时模式）", "启动自动找回被隔离的主库文件（此前容器初始化失败时移入沙箱 backup 文件夹的经营数据会自动归位，无需手动恢复）", "设置页顶部空白行移除（滚动检测标记行不再占位）", "页面背景统一为 iOS 系统分组灰（与设置页一致，各功能板块不再偏绿）", "房源板块标题改为「房源管理」"]),
         ("v1.7", "2026-10-23", ["品牌全局统一：所有「房源管家 / 租房管家」残留文案替换为「公寓管家」（含备份提示、数据文件夹说明）", "房源板块底色统一为主 App 深绿主题（背景 / 主色 / 强调色对齐，不再暖白/深墨蓝/琥珀）", "设置页图标与字体配色改为 iOS 原生蓝（房源管家风格）", "设置页顶部横线动态化：页面在顶部不显示，向下滑动、顶栏固定后才显示分隔线", "登记房源房号实时查重：输入即检测，重复房号变红提示（与保存时校验同口径，兼容 1- / 2- 前缀）", "房源板块：移除左上角设置按钮（已合并至主设置）；右上角 + 按钮样式与其他板块统一", "房源卡片左滑菜单：编辑 / 分享 / 删除（删除二次确认后移入回收站，不再直接删照片视频文件）", "回收站：新增房源板块（软删除房源可还原/彻底删除，彻底删除才移除本地文件）；顶部增加板块分类标签筛选；清空支持清空单个板块或全部", "备份/恢复文案更新：「备份租房数据（不含房源）」「恢复租房数据（不含房源）」，补充房源数据备份/恢复说明", "新增「查看备份文件」：设置页数据管理与远程配置备份 COS 处均可用内部浏览组件查看备份文件，不再跳文件 App"]),
         ("v1.6", "2026-10-22", ["设置统一：房源板块独立设置页取消，全部合并进主 App「设置 → 房源分享」分组（远程配置/名片信息/分享压缩/刷新缓存/房源数据）", "房源板块左上角设置按钮：一键跳转主「设置」页，全 App 只保留一个设置入口", "UI 按房源管家设置页原生 iOS 风格统一（Form 分组 + 小字说明）", "配色恢复为原租房管家深绿主题"]),
