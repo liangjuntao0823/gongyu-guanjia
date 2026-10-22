@@ -181,3 +181,4 @@ jobs:
           path: xcodebuild.log
           if-no-files-found: ignore
           retention-days: 14
+# ci: v1.6 rebuild (fix missing AgentToolWidget) 2026-10-22
