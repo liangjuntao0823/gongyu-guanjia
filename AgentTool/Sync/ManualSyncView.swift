@@ -87,9 +87,17 @@ final class ManualSyncViewModel: ObservableObject {
             let updated = await store.snapshot(); pending = []; conflicts = updated.conflicts
             result = SyncResultSummary(uploaded: pushed.accepted.count, downloaded: pulled.entities.count, merged: 0, conflicts: pushed.conflicts.count + pulled.conflicts.count + protective.count, failed: 0)
             phase = .finished; message = "同步请求已完成；冲突和远端变更需人工处理"
+            // v1.12：同步写操作日志（幂等与校验：时间/端/条数）
+            NotificationCenter.default.post(name: .backupSyncCompleted, object: nil, userInfo: [
+                "uploaded": result?.uploaded ?? 0,
+                "downloaded": result?.downloaded ?? 0,
+                "conflicts": result?.conflicts ?? 0,
+                "time": Date()
+            ])
         } catch {
             try? await store.incrementRetry(pending.map(\.id))
             phase = .preview; message = error.localizedDescription
+            NotificationCenter.default.post(name: .backupSyncFailed, object: nil, userInfo: ["detail": error.localizedDescription])
         }
     }
 

@@ -164,6 +164,8 @@ extension EnvironmentValues {
 struct MainTabView: View {
     @EnvironmentObject private var tabRouter: TabRouter
     @Environment(\.modelContext) private var modelContext
+    // v1.12：自动备份快速备份需要房源容器（保存快照中的房源 JSON）
+    @Environment(\.houseModelContext) private var houseModelContext
 
     private let tabs = [
         (title: "工作台", icon: "house.fill"),
@@ -265,7 +267,13 @@ struct MainTabView: View {
         }
         .onAppear {
             UNUserNotificationCenter.current().setBadgeCount(0)
+            // v1.12：启动时安装崩溃日志、同步日志桥、清理恢复残留、重试未上传的云端备份
+            CrashLogCollector.install()
+            BackupSyncLogBridge.install()
+            BackupV5Manager.cleanupPreRestoreResidue()
             checkAutoBackup()
+            Task { await CloudBackupService.retryPendingUploads() }
+            Task { await CloudBackupService.enforceCloudRetention() }
             LocalNotificationManager.shared.deliverMissedNotifications()
             LocalNotificationManager.shared.rebuildAll(modelContext: modelContext)
             WidgetDataSync.sync(modelContext: modelContext)
@@ -276,6 +284,8 @@ struct MainTabView: View {
             LocalNotificationManager.shared.deliverMissedNotifications()
             LocalNotificationManager.shared.rebuildAll(modelContext: modelContext)
             checkAutoBackup()
+            // v1.12：回前台重试未上传的云端备份
+            Task { await CloudBackupService.retryPendingUploads() }
             WidgetDataSync.sync(modelContext: modelContext)
         }
         .onReceive(automaticBackupTimer) { _ in
@@ -302,7 +312,8 @@ struct MainTabView: View {
         }
     }
 
-    // 自动补偿备份：启动和回前台时检查最近一个计划时间槽。
+    // 自动补偿备份：启动和回前台时检查最近一个计划时间槽（v1.12 改造：自动备份 = 快速备份 + 自动上传云端）。
+    // D2 方案保留：到点 App 不在前台不备份，下次打开时按 latestDueSlot 自动补做；过点不丢。
     private func checkAutoBackup() {
         guard !isCheckingAutomaticBackup else { return }
         guard let data = UserDefaults.standard.data(forKey: "autoBackupSettings"),
@@ -314,8 +325,9 @@ struct MainTabView: View {
         guard let dueSlot = latestDueSlot(settings: settings, now: now, calendar: calendar) else { return }
         let slotKey = ISO8601DateFormatter().string(from: dueSlot)
         let defaults = UserDefaults.standard
-        let existingAutoBackup = DataBackupManager.shared.listBackups(in: .total).contains { url in
-            guard url.lastPathComponent.hasPrefix("自动备份-") else { return false }
+        // v1.12：检查 Backups 目录中是否已有该槽位的自动快速备份（快速_*_自动.zip 且修改时间 ≥ 到期槽）
+        let existingAutoBackup = BackupV5Manager.listLocalBackups().contains { url in
+            guard url.lastPathComponent.hasPrefix("快速_") && url.lastPathComponent.contains("_自动") else { return false }
             let modified = (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
             return modified >= dueSlot
         }
@@ -327,18 +339,54 @@ struct MainTabView: View {
             }
             return
         }
-        do {
-            let backupData = try DataBackupManager.shared.exportAllData(modelContext: modelContext)
-            guard let url = DataBackupManager.shared.saveBackup(backupData, type: .total, isAuto: true) else { return }
+        // 执行自动快速备份（需房源容器）
+        guard let houseCtx = houseModelContext else { return }
+        if let url = BackupV5Manager.createFastBackup(mainContext: modelContext, houseContext: houseCtx, isAuto: true, date: now) {
             settings.lastBackupDate = now
             if let updated = try? JSONEncoder().encode(settings) { defaults.set(updated, forKey: "autoBackupSettings") }
             defaults.set(slotKey, forKey: "autoBackupCompletedSlot")
             defaults.synchronize()
-            DispatchQueue.main.async {
-                automaticBackupMessage = "已生成：\(url.lastPathComponent)"
+            BackupLogStore.log(category: "备份", action: "自动快速备份", result: "成功", detail: url.lastPathComponent, checksum: BackupV5Manager.sha1OfFile(at: url) ?? "")
+            // 自动上传云端（后台；失败入队下次重试）
+            Task {
+                await CloudBackupService.autoUploadFastBackup(zipURL: url, config: nil)
+                await MainActor.run {
+                    automaticBackupMessage = "自动备份成功：\(url.lastPathComponent)\n" + CloudBackupService.uploadState(of: url.lastPathComponent)
+                }
             }
-        } catch {
-            print("自动补偿备份失败: \(error)")
+            // 按保留天数清理旧自动备份（v1.12：只清理自动快速备份，手动备份不参与）
+            cleanupAutoFastBackups(days: retentionDays())
+        } else {
+            DispatchQueue.main.async {
+                automaticBackupMessage = "自动备份失败：请检查存储空间后重试"
+            }
+            BackupLogStore.log(category: "备份", action: "自动快速备份", result: "失败", detail: "存储空间或导出失败")
+        }
+    }
+
+    /// v1.12：自动备份保留天数（默认 7 天，设置页可调）
+    private func retentionDays() -> Int {
+        let days = UserDefaults.standard.integer(forKey: "autoBackupRetentionDays")
+        return days > 0 ? days : 7
+    }
+
+    /// v1.12：清理 Backups 目录中超过保留天数的自动快速备份（手动备份不参与）
+    private func cleanupAutoFastBackups(days: Int) {
+        let fileManager = FileManager.default
+        let folder = BackupV5Manager.backupsDirectory
+        guard let files = try? fileManager.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.creationDateKey]) else { return }
+        let calendar = Calendar.current
+        let cutoffDate = calendar.date(byAdding: .day, value: -days, to: Date()) ?? Date()
+        for file in files {
+            let filename = file.lastPathComponent
+            if filename.hasPrefix("快速_") && filename.contains("_自动") && filename.hasSuffix(".zip") {
+                if let attributes = try? fileManager.attributesOfItem(atPath: file.path),
+                   let creationDate = attributes[.creationDate] as? Date,
+                   creationDate < cutoffDate {
+                    try? fileManager.removeItem(at: file)
+                    print("已删除旧自动备份: \(filename)")
+                }
+            }
         }
     }
 
@@ -362,26 +410,6 @@ struct MainTabView: View {
             return candidate <= now ? candidate : calendar.date(byAdding: .month, value: -1, to: candidate)
         default:
             return today <= now ? today : calendar.date(byAdding: .day, value: -1, to: today)
-        }
-    }
-
-    private func deleteOldAutoBackups(in folder: URL, days: Int) {
-        let fileManager = FileManager.default
-        guard let files = try? fileManager.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.creationDateKey]) else { return }
-
-        let calendar = Calendar.current
-        let cutoffDate = calendar.date(byAdding: .day, value: -days, to: Date()) ?? Date()
-
-        for file in files {
-            let filename = file.lastPathComponent
-            if filename.hasPrefix("自动备份-") {
-                if let attributes = try? fileManager.attributesOfItem(atPath: file.path),
-                   let creationDate = attributes[.creationDate] as? Date,
-                   creationDate < cutoffDate {
-                    try? fileManager.removeItem(at: file)
-                    print("已删除旧自动备份: \(filename)")
-                }
-            }
         }
     }
 }

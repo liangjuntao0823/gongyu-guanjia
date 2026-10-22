@@ -46,16 +46,10 @@ private struct SettingsScrollViewReader: UIViewRepresentable {
 
 struct SettingsView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.houseModelContext) private var houseModelContext
     @State private var showMessage = ""
     @State private var showAlert = false
     @State private var showClearSheet = false
-    @State private var showBackupSheet = false
-    @State private var showRestoreSheet = false
-    @State private var showRestoreList = false
-    @State private var restoreType: DataBackupManager.BackupType = .total
-    @State private var autoBackupEnabled = false
-    @State private var backupFrequency = "day"
-    @State private var backupHour = 23
     @State private var clearType: DataBackupManager.BackupType? = nil
     @State private var showClearConfirm = false
     @State private var showVersionHistory = false
@@ -63,7 +57,17 @@ struct SettingsView: View {
     @State private var showMigration = false
     @State private var showBillTemplate = false
     @State private var showTrash = false   // v1.3：回收站入口从工作台移至设置页
-    @State private var showBackupBrowse = false   // v1.7：查看备份文件（内部浏览组件，只读）
+    // v1.12：备份体系重构——统一备份/恢复入口（替代旧分板块备份/恢复；旧 JSON 备份在查看器中保留）
+    @State private var showBackupKindSheet = false   // 备份方式选择（快速/全量）
+    @State private var showBackupCenterBrowse = false // 备份文件查看器
+    @State private var showBackupCenterRestore = false // 恢复选择器
+    @State private var showLogsView = false           // 操作日志
+    @State private var showCrashShare = false         // 崩溃日志导出（系统分享）
+    @State private var crashShareURLs: [URL] = []
+    @AppStorage("autoBackupRetentionDays") private var backupRetentionDays = 7   // 自动备份保留天数（默认7天，可调）
+    @State private var autoBackupEnabled = false
+    @State private var backupFrequency = "day"
+    @State private var backupHour = 23
     @State private var settingsScrollY: CGFloat = 0   // v1.7：设置页滚动检测（顶部标题横线动态显示）
     // v1.6：房源分享设置合并进主设置（原房源板块独立设置页取消）
     @State private var showHouseCacheConfirm = false
@@ -77,6 +81,15 @@ struct SettingsView: View {
     @AppStorage("defaultUtilityPrepayment") private var defaultUtilityPrepayment = "0"
 
     private let backupManager = DataBackupManager.shared
+
+    /// v1.12：已收录房源统计口径——以房源库为准（排除回收站）；容器不可用时回退目录计数
+    private var houseCountText: Int {
+        if let ctx = houseModelContext,
+           let all = try? ctx.fetch(FetchDescriptor<House>()) {
+            return all.filter { !($0.isDeleted ?? false) }.count
+        }
+        return MediaStore.houseCount()
+    }
 
     private var appVersion: String {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
@@ -118,7 +131,8 @@ struct SettingsView: View {
                     Image(systemName: "building.2")
                 }
                 Spacer()
-                Text("\(MediaStore.houseCount()) 套")
+                // v1.12：统计口径统一——以房源库为准（排除回收站），不再用 Media 目录计数（删进回收站的房子不再计入）
+                Text("\(houseCountText) 套")
                     .foregroundColor(.secondary)
             }
             Button {
@@ -144,13 +158,15 @@ struct SettingsView: View {
             }
         }
     }
+    // v1.12：数据管理统一为「快速/全量」备份体系（替代旧分板块备份/恢复）；
+    // 旧版分板块 JSON 备份在「查看备份文件 → 旧版备份（JSON）」分组里保留查看/恢复/删除，数据不丢失。
     private var dataSection: some View {
         Section {
-            Button { showBackupSheet = true } label: {
-                Label("备份租房数据（不含房源）", systemImage: "square.and.arrow.down")
+            Button { showBackupKindSheet = true } label: {
+                Label("备份数据", systemImage: "square.and.arrow.down")
             }
-            Button { showRestoreSheet = true } label: {
-                Label("恢复租房数据（不含房源）", systemImage: "square.and.arrow.up")
+            Button { showBackupCenterRestore = true } label: {
+                Label("恢复数据", systemImage: "square.and.arrow.up")
             }
             Button { showClearSheet = true } label: {
                 HStack {
@@ -162,12 +178,20 @@ struct SettingsView: View {
                         .foregroundColor(.secondary)
                 }
             }
-            // v1.7：查看备份文件——内部浏览组件（与恢复备份文件选文件同款窗口），不跳文件 App
-            Button { showBackupBrowse = true } label: {
+            // v1.12：备份文件查看器（快速/全量 zip + 云端 + 旧版 JSON）
+            Button { showBackupCenterBrowse = true } label: {
                 Label("查看备份文件", systemImage: "folder")
             }
+            // v1.12：操作日志（备份/恢复/上传/删除/同步）
+            Button { showLogsView = true } label: {
+                Label("操作日志", systemImage: "list.bullet.rectangle")
+            }
+            // v1.12：崩溃日志导出（自建日志文件，不依赖第三方）
+            Button { exportCrashLogs() } label: {
+                Label("导出崩溃日志", systemImage: "ladybug")
+            }
         } footer: {
-            Text("备份与恢复仅针对租房数据（成交 / 收租 / 包租 / 汇总 / 待办），不包含房源。房源数据（数据库、图片、视频）请到「房源分享 → 打开『文件』App 查看数据文件夹」，长按「备份」文件夹拷贝/共享即为备份，重装后放回原位即可还原。备份与恢复均为手动操作，建议重要数据每次修改后及时备份。")
+            Text("备份数据 = 快速备份（账本 + 房源信息 + 媒体清单，自动上传云端）或全量备份（额外含全部照片视频）。恢复会覆盖当前数据，恢复前自动打包当前数据做安全备份，失败自动还原。旧版分板块 JSON 备份仍可在「查看备份文件」中恢复，不会丢失。")
         }
     }
 
@@ -234,9 +258,20 @@ struct SettingsView: View {
                     .buttonStyle(.plain)
                 }
                 .onChange(of: backupHour) { _, _ in saveAutoSettings() }
+                // v1.12：自动备份保留天数可配置（默认 7 天）
+                HStack {
+                    Label("保留天数", systemImage: "archivebox")
+                    Spacer()
+                    Stepper("\(backupRetentionDays) 天", value: $backupRetentionDays, in: 1...60)
+                        .labelsHidden()
+                    Text("\(backupRetentionDays) 天")
+                        .font(.system(size: 16, weight: .semibold))
+                        .frame(minWidth: 44)
+                }
+                .onChange(of: backupRetentionDays) { _, _ in saveAutoSettings() }
             }
         } footer: {
-            Text("自动备份将保存到总备份文件夹；按天自动备份超过7天会自动清理，手动备份不会被删除。")
+            Text("自动备份 = 快速备份（账本 + 房源 + 清单），备份成功后自动上传云端；超过保留天数（默认 7 天）的自动备份会自动清理，手动备份不会被删除。若到点 App 未在前台，会等下次打开 App 时自动补做。")
         }
     }
 
@@ -440,12 +475,13 @@ struct SettingsView: View {
             } message: {
                 Text(showMessage)
             }
-            .confirmationDialog("选择要备份的板块", isPresented: $showBackupSheet, titleVisibility: .visible) {
-                Button("备份成交数据") { backupData(type: .deals) }
-                Button("备份收租数据") { backupData(type: .properties) }
-                Button("备份包租数据") { backupData(type: .payouts) }
-                Button("备份全部数据") { backupData(type: .total) }
+            // v1.12：备份方式选择（快速备份=账本+房源+清单自动传云端；全量备份=含照片视频）
+            .confirmationDialog("选择备份方式", isPresented: $showBackupKindSheet, titleVisibility: .visible) {
+                Button("快速备份（推荐）") { performNewBackup(kind: .fast) }
+                Button("全量备份（含照片视频）") { performNewBackup(kind: .full) }
                 Button("取消", role: .cancel) { }
+            } message: {
+                Text("快速备份：账本 + 房源信息 + 媒体清单（不含照片视频文件），备份后自动上传云端。\n全量备份：账本 + 房源 + 全部照片视频，备份后可在「查看备份文件」中手动上传云端。")
             }
             .confirmationDialog("选择要清空的板块", isPresented: $showClearSheet, titleVisibility: .visible) {
                 Button("清空成交数据") { clearType = .deals; showClearConfirm = true }
@@ -469,18 +505,6 @@ struct SettingsView: View {
                     Text("")
                 }
             }
-            .confirmationDialog("选择要恢复的板块", isPresented: $showRestoreSheet, titleVisibility: .visible) {
-                Button("恢复成交数据") { openRestore(.deals) }
-                Button("恢复收租数据") { openRestore(.properties) }
-                Button("恢复包租数据") { openRestore(.payouts) }
-                Button("恢复全部数据") { openRestore(.total) }
-                Button("取消", role: .cancel) { }
-            }
-            .sheet(isPresented: $showRestoreList) {
-                RestoreBackupView(type: restoreType) { success in
-                    showRestoreList = false
-                }
-            }
             .sheet(isPresented: $showVersionHistory) {
                 VersionHistoryView()
             }
@@ -496,9 +520,28 @@ struct SettingsView: View {
             .sheet(isPresented: $showTrash) {
                 TrashView()
             }
-            // v1.7：查看备份文件（内部浏览组件，只读；与恢复备份文件选文件同款窗口）
-            .sheet(isPresented: $showBackupBrowse) {
-                BackupFileBrowseView()
+            // v1.12：备份文件查看器（快速/全量 zip + 云端备份 + 旧版 JSON）
+            .sheet(isPresented: $showBackupCenterBrowse) {
+                BackupFileBrowseViewV5(mode: .browse)
+            }
+            // v1.12：恢复选择器（本地 zip / 云端备份 / 旧版 JSON）
+            .sheet(isPresented: $showBackupCenterRestore) {
+                BackupFileBrowseViewV5(mode: .restore)
+            }
+            // v1.12：操作日志
+            .sheet(isPresented: $showLogsView) {
+                BackupLogsView()
+            }
+            // v1.12：崩溃日志导出（系统分享面板）
+            .sheet(isPresented: $showCrashShare) {
+                SystemShareSheet(items: crashShareURLs)
+            }
+            // v1.12：备份中心消息通道（查看器/恢复器内的提示复用本页 alert）
+            .onReceive(NotificationCenter.default.publisher(for: .backupCenterMessage)) { note in
+                if let text = note.userInfo?["message"] as? String {
+                    showMessage = text
+                    showAlert = true
+                }
             }
             // v1.6：房源分享缓存刷新（二级确认，防止误触导致全部链接失效）
             .confirmationDialog("刷新分享缓存", isPresented: $showHouseCacheConfirm, titleVisibility: .visible) {
@@ -520,32 +563,58 @@ struct SettingsView: View {
             }
     }
 
-    // MARK: - 逻辑（保持不变）
+    // MARK: - 逻辑
 
-    private func openRestore(_ type: DataBackupManager.BackupType) {
-        restoreType = type
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { showRestoreList = true }
+    // v1.12：统一备份（快速/全量），复用备份中心逻辑
+    private func performNewBackup(kind: BackupKindV5) {
+        guard let houseCtx = houseModelContext else {
+            showMessage = "房源数据容器不可用，请重启 App 后重试"
+            showAlert = true
+            return
+        }
+        if kind == .fast {
+            if let url = BackupV5Manager.createFastBackup(mainContext: modelContext, houseContext: houseCtx) {
+                BackupLogStore.log(category: "备份", action: "快速备份", result: "成功", detail: url.lastPathComponent, checksum: BackupV5Manager.sha1OfFile(at: url) ?? "")
+                Task {
+                    await CloudBackupService.autoUploadFastBackup(zipURL: url, config: nil)
+                }
+                showMessage = "快速备份成功：\(url.lastPathComponent)\n已自动上传云端（若网络失败会在下次打开 App 时自动重试）"
+            } else {
+                showMessage = "快速备份失败，请检查存储空间"
+            }
+        } else {
+            if !BackupV5Manager.hasFreeSpace(needed: BackupV5Manager.collectMediaFileEntries().reduce(0) { $0 + (BackupV5Manager.fileSize(at: $1.fileURL)) }) {
+                showMessage = "存储空间不足，全量备份至少需要与照片视频等量的剩余空间"
+                showAlert = true
+                return
+            }
+            showMessage = "正在生成全量备份…"
+            showAlert = true
+            Task {
+                let url = await BackupV5Manager.createFullBackup(mainContext: modelContext, houseContext: houseCtx) { _ in }
+                await MainActor.run {
+                    if let url = url {
+                        BackupLogStore.log(category: "备份", action: "全量备份", result: "成功", detail: url.lastPathComponent, checksum: BackupV5Manager.sha1OfFile(at: url) ?? "")
+                        showMessage = "全量备份成功：\(url.lastPathComponent)\n可在「查看备份文件」中手动上传到云端"
+                    } else {
+                        showMessage = "全量备份失败，请检查存储空间"
+                    }
+                    showAlert = true
+                }
+            }
+        }
     }
 
-    // 备份数据 - 按板块备份
-    private func backupData(type: DataBackupManager.BackupType) {
-        do {
-            let data: Data
-            switch type {
-            case .deals: data = try backupManager.exportDeals(modelContext: modelContext)
-            case .properties: data = try backupManager.exportProperties(modelContext: modelContext)
-            case .payouts: data = try backupManager.exportPayouts(modelContext: modelContext)
-            case .total: data = try backupManager.exportAllData(modelContext: modelContext)
-            }
-            if let url = backupManager.saveBackup(data, type: type) {
-                showMessage = "备份成功：\(url.lastPathComponent)"
-            } else {
-                showMessage = "备份保存失败，请检查存储空间或文件权限"
-            }
-        } catch {
-            showMessage = "备份导出失败：\(error.localizedDescription)"
+    // v1.12：导出崩溃日志（无日志时提示）
+    private func exportCrashLogs() {
+        let files = CrashLogCollector.logFiles()
+        if files.isEmpty {
+            showMessage = "暂无崩溃日志"
+            showAlert = true
+            return
         }
-        showAlert = true
+        crashShareURLs = files
+        showCrashShare = true
     }
 
     // 清空数据

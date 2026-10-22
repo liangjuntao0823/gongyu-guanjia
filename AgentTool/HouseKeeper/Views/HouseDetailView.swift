@@ -28,6 +28,8 @@ struct HouseDetailView: View {
     @State private var saveTip: String?
     @State private var isSharing = false           // 生成分享卡片中
     @State private var shareError: String?
+    @State private var showCopySheet = false       // v1.12：一键生成朋友圈/小红书文案
+    @State private var generatedCopy = ""
 
     var body: some View {
         ScrollView {
@@ -52,6 +54,9 @@ struct HouseDetailView: View {
         .sheet(isPresented: $showShare) {
             // 注意：UIActivityViewController 不能加 presentationDetents，否则弹分享面板会闪退
             HouseShareSheet(items: shareItems)
+        }
+        .sheet(isPresented: $showCopySheet) {
+            HouseCopySheet(text: generatedCopy)
         }
         .confirmationDialog("切换房源状态", isPresented: $showStatusConfirm, titleVisibility: .visible) {
             if house.status == .available {
@@ -405,6 +410,17 @@ struct HouseDetailView: View {
             }
             .buttonStyle(.bordered)
 
+            // v1.12：一键生成朋友圈/小红书文案
+            Button {
+                generatedCopy = buildCopyText()
+                showCopySheet = true
+            } label: {
+                Label("生成朋友圈/小红书文案", systemImage: "text.quote")
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 4)
+            }
+            .buttonStyle(.bordered)
+
             Button(role: .destructive) {
                 showDeleteConfirm = true
             } label: {
@@ -489,6 +505,73 @@ struct HouseDetailView: View {
                 await MainActor.run {
                     isSharing = false
                     shareError = error.localizedDescription
+                }
+            }
+        }
+    }
+
+    // MARK: - v1.12：一键生成朋友圈/小红书文案
+
+    private func buildCopyText() -> String {
+        let statusText = house.status == .available ? "待租" : "已租"
+        let floorText = house.floorNumber > 0 ? "\(house.floorNumber)层" : ""
+        let roomDesc = "\(house.towerLabel)\(house.roomNo)（\(floorText)）"
+        let mediaCount = house.mediaItems.count
+        let hasMediaText = mediaCount > 0 ? "（本房配有实拍照片/视频）" : ""
+        let remarkText = house.remark.isEmpty ? "" : "\n房源亮点：\(house.remark)"
+        let passwordText = house.password.isEmpty ? "" : "\n看房密码：\(house.password)"
+
+        // 朋友圈版
+        var pyq = "🏠 出租 | 米兰公馆 \(roomDesc)\n"
+        pyq += "💰 租金：\(house.price)元/月\n"
+        pyq += "📐 户型：\(house.layout)\n"
+        pyq += "👤 状态：\(statusText)\(hasMediaText)\n"
+        pyq += remarkText
+        pyq += passwordText
+        pyq += "\n\n📲 感兴趣欢迎随时联系看房！"
+
+        // 小红书版
+        var xhs = "🏠 米兰公馆 \(roomDesc) 出租中\n"
+        xhs += "📍 佛山顺德 · 利保米兰公馆\n"
+        xhs += "💴 \(house.price)元/月 | 户型：\(house.layout)\n"
+        xhs += "✅ \(statusText)\(hasMediaText)\n"
+        xhs += remarkText
+        xhs += "\n\n⭐ 房源真实，实拍图视频可看\n👉 有意私聊，欢迎随时看房"
+
+        return "【朋友圈】\n\(pyq)\n\n【小红书】\n\(xhs)"
+    }
+}
+
+// MARK: - 朋友圈/小红书文案展示
+
+struct HouseCopySheet: View {
+    let text: String
+    @Environment(\.dismiss) private var dismiss
+    @State private var copied = false
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                Text(text)
+                    .font(.body)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(16)
+            }
+            .navigationTitle("文案")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("关闭") { dismiss() }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        UIPasteboard.general.string = text
+                        copied = true
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { copied = false }
+                    } label: {
+                        Text(copied ? "已复制 ✓" : "复制")
+                    }
                 }
             }
         }

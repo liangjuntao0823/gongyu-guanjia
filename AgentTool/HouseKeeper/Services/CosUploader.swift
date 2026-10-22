@@ -1101,7 +1101,7 @@ enum CosUploader {
         ((localName as NSString).deletingPathExtension) + ".mp4"
     }
 
-    private static func upload(data: Data, to remotePath: String, contentType: String, config: CosConfig) async throws {
+    internal static func upload(data: Data, to remotePath: String, contentType: String, config: CosConfig) async throws {
         let url = try presignedPutURL(for: remotePath, contentType: contentType, config: config)
         var request = URLRequest(url: url)
         request.httpMethod = "PUT"
@@ -1122,7 +1122,7 @@ enum CosUploader {
     }
 
     /// 从 COS 错误响应 XML 中提取 Error Code 与 Message
-    private static func extractCosError(from data: Data) -> String {
+    internal static func extractCosError(from data: Data) -> String {
         guard let text = String(data: data, encoding: .utf8) else { return "" }
         func value(of tag: String) -> String? {
             guard let start = text.range(of: "<\(tag)>")?.upperBound,
@@ -1138,7 +1138,7 @@ enum CosUploader {
     /// v1.19：配置了自定义域名就用它（Host 与签名都指向自定义域名，微信按网页抓取）；
     /// 未配置时回退 COS 默认域名（2024 年后新建桶默认域名强制下载，微信会识别成文件——仅作兜底）
     /// v1.20：自动剥离用户误填的 https:// / http:// 前缀和尾部斜杠
-    private static func host(for config: CosConfig) -> String {
+    internal static func host(for config: CosConfig) -> String {
         var domain = config.customDomain.trimmingCharacters(in: .whitespacesAndNewlines)
         if !domain.isEmpty {
             for prefix in ["https://", "http://"] {
@@ -1155,12 +1155,12 @@ enum CosUploader {
     }
 
     /// PUT 预签名：Content-Type 参与签名（COS 要求请求携带的 header 必须在签名中，否则返回 403）
-    private static func presignedPutURL(for path: String, contentType: String, config: CosConfig) throws -> URL {
+    internal static func presignedPutURL(for path: String, contentType: String, config: CosConfig) throws -> URL {
         try presignedURL(for: path, method: "PUT", expires: 3600, headers: [("content-type", contentType)], config: config)
     }
 
     /// GET 预签名：只签 host（下载/访问链接不带自定义 header）
-    private static func presignedGetURL(for path: String, expires: Int, config: CosConfig) throws -> URL {
+    internal static func presignedGetURL(for path: String, expires: Int, config: CosConfig) throws -> URL {
         try presignedURL(for: path, method: "GET", expires: expires, headers: [], config: config)
     }
 
@@ -1171,7 +1171,7 @@ enum CosUploader {
     ///    实际请求 URL 的 path 才做百分号编码
     /// 3. HttpHeaders 的 key 小写、value 按 RFC3986 编码、按字典序拼接
     /// 4. q-header-list 用分号分隔参与签名的 header key
-    private static func presignedURL(for path: String, method: String, expires: Int, headers: [(String, String)], config: CosConfig) throws -> URL {
+    internal static func presignedURL(for path: String, method: String, expires: Int, headers: [(String, String)], config: CosConfig) throws -> URL {
         let now = Int(Date().timeIntervalSince1970)
         let signTime = "\(now);\(now + expires)"
         let keyTime = signTime

@@ -34,6 +34,9 @@ struct HouseListView: View {
     @State private var isGenerating = false
     @State private var generateTip = ""
     @State private var shareError: String?
+    // v1.12：多选模式批量操作——批量已租 / 批量删除（保留原有多选分享逻辑不动）
+    @State private var showBatchDeleteConfirm = false
+    @State private var batchResultTip: String? = nil
 
     /// 筛选后的房源：默认待租，并按「座号 + 楼层 + 房号」升序排列（1座在前，同座先按楼层、再按房号从小到大）
     /// v1.29（优化评估）：搜索/筛选在内存中进行。房源规模通常为个位数~几十套，
@@ -181,6 +184,22 @@ struct HouseListView: View {
                 Button("好", role: .cancel) {}
             } message: {
                 Text(shareError ?? "")
+            }
+            // v1.12：多选批量删除二级确认（移入回收站，不删照片/视频文件）
+            .confirmationDialog("删除选中的 \(selectedHouseIDs.count) 套房源？", isPresented: $showBatchDeleteConfirm, titleVisibility: .visible) {
+                Button("移入回收站", role: .destructive) { batchSoftDelete() }
+                Button("取消", role: .cancel) {}
+            } message: {
+                Text("删除后进入「设置 → 回收站」可恢复；照片和视频保留在本地，彻底删除时才会移除。")
+            }
+            // v1.12：批量操作结果提示
+            .alert("批量操作", isPresented: Binding(
+                get: { batchResultTip != nil },
+                set: { if !$0 { batchResultTip = nil } }
+            )) {
+                Button("好", role: .cancel) {}
+            } message: {
+                Text(batchResultTip ?? "")
             }
         }
         .onAppear {
@@ -437,28 +456,56 @@ struct HouseListView: View {
                 .background(AppTheme.background)
             }
         }
-        // v1.21：多选模式底部操作栏
+        // v1.21：多选模式底部操作栏（v1.12：增加批量已租 / 批量删除，分享逻辑保留不动）
         .safeAreaInset(edge: .bottom) {
             if isSelecting {
-                HStack(spacing: 12) {
-                    Text("已选 \(selectedHouseIDs.count) 套")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundColor(AppTheme.primary)
-                    Spacer()
-                    Button("全选") {
-                        selectAllFiltered()
-                    }
-                    .font(.subheadline)
-                    .disabled(selectedHouseIDs.count == filteredHouses.count)
-                    Button {
-                        startMultiShare()
-                    } label: {
-                        Text("分享（\(selectedHouseIDs.count)）")
+                VStack(spacing: 8) {
+                    HStack(spacing: 12) {
+                        Text("已选 \(selectedHouseIDs.count) 套")
                             .font(.subheadline.weight(.semibold))
+                            .foregroundColor(AppTheme.primary)
+                        Spacer()
+                        Button("全选") {
+                            selectAllFiltered()
+                        }
+                        .font(.subheadline)
+                        .disabled(selectedHouseIDs.count == filteredHouses.count)
                     }
-                    .buttonStyle(.borderedProminent)
-                    .tint(AppTheme.primary)
-                    .disabled(selectedHouseIDs.isEmpty)
+                    HStack(spacing: 10) {
+                        // v1.12：批量已租——选中的待租房源一键标为已租（已租的保持不变）
+                        Button {
+                            batchSetRented()
+                        } label: {
+                            Text("批量已租")
+                                .font(.subheadline.weight(.semibold))
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.green)
+                        .disabled(selectedHouseIDs.isEmpty)
+                        // v1.12：批量删除——移入回收站（二级确认，不删照片视频）
+                        Button(role: .destructive) {
+                            showBatchDeleteConfirm = true
+                        } label: {
+                            Text("删除（\(selectedHouseIDs.count)）")
+                                .font(.subheadline.weight(.semibold))
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.red)
+                        .disabled(selectedHouseIDs.isEmpty)
+                        // v1.21：批量分享（合集卡片）——保留原逻辑
+                        Button {
+                            startMultiShare()
+                        } label: {
+                            Text("分享（\(selectedHouseIDs.count)）")
+                                .font(.subheadline.weight(.semibold))
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(AppTheme.primary)
+                        .disabled(selectedHouseIDs.isEmpty)
+                    }
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 10)
@@ -507,6 +554,39 @@ struct HouseListView: View {
         house.status = (house.status == .rented) ? .available : .rented
         try? ctx.save()
         NotificationCenter.default.post(name: Self.houseStoreChanged, object: nil)
+    }
+
+    // MARK: - v1.12 多选批量操作（批量已租 / 批量删除）
+
+    /// 批量已租：选中的待租房源全部标为已租（已租的保持不变），完成后自动退出多选
+    private func batchSetRented() {
+        guard !selectedHouseIDs.isEmpty, let ctx = houseModelContext else { return }
+        var changed = 0
+        for house in houses where selectedHouseIDs.contains(house.id) && house.status == .available {
+            house.status = .rented
+            changed += 1
+        }
+        try? ctx.save()
+        NotificationCenter.default.post(name: Self.houseStoreChanged, object: nil)
+        let total = selectedHouseIDs.count
+        exitMultiSelect()
+        batchResultTip = "已将 \(changed) 套标记为已租（共选中 \(total) 套）"
+    }
+
+    /// 批量删除：选中的房源全部软删除进回收站（不删照片/视频文件）
+    private func batchSoftDelete() {
+        guard !selectedHouseIDs.isEmpty, let ctx = houseModelContext else { return }
+        var changed = 0
+        for house in houses where selectedHouseIDs.contains(house.id) {
+            house.isDeleted = true
+            house.deletedAt = Date()
+            changed += 1
+        }
+        try? ctx.save()
+        NotificationCenter.default.post(name: Self.houseStoreChanged, object: nil)
+        let total = selectedHouseIDs.count
+        exitMultiSelect()
+        batchResultTip = "已将 \(changed) 套移入回收站（共选中 \(total) 套）"
     }
 
     /// v1.7：卡片左滑「分享」→ 单套分享卡片（脱敏 / 完整），生成链接后弹系统分享面板
