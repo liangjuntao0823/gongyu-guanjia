@@ -577,12 +577,15 @@ struct ConfigRestoreListView: View {
     }
 }
 
-// MARK: - v1.7 查看 COS 配置备份文件（内部浏览组件，只读）
+// MARK: - v1.7 查看 COS 配置备份文件（内部浏览组件，v1.11 支持左滑删除 + 二级确认）
 
-/// 列出「备份」文件夹根目录的 .json 配置备份文件（桶名_地域_日期.json），只读查看，不跳文件 App。
+/// 列出「备份」文件夹根目录的 .json 配置备份文件（桶名_地域_日期.json），v1.11 起支持左滑删除（带二级确认）。
 struct CosBackupBrowseView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var files: [ConfigBackupFileEntry] = []
+    @State private var deleteTarget: ConfigBackupFileEntry? = nil
+    @State private var showDeleteConfirm = false
+    @State private var deleteResultTip: String? = nil
 
     var body: some View {
         NavigationStack {
@@ -618,6 +621,14 @@ struct CosBackupBrowseView: View {
                                         .font(.footnote)
                                         .foregroundColor(.secondary)
                                 }
+                                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                    Button(role: .destructive) {
+                                        deleteTarget = file
+                                        showDeleteConfirm = true
+                                    } label: {
+                                        Label("删除", systemImage: "trash")
+                                    }
+                                }
                             }
                         }
                     }
@@ -630,6 +641,25 @@ struct CosBackupBrowseView: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("关闭") { dismiss() }
                 }
+            }
+            .confirmationDialog(
+                "删除配置备份文件？",
+                isPresented: $showDeleteConfirm,
+                titleVisibility: .visible,
+                presenting: deleteTarget
+            ) { file in
+                Button("删除", role: .destructive) { performDelete(file) }
+                Button("取消", role: .cancel) {}
+            } message: { file in
+                Text("「\(file.name)」将被永久删除，删除后无法恢复。")
+            }
+            .alert("删除配置备份文件", isPresented: Binding(
+                get: { deleteResultTip != nil },
+                set: { if !$0 { deleteResultTip = nil } }
+            )) {
+                Button("好", role: .cancel) {}
+            } message: {
+                Text(deleteResultTip ?? "")
             }
             .onAppear(perform: loadFiles)
         }
@@ -647,11 +677,22 @@ struct CosBackupBrowseView: View {
             entries.append(ConfigBackupFileEntry(
                 name: name,
                 sizeText: ByteCountFormatter.string(fromByteCount: size, countStyle: .file),
-                dateText: Self.dateFormatter.string(from: date)
+                dateText: Self.dateFormatter.string(from: date),
+                url: url
             ))
         }
         entries.sort { $0.dateText > $1.dateText }
         files = entries
+    }
+
+    private func performDelete(_ file: ConfigBackupFileEntry) {
+        do {
+            try FileManager.default.removeItem(at: file.url)
+            deleteResultTip = "已删除「\(file.name)」"
+            loadFiles()
+        } catch {
+            deleteResultTip = "删除失败，请检查文件权限后重试"
+        }
     }
 
     private static let dateFormatter: DateFormatter = {
@@ -667,6 +708,7 @@ struct ConfigBackupFileEntry: Identifiable {
     let name: String
     let sizeText: String
     let dateText: String
+    let url: URL
 }
 
 // MARK: - 名片信息

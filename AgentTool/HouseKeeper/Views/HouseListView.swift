@@ -398,7 +398,8 @@ struct HouseListView: View {
                             .listRowSeparator(.hidden)
                             .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
                         } else {
-                            // 卡片左滑菜单（编辑 / 已租 / 删除），样式与其他板块一致；点击卡片进入详情
+                            // 卡片左滑菜单（编辑 / 状态切换 / 删除），样式与其他板块一致；点击卡片进入详情
+                            // v1.11：状态按钮按当前状态动态显示（待租→「已租」、已租→「待租」），颜色用绿色与编辑的蓝色区分
                             HouseCardView(house: house)
                                 .contentShape(Rectangle())
                                 .onTapGesture {
@@ -413,11 +414,11 @@ struct HouseListView: View {
                                     }
                                     .tint(.red)
                                     Button {
-                                        markHouseRented(house)
+                                        toggleHouseStatus(house)
                                     } label: {
-                                        Label("已租", systemImage: "checkmark.circle")
+                                        Label(house.status == .rented ? "待租" : "已租", systemImage: house.status == .rented ? "arrow.uturn.backward" : "checkmark.circle")
                                     }
-                                    .tint(.themeBlue)
+                                    .tint(.green)
                                     Button {
                                         showEditHouse = house
                                     } label: {
@@ -499,11 +500,11 @@ struct HouseListView: View {
         NotificationCenter.default.post(name: Self.houseStoreChanged, object: nil)
     }
 
-    /// v1.10：卡片左滑「已租」→ 直接切换房源状态为已租并保存。
-    /// 首页默认筛选口径为「待租」，切换后该房源会从当前列表消失（可在「已租」筛选或详情页查看）。
-    private func markHouseRented(_ house: House) {
+    /// v1.11：卡片左滑状态切换按钮——待租→已租、已租→待租，按当前状态动态显示并反向切换。
+    /// 默认列表筛选口径为「待租」，切换为已租后该房源从当前列表消失；已租筛选下左滑可一键改回待租。
+    private func toggleHouseStatus(_ house: House) {
         guard let ctx = houseModelContext else { return }
-        house.status = .rented
+        house.status = (house.status == .rented) ? .available : .rented
         try? ctx.save()
         NotificationCenter.default.post(name: Self.houseStoreChanged, object: nil)
     }
