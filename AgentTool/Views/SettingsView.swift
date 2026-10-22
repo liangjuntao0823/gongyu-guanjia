@@ -122,9 +122,7 @@ struct SettingsView: View {
                     .foregroundColor(.secondary)
             }
             Button {
-                if let url = URL(string: "shareddocuments://") {
-                    UIApplication.shared.open(url)
-                }
+                openHouseDataFolder()
             } label: {
                 Label("打开「文件」App 查看数据文件夹", systemImage: "folder")
             }
@@ -135,6 +133,17 @@ struct SettingsView: View {
 
     // MARK: - 设置页 Section 分组（v1.6 拆分，避免 Form 表达式 type-check 超时）
     // v1.7：备份/恢复仅针对租房数据（成交/收租/包租/汇总/待办），房源数据走「房源分享 → 数据文件夹」整文件夹备份
+    /// v1.11：打开「文件」App 直达房源数据 media 文件夹（Documents/备份/Media）。
+    /// 优先直接打开该目录的 file:// URL（配合 LSSupportsOpeningDocumentsInPlace，iOS 会定位到该文件夹）；
+    /// 个别系统版本不支持定位子目录时兜底打开文件 App 根目录。
+    private func openHouseDataFolder() {
+        let mediaURL = MediaStore.mediaDirectory()
+        UIApplication.shared.open(mediaURL) { success in
+            if !success, let root = URL(string: "shareddocuments://") {
+                UIApplication.shared.open(root)
+            }
+        }
+    }
     private var dataSection: some View {
         Section {
             Button { showBackupSheet = true } label: {
@@ -576,6 +585,7 @@ struct SettingsView: View {
 // MARK: - 版本更新介绍
 struct VersionHistoryView: View {
     let versions: [(version: String, date: String, changes: [String])] = [
+        ("v1.11", "2026-10-22", ["设置页两处「查看备份文件」（数据管理 + 远程配置 COS）支持左滑删除，删除前二次确认，删除后列表自动刷新", "「打开『文件』App 查看数据文件夹」点击直接打开房源图片/视频所在 Media 文件夹（不再只打开文件 App 根目录）", "房源卡片左滑：编辑 / 状态按钮改为双色区分（编辑保持 iOS 蓝，状态切换用绿色，不再连排同色）", "房源卡片左滑状态按钮按当前状态动态显示：待租房源左滑显示「已租」（点击改为已租），已租房源左滑显示「待租」（点击改回待租）"]),
         ("v1.10", "2026-10-22", ["房源卡片左滑菜单改为 iOS 原生 swipeActions：样式与其他板块（成交/收租/包租/待办）完全一致，滑动更流畅，不再用自定义拖拽组件", "左滑菜单「分享」替换为「已租」：左滑一键把房源切换为已租状态并保存，默认列表（待租）即时刷新，无需进详情页操作"]),
         ("v1.9", "2026-10-23", ["设置页顶部空白彻底移除：滚动检测不再用占位行（v1.7/v1.8 残留行占位），改为 UIKit 监听滚动容器偏移，不占任何布局", "修复点「房源」板块闪退：房源软删除字段为可选属性，iOS 17 SwiftData 谓词翻译可选 Bool 会崩溃；改为全量拉取 + 内存过滤，兼容旧库且不再走有风险的谓词", "汇总页 KPI 胶囊改为动态宽度：标题/数值胶囊随文本长度自适应（¥70447 与 ¥20688 宽度不同，不再固定最小宽/被压缩）"]),
         ("v1.8", "2026-10-23", ["修复存储异常：房源模型软删除字段改为可选属性（v1.7 加非可选字段触发 iOS 17 SwiftData 自动迁移失败，打不开旧房源库导致整 App 进入临时模式）", "启动自动找回被隔离的主库文件（此前容器初始化失败时移入沙箱 backup 文件夹的经营数据会自动归位，无需手动恢复）", "设置页顶部空白行移除（滚动检测标记行不再占位）", "页面背景统一为 iOS 系统分组灰（与设置页一致，各功能板块不再偏绿）", "房源板块标题改为「房源管理」"]),
@@ -1209,12 +1219,15 @@ struct BillTemplateSettingsView: View {
     }
 }
 
-// MARK: - v1.7 查看备份文件（内部浏览组件，只读）
+// MARK: - v1.7 查看备份文件（内部浏览组件，v1.11 支持左滑删除 + 二级确认）
 /// 列出全部板块（成交 / 收租 / 包租 / 总备份）的备份文件：文件名 + 板块 + 大小 + 时间。
 /// 与「恢复备份文件」选文件同款内部列表窗口，不跳系统「文件」App。
 struct BackupFileBrowseView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var files: [BackupFileEntry] = []
+    @State private var deleteTarget: BackupFileEntry? = nil
+    @State private var showDeleteConfirm = false
+    @State private var deleteResultTip: String? = nil
     private let backupManager = DataBackupManager.shared
 
     var body: some View {
@@ -1251,6 +1264,14 @@ struct BackupFileBrowseView: View {
                                         .font(.footnote)
                                         .foregroundColor(.secondary)
                                 }
+                                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                    Button(role: .destructive) {
+                                        deleteTarget = file
+                                        showDeleteConfirm = true
+                                    } label: {
+                                        Label("删除", systemImage: "trash")
+                                    }
+                                }
                             }
                         }
                     }
@@ -1262,6 +1283,25 @@ struct BackupFileBrowseView: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("关闭") { dismiss() }
                 }
+            }
+            .confirmationDialog(
+                "删除备份文件？",
+                isPresented: $showDeleteConfirm,
+                titleVisibility: .visible,
+                presenting: deleteTarget
+            ) { file in
+                Button("删除", role: .destructive) { performDelete(file) }
+                Button("取消", role: .cancel) {}
+            } message: { file in
+                Text("「\(file.name)」（\(file.typeLabel)）将被永久删除，删除后无法恢复。")
+            }
+            .alert("删除备份文件", isPresented: Binding(
+                get: { deleteResultTip != nil },
+                set: { if !$0 { deleteResultTip = nil } }
+            )) {
+                Button("好", role: .cancel) {}
+            } message: {
+                Text(deleteResultTip ?? "")
             }
             .onAppear(perform: loadFiles)
         }
@@ -1283,12 +1323,23 @@ struct BackupFileBrowseView: View {
                     name: url.lastPathComponent,
                     typeLabel: label,
                     sizeText: ByteCountFormatter.string(fromByteCount: size, countStyle: .file),
-                    dateText: Self.dateFormatter.string(from: date)
+                    dateText: Self.dateFormatter.string(from: date),
+                    url: url,
+                    type: type
                 ))
             }
         }
         entries.sort { $0.dateText > $1.dateText }
         files = entries
+    }
+
+    private func performDelete(_ file: BackupFileEntry) {
+        if backupManager.deleteBackup(file.url, type: file.type) {
+            deleteResultTip = "已删除「\(file.name)」"
+            loadFiles()
+        } else {
+            deleteResultTip = "删除失败，请检查文件权限后重试"
+        }
     }
 
     private static let dateFormatter: DateFormatter = {
@@ -1305,4 +1356,6 @@ struct BackupFileEntry: Identifiable {
     let typeLabel: String
     let sizeText: String
     let dateText: String
+    let url: URL
+    let type: DataBackupManager.BackupType
 }
