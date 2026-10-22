@@ -24,6 +24,9 @@ struct AgentToolApp: App {
         // 与主 App 经营数据（默认 default.store）完全隔离：复制「备份」文件夹即可整体还原房源数据
         BackupGuide.ensureExists()
 
+        // v1.13 需求16：启动时执行一次性目录迁移——旧分区备份 JSON 迁入 备份/旧版备份/，COS 配置 json 迁入 备份/CosConfig/
+        DataBackupManager.migrateLegacyDirectories()
+
         // v1.8：先把此前「容器初始化失败时自动隔离」的主库文件找回原位（仅当当前默认 store 不存在时执行）。
         // 防误移：目标位置已存在同名文件则不覆盖。数据找回后再正常打开，避免用户主经营数据留在隔离区。
         Self.recoverQuarantinedStores()
@@ -143,7 +146,57 @@ struct AgentToolApp: App {
                     Text(storageWarning ?? "")
                 }
         }
+        // v1.13 需求17：其他 App 用「用其他 App 打开」把备份 zip 发过来时，复制进本地备份目录并提示去恢复
+        .onOpenURL { url in
+            BackupImportHandler.handleIncomingZip(url)
+        }
         .modelContainer(mainContainer)
+    }
+}
+
+/// v1.13 需求17：外部 zip 备份导入处理（系统「用其他 App 打开」→ 公寓管家）
+enum BackupImportHandler {
+    /// 把外部传来的 zip 复制到 备份/Backups/ 目录；成功后弹提示（含路径说明）
+    /// 文件名冲突自动追加 -2、-3…；非 zip 或复制失败时仅打印日志（不打断用户）
+    static func handleIncomingZip(_ url: URL) {
+        let isScoped = url.startAccessingSecurityScopedResource()
+        defer { if isScoped { url.stopAccessingSecurityScopedResource() } }
+
+        // 只处理 zip（含以 .zip 结尾的文件）
+        guard url.pathExtension.lowercased() == "zip" else {
+            print("导入跳过：非 zip 文件 \(url.lastPathComponent)")
+            return
+        }
+        let fm = FileManager.default
+        // 外部传进来的文件往往在临时 Inbox 里，先读到内存再写目标目录（避免直接 move 跨容器失败）
+        guard let data = try? Data(contentsOf: url) else {
+            print("导入失败：无法读取文件 \(url.lastPathComponent)")
+            return
+        }
+        // 校验 zip 魔数（PK\x03\x04），防止把无关文件当备份
+        guard data.count >= 4, Array(data.prefix(4)) == [0x50, 0x4B, 0x03, 0x04] else {
+            print("导入失败：文件不是有效 ZIP \(url.lastPathComponent)")
+            return
+        }
+        let destDir = BackupV5Manager.backupsDirectory
+        var destName = url.lastPathComponent
+        var candidate = destDir.appendingPathComponent(destName)
+        var n = 2
+        while fm.fileExists(atPath: candidate.path) {
+            destName = "\(url.deletingPathExtension().lastPathComponent)-\(n).zip"
+            candidate = destDir.appendingPathComponent(destName)
+            n += 1
+        }
+        do {
+            try data.write(to: candidate, options: .atomic)
+            // 复制成功后提示（App 启动场景直接展示；已运行场景用通知驱动）
+            let message = "已导入备份「\(destName)」到本地备份文件夹。\n可到「设置 → 备份数据 → 查看备份文件」查看并恢复。"
+            NotificationCenter.default.post(name: .backupZipImported, object: message)
+            BackupLogStore.log(category: "备份", action: "导入外部备份", result: "成功", detail: destName)
+        } catch {
+            print("导入失败：写入备份目录出错 \(error.localizedDescription)")
+            BackupLogStore.log(category: "备份", action: "导入外部备份", result: "失败", detail: error.localizedDescription)
+        }
     }
 }
 
@@ -179,6 +232,7 @@ struct MainTabView: View {
 
     @State private var visitedTabs: Set<Int> = [0]
     @State private var automaticBackupMessage: String?
+    @State private var importedZipMessage: String?   // v1.13 需求17：外部 zip 导入提示
     @State private var isCheckingAutomaticBackup = false
     private let automaticBackupTimer = Timer.publish(every: 30, on: .main, in: .common).autoconnect() // 记录已访问的tab，默认工作台已访问
 
@@ -310,6 +364,22 @@ struct MainTabView: View {
                     Text(automaticBackupMessage ?? "")
                 }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .backupZipImported)) { note in
+            if let msg = note.object as? String {
+                importedZipMessage = msg
+            }
+        }
+        .overlay {
+            Color.clear.frame(width: 1, height: 1)
+                .alert("已导入备份", isPresented: Binding(
+                    get: { importedZipMessage != nil },
+                    set: { if !$0 { importedZipMessage = nil } }
+                )) {
+                    Button("知道了", role: .cancel) { importedZipMessage = nil }
+                } message: {
+                    Text(importedZipMessage ?? "")
+                }
+        }
     }
 
     // 自动补偿备份：启动和回前台时检查最近一个计划时间槽（v1.12 改造：自动备份 = 快速备份 + 自动上传云端）。
@@ -417,4 +487,6 @@ struct MainTabView: View {
 
 extension Notification.Name {
     static let autoBackupSettingsChanged = Notification.Name("autoBackupSettingsChanged")
+    /// v1.13 需求17：外部 zip 导入完成（object = 提示文案 String）
+    static let backupZipImported = Notification.Name("backupZipImported")
 }

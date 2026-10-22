@@ -259,14 +259,26 @@ struct SettingsView: View {
                 }
                 .onChange(of: backupHour) { _, _ in saveAutoSettings() }
                 // v1.12：自动备份保留天数可配置（默认 7 天）
+                // v1.13 需求9：天数放在 - + 号中间（与备份时间行同款布局）
                 HStack {
                     Label("保留天数", systemImage: "archivebox")
                     Spacer()
-                    Stepper("\(backupRetentionDays) 天", value: $backupRetentionDays, in: 1...60)
-                        .labelsHidden()
+                    Button { if backupRetentionDays > 1 { backupRetentionDays -= 1 } } label: {
+                        Image(systemName: "minus.circle")
+                            .font(.system(size: 20, weight: .regular))
+                            .foregroundColor(.secondary)
+                    }
+                    .buttonStyle(.plain)
                     Text("\(backupRetentionDays) 天")
                         .font(.system(size: 16, weight: .semibold))
-                        .frame(minWidth: 44)
+                        .frame(minWidth: 58)
+                        .multilineTextAlignment(.center)
+                    Button { if backupRetentionDays < 60 { backupRetentionDays += 1 } } label: {
+                        Image(systemName: "plus.circle")
+                            .font(.system(size: 20, weight: .regular))
+                            .foregroundColor(.secondary)
+                    }
+                    .buttonStyle(.plain)
                 }
                 .onChange(of: backupRetentionDays) { _, _ in saveAutoSettings() }
             }
@@ -587,6 +599,7 @@ struct SettingsView: View {
             } else {
                 showMessage = "快速备份失败，请检查存储空间"
             }
+            showAlert = true
         } else {
             if !BackupV5Manager.hasFreeSpace(needed: BackupV5Manager.collectMediaFileEntries().reduce(0) { $0 + (BackupV5Manager.fileSize(at: $1.fileURL)) }) {
                 showMessage = "存储空间不足，全量备份至少需要与照片视频等量的剩余空间"
@@ -1293,143 +1306,3 @@ struct BillTemplateSettingsView: View {
     }
 }
 
-// MARK: - v1.7 查看备份文件（内部浏览组件，v1.11 支持左滑删除 + 二级确认）
-/// 列出全部板块（成交 / 收租 / 包租 / 总备份）的备份文件：文件名 + 板块 + 大小 + 时间。
-/// 与「恢复备份文件」选文件同款内部列表窗口，不跳系统「文件」App。
-struct BackupFileBrowseView: View {
-    @Environment(\.dismiss) private var dismiss
-    @State private var files: [BackupFileEntry] = []
-    @State private var deleteTarget: BackupFileEntry? = nil
-    @State private var showDeleteConfirm = false
-    @State private var deleteResultTip: String? = nil
-    private let backupManager = DataBackupManager.shared
-
-    var body: some View {
-        NavigationStack {
-            Group {
-                if files.isEmpty {
-                    VStack(spacing: 12) {
-                        Image(systemName: "tray")
-                            .font(.system(size: 44))
-                            .foregroundColor(.secondary)
-                        Text("还没有备份文件")
-                            .font(.headline)
-                        Text("在「备份租房数据」里选择板块并备份后，文件会出现在这里")
-                            .font(.footnote)
-                            .foregroundColor(.secondary)
-                            .multilineTextAlignment(.center)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else {
-                    List {
-                        Section("全部备份文件") {
-                            ForEach(files) { file in
-                                VStack(alignment: .leading, spacing: 4) {
-                                    HStack {
-                                        Text(file.name)
-                                            .font(.subheadline.weight(.medium))
-                                            .lineLimit(1)
-                                        Spacer()
-                                        Text(file.sizeText)
-                                            .font(.footnote)
-                                            .foregroundColor(.secondary)
-                                    }
-                                    Text("\(file.typeLabel) · \(file.dateText)")
-                                        .font(.footnote)
-                                        .foregroundColor(.secondary)
-                                }
-                                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                                    Button(role: .destructive) {
-                                        deleteTarget = file
-                                        showDeleteConfirm = true
-                                    } label: {
-                                        Label("删除", systemImage: "trash")
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            .navigationTitle("查看备份文件")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("关闭") { dismiss() }
-                }
-            }
-            .confirmationDialog(
-                "删除备份文件？",
-                isPresented: $showDeleteConfirm,
-                titleVisibility: .visible,
-                presenting: deleteTarget
-            ) { file in
-                Button("删除", role: .destructive) { performDelete(file) }
-                Button("取消", role: .cancel) {}
-            } message: { file in
-                Text("「\(file.name)」（\(file.typeLabel)）将被永久删除，删除后无法恢复。")
-            }
-            .alert("删除备份文件", isPresented: Binding(
-                get: { deleteResultTip != nil },
-                set: { if !$0 { deleteResultTip = nil } }
-            )) {
-                Button("好", role: .cancel) {}
-            } message: {
-                Text(deleteResultTip ?? "")
-            }
-            .onAppear(perform: loadFiles)
-        }
-    }
-
-    private func loadFiles() {
-        var entries: [BackupFileEntry] = []
-        let types: [(DataBackupManager.BackupType, String)] = [
-            (.deals, "成交备份"),
-            (.properties, "收租备份"),
-            (.payouts, "包租备份"),
-            (.total, "总备份")
-        ]
-        for (type, label) in types {
-            for url in backupManager.listBackups(in: type) {
-                let size = (try? backupManager.backupFileSize(at: url, type: type)) ?? 0
-                let date = (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
-                entries.append(BackupFileEntry(
-                    name: url.lastPathComponent,
-                    typeLabel: label,
-                    sizeText: ByteCountFormatter.string(fromByteCount: size, countStyle: .file),
-                    dateText: Self.dateFormatter.string(from: date),
-                    url: url,
-                    type: type
-                ))
-            }
-        }
-        entries.sort { $0.dateText > $1.dateText }
-        files = entries
-    }
-
-    private func performDelete(_ file: BackupFileEntry) {
-        if backupManager.deleteBackup(file.url, type: file.type) {
-            deleteResultTip = "已删除「\(file.name)」"
-            loadFiles()
-        } else {
-            deleteResultTip = "删除失败，请检查文件权限后重试"
-        }
-    }
-
-    private static let dateFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "yyyy-MM-dd HH:mm"
-        f.locale = Locale(identifier: "zh_CN")
-        return f
-    }()
-}
-
-struct BackupFileEntry: Identifiable {
-    let id = UUID()
-    let name: String
-    let typeLabel: String
-    let sizeText: String
-    let dateText: String
-    let url: URL
-    let type: DataBackupManager.BackupType
-}

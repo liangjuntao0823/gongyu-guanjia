@@ -98,6 +98,15 @@ func houseDocumentsSizeText() -> String {
 /// 不再静默提示「已保存」；同时密钥写入失败也会明确报出。
 // MARK: - COS 配置备份 / 恢复（v1.33 剪贴板版 → v1.34 文件版）
 
+/// v1.13 需求16：COS 配置备份统一存放目录 Documents/备份/CosConfig/（不再散在「备份」根目录）
+enum CosConfigStore {
+    static func directory() -> URL {
+        let dir = DataRoot.url().appendingPathComponent("CosConfig", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+}
+
 /// 把钥匙串里的 COS 配置导出为 JSON（v1.34 改为生成「桶名_地域_日期.json」文件由用户选择位置保存），
 /// 换机 / 重装 / 误改后可从备份文件一键恢复。配置含密钥，备份文件请妥善保管。
 enum CosConfigBackup {
@@ -392,17 +401,18 @@ struct CosConfigView: View {
         return "\(safeBucket)_\(safeRegion)_\(df.string(from: Date())).json"
     }
 
-    /// 备份：生成 JSON 文件并直接写入「备份」子文件夹（Documents/备份/<桶名_地域_日期.json>），
+    /// 备份：生成 JSON 文件并直接写入「备份/CosConfig」子文件夹（Documents/备份/CosConfig/<桶名_地域_日期.json>），
     /// v1.35：不再弹出文件导出器（避免 iOS 上偶发空白面板）；备份文件随整个「备份」文件夹一起备份
+    /// v1.13 需求16：配置备份收拢到 备份/CosConfig/ 子文件夹（根目录只留「备份」文件夹）
     private func prepareBackupFile() {
         guard let json = CosConfigBackup.exportJSON() else {
             savedTip = "当前没有完整配置可备份，请先填写存储桶 / 地域 / SecretId / SecretKey 并保存"
             return
         }
-        let target = DataRoot.url().appendingPathComponent(backupFileName)
+        let target = CosConfigStore.directory().appendingPathComponent(backupFileName)
         do {
             try json.data(using: .utf8)?.write(to: target, options: .atomic)
-            savedTip = "配置备份成功 ✅\n文件已生成到：文件 App → 我的 iPhone → 公寓管家 → 备份\n\(backupFileName)\n（随「备份」文件夹一起拷贝/共享即可留底）"
+            savedTip = "配置备份成功 ✅\n文件已生成到：文件 App → 我的 iPhone → 公寓管家 → 备份 → CosConfig\n\(backupFileName)\n（随「备份」文件夹一起拷贝/共享即可留底）"
         } catch {
             savedTip = "生成备份文件失败：\(error.localizedDescription)"
         }
@@ -558,16 +568,23 @@ struct ConfigRestoreListView: View {
         }
     }
 
-    /// 列出「备份」文件夹内的 .json 文件，按文件名（含日期）倒序，最新的在最上面
+    /// 列出「备份/CosConfig」文件夹内的 .json 文件（v1.13 需求16：配置备份收拢到子文件夹），
+    /// 兼容旧位置「备份」根目录残留文件（启动迁移未执行完的场景），按文件名（含日期）倒序，最新的在最上面
     private func loadFiles() {
         let fm = FileManager.default
-        guard let items = try? fm.contentsOfDirectory(
-            at: DataRoot.url(),
-            includingPropertiesForKeys: [.fileSizeKey],
-            options: [.skipsHiddenFiles]
-        ) else { return }
-        files = items
-            .filter { $0.pathExtension.lowercased() == "json" }
+        var collected: [URL] = []
+        for dir in [CosConfigStore.directory(), DataRoot.url()] {
+            guard let items = try? fm.contentsOfDirectory(
+                at: dir,
+                includingPropertiesForKeys: [.fileSizeKey],
+                options: [.skipsHiddenFiles]
+            ) else { continue }
+            collected += items.filter { $0.pathExtension.lowercased() == "json" }
+        }
+        // 去重（同路径只保留一次）
+        var seen = Set<String>()
+        files = collected
+            .filter { seen.insert($0.path).inserted }
             .sorted { $0.lastPathComponent > $1.lastPathComponent }
     }
 
@@ -665,21 +682,25 @@ struct CosBackupBrowseView: View {
         }
     }
 
+    /// v1.13 需求16：配置备份文件收拢在 备份/CosConfig/；兼容扫描旧位置（备份/ 根目录残留 json）
     private func loadFiles() {
-        let dir = DataRoot.url()
-        let names = (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []
         var entries: [ConfigBackupFileEntry] = []
-        for name in names where name.hasSuffix(".json") {
-            let url = dir.appendingPathComponent(name)
-            let attrs = try? FileManager.default.attributesOfItem(atPath: url.path)
-            let size = (attrs?[.size] as? NSNumber)?.int64Value ?? 0
-            let date = attrs?[.modificationDate] as? Date ?? .distantPast
-            entries.append(ConfigBackupFileEntry(
-                name: name,
-                sizeText: ByteCountFormatter.string(fromByteCount: size, countStyle: .file),
-                dateText: Self.dateFormatter.string(from: date),
-                url: url
-            ))
+        for dir in [CosConfigStore.directory(), DataRoot.url()] {
+            let names = (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []
+            for name in names where name.hasSuffix(".json") {
+                let url = dir.appendingPathComponent(name)
+                // 同一文件已收录（如迁移未完成导致的重复），跳过
+                if entries.contains(where: { $0.url.path == url.path }) { continue }
+                let attrs = try? FileManager.default.attributesOfItem(atPath: url.path)
+                let size = (attrs?[.size] as? NSNumber)?.int64Value ?? 0
+                let date = attrs?[.modificationDate] as? Date ?? .distantPast
+                entries.append(ConfigBackupFileEntry(
+                    name: name,
+                    sizeText: ByteCountFormatter.string(fromByteCount: size, countStyle: .file),
+                    dateText: Self.dateFormatter.string(from: date),
+                    url: url
+                ))
+            }
         }
         entries.sort { $0.dateText > $1.dateText }
         files = entries

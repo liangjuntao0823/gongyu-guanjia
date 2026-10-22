@@ -188,7 +188,13 @@ final class CloudBackupService {
     }
 
     /// 下载云端备份 zip 到本地临时文件（流式 downloadTask），返回文件 URL
+    /// v1.13 需求15：下载前先检查本地是否已有该备份（同名 zip 或 下载_ 前缀副本）→ 有则直接返回本地文件，不重复下载
+    /// v1.13 需求12：下载完成后逐文件 CRC 核对（防损坏/不完整），失败删除临时文件并抛错
     static func downloadBackup(name: String, config: CosConfig) async throws -> URL {
+        // 需求15：本地已有同名文件 → 直接复用本地，无需下载
+        if let existing = localCopyIfExists(name: name) {
+            return existing
+        }
         let remotePath = cloudBackupPrefix + name
         guard let url = try? CosUploader.presignedGetURL(for: remotePath, expires: 3600, config: config) else {
             throw CosUploader.CosError.invalidConfig
@@ -204,7 +210,56 @@ final class CloudBackupService {
         let dest = BackupV5Manager.backupsDirectory.appendingPathComponent("下载_" + name)
         try? FileManager.default.removeItem(at: dest)
         try FileManager.default.moveItem(at: tempURL, to: dest)
+        // 需求12：逐文件 CRC 核对（STORE 模式 zip，中央目录 crc32 与实际数据段比对）
+        do {
+            _ = try ZipStore.verifyAllEntriesCRC(at: dest)
+        } catch {
+            try? FileManager.default.removeItem(at: dest)
+            throw error
+        }
         return dest
+    }
+
+    /// v1.13 需求15：检查本地 Backups 目录是否已有该云端备份的副本
+    /// 命中规则：①同名 zip（本地快速/全量原文件）；②「下载_」+ 名（之前从云端下载过的副本）
+    static func localCopyIfExists(name: String) -> URL? {
+        let dir = BackupV5Manager.backupsDirectory
+        let sameName = dir.appendingPathComponent(name)
+        if FileManager.default.fileExists(atPath: sameName.path) {
+            return sameName
+        }
+        let downloaded = dir.appendingPathComponent("下载_" + name)
+        if FileManager.default.fileExists(atPath: downloaded.path) {
+            return downloaded
+        }
+        return nil
+    }
+
+    /// v1.13 需求7：实时刷新桶内备份清单并同步到本地权威记录。
+    /// 以 COS ListObjects 为准重建 cloudRecords（剔除媒体镜像 backups/media/ 前缀）：
+    /// 桶里真实存在的 → 记录（含本机未上传过的其他设备备份）；桶里已删除的 → 本地记录同步移除。
+    /// isAuto 判定：文件名含「_自动」后缀（与 BackupV5Manager.fileName 命名一致）。
+    static func refreshCloudRecords(config: CosConfig) async throws {
+        // delimiter="/" 只取备份根目录对象，跳过 backups/media/ 媒体镜像（海量对象）
+        let objects = try await CosUploader.listObjects(prefix: cloudBackupPrefix, delimiter: "/", config: config)
+        // 只取备份 zip（排除 backups/media/ 媒体镜像目录）
+        var records: [CloudRecord] = []
+        for obj in objects {
+            let key = obj.name
+            guard key.hasPrefix(cloudBackupPrefix), !key.hasPrefix(cloudMediaPrefix) else { continue }
+            let fileName = String(key.dropFirst(cloudBackupPrefix.count))
+            guard fileName.hasSuffix(".zip") else { continue }
+            records.append(CloudRecord(
+                name: fileName,
+                size: obj.size,
+                date: obj.date == .distantPast ? Date() : obj.date,
+                isAuto: fileName.contains("_自动")
+            ))
+        }
+        records.sort { $0.date > $1.date }
+        if let data = try? JSONEncoder().encode(records) {
+            UserDefaults.standard.set(data, forKey: recordsKey)
+        }
     }
 
     /// 删除云端备份对象
@@ -222,11 +277,60 @@ final class CloudBackupService {
         removeCloudRecord(name: name)
     }
 
-    // MARK: - 云端保留（快速_ 自动备份保留最近 10 份）
+    // MARK: - v1.13 需求19：删除房源在桶里的整个文件夹 h/<roomKey>/
 
+    /// 列出一套房源在桶里 h/<roomKey>/ 下的全部对象（含封面、视频首帧、分享页等，不含 backups/ 前缀）
+    static func listHouseRemoteObjects(roomKey: String, config: CosConfig) async throws -> [String] {
+        let prefix = "h/\(roomKey)/"
+        let items = try await CosUploader.listObjects(prefix: prefix, delimiter: nil, config: config)
+        return items.map { $0.name }
+    }
+
+    /// 删除单个云端对象（h/<roomKey>/ 下用；403/404 不视为失败——对象可能已被手动删过）
+    static func deleteRemoteObject(name: String, config: CosConfig) async throws {
+        guard let url = try? CosUploader.presignedURL(for: name, method: "DELETE", expires: 600, headers: [], config: config) else {
+            throw CosUploader.CosError.invalidConfig
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "DELETE"
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            // 404 = 对象不存在（已被删过/未上传过），视为已删除成功；其余错误抛给上层
+            if let code = http.statusCode, code == 404 {
+                return
+            }
+            throw CosUploader.CosError.uploadFailed("云端删除失败（HTTP \(http.statusCode)）" + CosUploader.extractCosError(from: data))
+        }
+    }
+
+    /// 删除房源在桶里的整个文件夹（h/<roomKey>/ 下全部对象）。
+    /// 无云端配置或桶里无该房源的文件夹时静默跳过（不打断本地删除）；
+    /// 单个对象删除失败只记日志，不阻塞其余对象与本地删除。
+    static func deleteHouseRemoteFolder(roomKey: String, config: CosConfig?) async {
+        guard let config = config ?? CosConfig.load(), config.isValid else { return }
+        do {
+            let objects = try await listHouseRemoteObjects(roomKey: roomKey, config: config)
+            guard !objects.isEmpty else { return }   // 桶里没有该房源的文件夹
+            for name in objects {
+                do {
+                    try await deleteRemoteObject(name: name, config: config)
+                } catch {
+                    BackupLogStore.log(category: "删除", action: "云端删除对象", result: "失败", detail: "\(name)：\(error.localizedDescription)")
+                }
+            }
+            BackupLogStore.log(category: "删除", action: "云端删除房源文件夹", result: "成功", detail: "h/\(roomKey)/ 共 \(objects.count) 个对象")
+        } catch {
+            BackupLogStore.log(category: "删除", action: "云端删除房源文件夹", result: "失败", detail: "h/\(roomKey)/：\(error.localizedDescription)")
+        }
+    }
+
+    // MARK: - 云端保留（快速_ 且文件名带 _自动 的自动备份保留最近 10 份）
+
+    /// v1.13 需求10：只清理「文件名含 _自动 后缀」的自动备份，保留最近 10 份；
+    /// 手动备份（文件名不带 _自动，含手动快速备份与手动全量上传）一律不清理。
     static func enforceCloudRetention(config: CosConfig? = nil) async {
         guard let config = config ?? CosConfig.load(), config.isValid else { return }
-        var records = cloudRecords().filter { $0.isAuto && $0.name.hasPrefix("快速_") }
+        var records = cloudRecords().filter { $0.name.hasPrefix("快速_") && $0.name.contains("_自动") }
         records.sort { $0.date > $1.date }
         guard records.count > 10 else { return }
         for record in records.dropFirst(10) {

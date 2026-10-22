@@ -27,9 +27,11 @@ struct HouseDetailView: View {
     @State private var selectedMediaNames = Set<String>()   // 用唯一 fileName 标记选中
     @State private var saveTip: String?
     @State private var isSharing = false           // 生成分享卡片中
+    @State private var shareProgress = 0.0         // v1.13 需求13：上传百分比进度
     @State private var shareError: String?
-    @State private var showCopySheet = false       // v1.12：一键生成朋友圈/小红书文案
-    @State private var generatedCopy = ""
+    // v1.13 需求11：转发朋友圈——有视频+图片时弹二级菜单选「图片 / 视频」
+    @State private var showForwardMenu = false
+    @State private var isForwarding = false
 
     var body: some View {
         ScrollView {
@@ -55,8 +57,13 @@ struct HouseDetailView: View {
             // 注意：UIActivityViewController 不能加 presentationDetents，否则弹分享面板会闪退
             HouseShareSheet(items: shareItems)
         }
-        .sheet(isPresented: $showCopySheet) {
-            HouseCopySheet(text: generatedCopy)
+        .confirmationDialog("转发到朋友圈", isPresented: $showForwardMenu, titleVisibility: .visible) {
+            // v1.13 需求11：有视频+图片时选择转发内容；图片自动取前 9 张（不足取全部）
+            Button("分享图片（前 9 张）") { forwardImages() }
+            Button("分享视频") { forwardVideos() }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("这套房源同时有照片和视频，选择要转发到朋友圈的内容。")
         }
         .confirmationDialog("切换房源状态", isPresented: $showStatusConfirm, titleVisibility: .visible) {
             if house.status == .available {
@@ -90,11 +97,15 @@ struct HouseDetailView: View {
                 ZStack {
                     Color.black.opacity(0.35).ignoresSafeArea()
                     VStack(spacing: 12) {
-                        ProgressView()
+                        ProgressView(value: shareProgress)
+                            .progressViewStyle(.linear)
                             .tint(.white)
-                        Text("正在生成分享卡片，上传照片和视频…")
+                        Text("正在上传照片和视频…")
                             .font(.footnote)
                             .foregroundColor(.white)
+                        Text("\(Int(shareProgress * 100))%")
+                            .font(.caption)
+                            .foregroundColor(.white.opacity(0.85))
                     }
                     .padding(20)
                     .background(Color.black.opacity(0.6))
@@ -410,16 +421,16 @@ struct HouseDetailView: View {
             }
             .buttonStyle(.bordered)
 
-            // v1.12：一键生成朋友圈/小红书文案
+            // v1.13 需求11：一键转发朋友圈（图片自动取前 9 张；有视频+图片时弹二级菜单选择）
             Button {
-                generatedCopy = buildCopyText()
-                showCopySheet = true
+                forwardToMoments()
             } label: {
-                Label("生成朋友圈/小红书文案", systemImage: "text.quote")
+                Label("转发朋友圈", systemImage: "heart.circle")
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 4)
             }
             .buttonStyle(.bordered)
+            .disabled(isForwarding)
 
             Button(role: .destructive) {
                 showDeleteConfirm = true
@@ -493,9 +504,12 @@ struct HouseDetailView: View {
             phone: profile.phone
         )
         isSharing = true
+        shareProgress = 0
         Task {
             do {
-                let url = try await CosUploader.shareCard(mediaFiles: files, roomKey: roomKey, info: info, mode: mode, config: config)
+                let url = try await CosUploader.shareCard(mediaFiles: files, roomKey: roomKey, info: info, mode: mode, config: config) { p in
+                    Task { @MainActor in self.shareProgress = p }
+                }
                 await MainActor.run {
                     isSharing = false
                     shareItems = [url]
@@ -510,70 +524,59 @@ struct HouseDetailView: View {
         }
     }
 
-    // MARK: - v1.12：一键生成朋友圈/小红书文案
+    // MARK: - v1.13 需求11：转发朋友圈
 
-    private func buildCopyText() -> String {
-        let statusText = house.status == .available ? "待租" : "已租"
-        let floorText = house.floorNumber > 0 ? "\(house.floorNumber)层" : ""
-        let roomDesc = "\(house.towerLabel)\(house.roomNo)（\(floorText)）"
-        let mediaCount = house.mediaItems.count
-        let hasMediaText = mediaCount > 0 ? "（本房配有实拍照片/视频）" : ""
-        let remarkText = house.remark.isEmpty ? "" : "\n房源亮点：\(house.remark)"
-        let passwordText = house.password.isEmpty ? "" : "\n看房密码：\(house.password)"
-
-        // 朋友圈版
-        var pyq = "🏠 出租 | 米兰公馆 \(roomDesc)\n"
-        pyq += "💰 租金：\(house.price)元/月\n"
-        pyq += "📐 户型：\(house.layout)\n"
-        pyq += "👤 状态：\(statusText)\(hasMediaText)\n"
-        pyq += remarkText
-        pyq += passwordText
-        pyq += "\n\n📲 感兴趣欢迎随时联系看房！"
-
-        // 小红书版
-        var xhs = "🏠 米兰公馆 \(roomDesc) 出租中\n"
-        xhs += "📍 佛山顺德 · 利保米兰公馆\n"
-        xhs += "💴 \(house.price)元/月 | 户型：\(house.layout)\n"
-        xhs += "✅ \(statusText)\(hasMediaText)\n"
-        xhs += remarkText
-        xhs += "\n\n⭐ 房源真实，实拍图视频可看\n👉 有意私聊，欢迎随时看房"
-
-        return "【朋友圈】\n\(pyq)\n\n【小红书】\n\(xhs)"
+    /// 转发朋友圈入口：有照片+视频 → 弹二级菜单选择；只有照片 → 直接分享前 9 张图片；只有视频 → 直接分享视频
+    private func forwardToMoments() {
+        guard !house.mediaItems.isEmpty else {
+            shareError = "这套房源还没有照片或视频，先编辑添加素材再转发"
+            return
+        }
+        let hasImages = house.photos.count > 0
+        let hasVideos = house.videos.count > 0
+        if hasImages && hasVideos {
+            showForwardMenu = true
+        } else if hasImages {
+            forwardImages()
+        } else {
+            forwardVideos()
+        }
     }
-}
 
-// MARK: - 朋友圈/小红书文案展示
+    /// 转发图片：自动取前 9 张（不足 9 张取全部），走系统分享面板
+    private func forwardImages() {
+        let images = house.photos.prefix(9)
+        guard !images.isEmpty else {
+            shareError = "这套房源没有照片"
+            return
+        }
+        let urls = images.map { MediaStore.url(for: $0.fileName, roomKey: house.mediaRoomKey) }
+            .filter { FileManager.default.fileExists(atPath: $0.path) }
+        guard !urls.isEmpty else {
+            shareError = "照片文件不存在，请重新添加"
+            return
+        }
+        isForwarding = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            isForwarding = false
+            shareItems = urls
+            showShare = true
+        }
+    }
 
-struct HouseCopySheet: View {
-    let text: String
-    @Environment(\.dismiss) private var dismiss
-    @State private var copied = false
-
-    var body: some View {
-        NavigationStack {
-            ScrollView {
-                Text(text)
-                    .font(.body)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(16)
-            }
-            .navigationTitle("文案")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("关闭") { dismiss() }
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        UIPasteboard.general.string = text
-                        copied = true
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { copied = false }
-                    } label: {
-                        Text(copied ? "已复制 ✓" : "复制")
-                    }
-                }
-            }
+    /// 转发视频：分享全部视频文件，走系统分享面板
+    private func forwardVideos() {
+        let urls = house.videos.map { MediaStore.url(for: $0.fileName, roomKey: house.mediaRoomKey) }
+            .filter { FileManager.default.fileExists(atPath: $0.path) }
+        guard !urls.isEmpty else {
+            shareError = "视频文件不存在，请重新添加"
+            return
+        }
+        isForwarding = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            isForwarding = false
+            shareItems = urls
+            showShare = true
         }
     }
 }

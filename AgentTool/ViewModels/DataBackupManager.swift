@@ -329,6 +329,16 @@ class DataBackupManager {
         case payouts
     }
 
+    /// v1.13：异步导入（不阻塞主线程）。原 importAllData 的完成回调走 DispatchQueue.main.async，
+    /// 若调用方在主线程 sem.wait() 同步等待会死锁（恢复卡死在 38% 的根因），此方法用 withCheckedContinuation 正确等待。
+    func importAllDataAsync(from data: Data, modelContext: ModelContext, scope: ImportScope = .all) async -> (Bool, String) {
+        await withCheckedContinuation { continuation in
+            importAllData(from: data, modelContext: modelContext, scope: scope) { ok, message in
+                continuation.resume(returning: (ok, message))
+            }
+        }
+    }
+
     func importAllData(from data: Data, modelContext: ModelContext, scope: ImportScope = .all, completion: @escaping (Bool, String) -> Void) {
         // P2-13: 文件大小限制
         if data.count > maxBackupFileSize {
@@ -640,9 +650,57 @@ class DataBackupManager {
     }
 
     // MARK: - 备份文件管理
+    /// v1.13 需求16：旧版分板块 JSON 统一收纳到 Documents/备份/旧版备份/<板块>/（不再在根目录生成 成交备份/收租备份/… 文件夹）
     func backupFolderURL(for type: BackupType) -> URL {
-        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        return docs.appendingPathComponent(type.rawValue, isDirectory: true)
+        let legacyRoot = DataRoot.url().appendingPathComponent("旧版备份", isDirectory: true)
+        return legacyRoot.appendingPathComponent(type.rawValue, isDirectory: true)
+    }
+
+    /// v1.13 需求16：一次性目录迁移（App 启动时调用，幂等，可重复执行不产生重复文件）
+    /// ① Documents 根目录的旧分区备份文件夹（成交备份/收租备份/包租备份/总备份）
+    ///    → 整体迁入 备份/旧版备份/<板块>/；原目录内若只剩 JSON（已全部迁走）则删除空目录
+    /// ② 备份/ 根目录下的 COS 配置 json → 备份/CosConfig/
+    static func migrateLegacyDirectories() {
+        let fm = FileManager.default
+        let docs = fm.urls(for: .documentDirectory, in: .userDomainMask)[0]
+
+        // ① 旧分区备份：Documents/<板块>/ → 备份/旧版备份/<板块>/
+        for type in [BackupType.deals, .properties, .payouts, .total] {
+            let legacyDir = docs.appendingPathComponent(type.rawValue, isDirectory: true)
+            guard fm.fileExists(atPath: legacyDir.path) else { continue }
+            let destDir = backupFolderURL(for: type)
+            try? fm.createDirectory(at: destDir, withIntermediateDirectories: true)
+            if let names = try? fm.contentsOfDirectory(atPath: legacyDir.path) {
+                for name in names where name.lowercased().hasSuffix(".json") {
+                    let src = legacyDir.appendingPathComponent(name)
+                    let dst = destDir.appendingPathComponent(name)
+                    if fm.fileExists(atPath: dst.path) {
+                        try? fm.removeItem(at: src)
+                    } else {
+                        try? fm.moveItem(at: src, to: dst)
+                    }
+                }
+            }
+            // 目录已空则删除（残留非 JSON 文件时保留原目录，避免误删用户文件）
+            if let remain = try? fm.contentsOfDirectory(atPath: legacyDir.path), remain.isEmpty {
+                try? fm.removeItem(at: legacyDir)
+            }
+        }
+
+        // ② COS 配置备份 json：备份/ 根目录 → 备份/CosConfig/
+        let cosDir = DataRoot.url().appendingPathComponent("CosConfig", isDirectory: true)
+        try? fm.createDirectory(at: cosDir, withIntermediateDirectories: true)
+        if let names = try? fm.contentsOfDirectory(atPath: DataRoot.url().path) {
+            for name in names where name.lowercased().hasSuffix(".json") {
+                let src = DataRoot.url().appendingPathComponent(name)
+                let dst = cosDir.appendingPathComponent(name)
+                if fm.fileExists(atPath: dst.path) {
+                    try? fm.removeItem(at: src)
+                } else {
+                    try? fm.moveItem(at: src, to: dst)
+                }
+            }
+        }
     }
 
     func listBackups(in type: BackupType) -> [URL] {

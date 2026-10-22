@@ -423,17 +423,8 @@ final class BackupV5Manager {
             try await MainActor.run {
                 try clearAllMainData(mainContext: mainContext)
             }
-            let importOK = await MainActor.run { () -> Bool in
-                let dm = DataBackupManager()
-                var result = false
-                let sem = DispatchSemaphore(value: 0)
-                dm.importAllData(from: businessData, modelContext: mainContext, scope: .all) { ok, _ in
-                    result = ok
-                    sem.signal()
-                }
-                sem.wait()
-                return result
-            }
+            let dm = DataBackupManager()
+            let (importOK, _) = await dm.importAllDataAsync(from: businessData, modelContext: mainContext, scope: .all)
             guard importOK else { throw BackupV5Error.restoreFailed("账本数据导入失败") }
             phaseProgress(0.55)
 
@@ -498,32 +489,14 @@ final class BackupV5Manager {
             throw BackupV5Error.restoreFailed("安全快照创建失败：\(error.localizedDescription)")
         }
         do {
-            let importOK = await MainActor.run { () -> Bool in
-                let dm = DataBackupManager()
-                var result = false
-                let sem = DispatchSemaphore(value: 0)
-                dm.importAllData(from: data, modelContext: mainContext, scope: scope) { ok, _ in
-                    result = ok
-                    sem.signal()
-                }
-                sem.wait()
-                return result
-            }
+            let dm = DataBackupManager()
+            let (importOK, _) = await dm.importAllDataAsync(from: data, modelContext: mainContext, scope: scope)
             guard importOK else { throw BackupV5Error.restoreFailed("旧版备份导入失败") }
         } catch {
             // 回滚经营数据
             if let before = try? Data(contentsOf: preDir.appendingPathComponent("business_before.json")) {
-                _ = await MainActor.run { () -> Bool in
-                    let dm = DataBackupManager()
-                    var result = false
-                    let sem = DispatchSemaphore(value: 0)
-                    dm.importAllData(from: before, modelContext: mainContext, scope: .all) { ok, _ in
-                        result = ok
-                        sem.signal()
-                    }
-                    sem.wait()
-                    return result
-                }
+                let dm = DataBackupManager()
+                _ = await dm.importAllDataAsync(from: before, modelContext: mainContext, scope: .all)
             }
             try? FileManager.default.removeItem(at: preDir)
             throw error
@@ -613,17 +586,8 @@ final class BackupV5Manager {
             try await MainActor.run {
                 try clearAllMainData(mainContext: mainContext)
             }
-            _ = await MainActor.run { () -> Bool in
-                let dm = DataBackupManager()
-                var result = false
-                let sem = DispatchSemaphore(value: 0)
-                dm.importAllData(from: before, modelContext: mainContext, scope: .all) { ok, _ in
-                    result = ok
-                    sem.signal()
-                }
-                sem.wait()
-                return result
-            }
+            let dm = DataBackupManager()
+            _ = await dm.importAllDataAsync(from: before, modelContext: mainContext, scope: .all)
         }
         // 房源数据
         if let houseContext = houseContext, let before = try? Data(contentsOf: preDir.appendingPathComponent("houses_before.json")) {

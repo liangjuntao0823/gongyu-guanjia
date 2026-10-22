@@ -104,12 +104,18 @@ struct TextRow: View {
     @Binding var text: String
     var keyboard: UIKeyboardType = .default
     var width: CGFloat = 170
+    var allowSpaces = true   // v1.13 需求18：房号等不允许空格的行传 false，输入时自动剥离空格
 
     var body: some View {
         HStack {
             Text(label).foregroundColor(.themeText)
             Spacer()
-            TextField("请输入", text: $text)
+            TextField("请输入", text: Binding(
+                get: { text },
+                set: { newValue in
+                    text = allowSpaces ? newValue : newValue.replacingOccurrences(of: " ", with: "")
+                }
+            ))
                 .keyboardType(keyboard)
                 .multilineTextAlignment(.trailing)
                 .foregroundColor(.themeText)
@@ -676,173 +682,6 @@ struct SwipeActionRow<Content: View>: View {
         .clipped()
     }
 }
-
-// MARK: - 恢复数据视图
-struct RestoreBackupView: View {
-    let type: DataBackupManager.BackupType
-    var onComplete: ((Bool) -> Void)?
-
-    @Environment(\.modelContext) private var modelContext
-    @Environment(\.dismiss) private var dismiss
-    @State private var backupFiles: [URL] = []
-    @State private var isRestoring = false
-    @State private var restoreMessage = ""
-    @State private var showRestoreAlert = false
-    @State private var restoreSuccess = false
-    @State private var pendingRestoreURL: URL?
-    @State private var showRestoreConfirm = false
-
-    private let backupManager = DataBackupManager.shared
-
-    var body: some View {
-        NavigationView {
-            ZStack {
-                Color.themeBg.ignoresSafeArea()
-                VStack {
-                    if isRestoring {
-                        ProgressView(restoreMessage)
-                            .padding()
-                    } else if backupFiles.isEmpty {
-                        VStack(spacing: 12) {
-                            Image(systemName: "folder.badge.questionmark")
-                                .font(.system(size: 48))
-                                .foregroundColor(.themeText3)
-                            Text("暂无备份文件")
-                                .foregroundColor(.themeText2)
-                            Text("请先在设置中导出备份")
-                                .font(.system(size: 13))
-                                .foregroundColor(.themeText3)
-                        }
-                        .padding(.top, 80)
-                    } else {
-                        List {
-                            ForEach(backupFiles, id: \.self) { url in
-                                Button {
-                                    pendingRestoreURL = url
-                                    showRestoreConfirm = true
-                                } label: {
-                                    HStack {
-                                        Image(systemName: "doc.text")
-                                            .foregroundColor(.themeAccent)
-                                        VStack(alignment: .leading, spacing: 2) {
-                                            Text(url.deletingPathExtension().lastPathComponent)
-                                                .foregroundColor(.themeText)
-                                                .lineLimit(1)
-                                            Text(fileDate(url))
-                                                .font(.system(size: 12))
-                                                .foregroundColor(.themeText3)
-                                        }
-                                        Spacer()
-                                        Image(systemName: "chevron.right")
-                                            .foregroundColor(.themeText3)
-                                    }
-                                    .padding(.vertical, 4)
-                                }
-                                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                    Button(role: .destructive) {
-                                        deleteBackup(url)
-                                    } label: {
-                                        Label("删除", systemImage: "trash")
-                                    }
-                                }
-                            }
-                        }
-                        .listStyle(.plain)
-                    }
-                }
-            }
-            .navigationTitle("恢复\(type.rawValue)")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("关闭") { dismiss() }
-                        .foregroundColor(.themeAccent)
-                }
-            }
-            .onAppear { loadBackups() }
-            .alert("确认恢复", isPresented: $showRestoreConfirm) {
-                Button("取消", role: .cancel) { pendingRestoreURL = nil }
-                Button("确认恢复", role: .destructive) {
-                    if let url = pendingRestoreURL {
-                        restoreFromFile(url)
-                    }
-                    pendingRestoreURL = nil
-                }
-            } message: {
-                Text("将用所选备份覆盖当前\(type.rawValue)数据，此操作不可撤销。建议先备份当前数据再恢复。")
-            }
-            .alert(restoreSuccess ? "恢复成功" : "恢复失败", isPresented: $showRestoreAlert) {
-                Button("确定") {
-                    if restoreSuccess {
-                        dismiss()
-                        onComplete?(true)
-                    }
-                }
-            } message: {
-                Text(restoreMessage)
-            }
-        }
-    }
-
-    private func loadBackups() {
-        backupFiles = backupManager.listBackups(in: type)
-    }
-
-    private func fileDate(_ url: URL) -> String {
-        if let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
-           let date = attrs[.modificationDate] as? Date {
-            let df = DateFormatter()
-            df.locale = Locale(identifier: "zh_CN")
-            df.dateFormat = "yyyy-MM-dd HH:mm"
-            return df.string(from: date)
-        }
-        return ""
-    }
-
-    private func restoreFromFile(_ url: URL) {
-        do {
-            let size = try backupManager.backupFileSize(at: url, type: type)
-            guard size <= 10 * 1024 * 1024 else {
-                throw NSError(domain: "Backup", code: 1, userInfo: [NSLocalizedDescriptionKey: "备份文件过大（超过10MB）"])
-            }
-            let data = try Data(contentsOf: url, options: [.mappedIfSafe])
-            isRestoring = true
-            restoreMessage = "正在恢复数据..."
-
-            let scope: DataBackupManager.ImportScope
-            switch type {
-            case .deals: scope = .deals
-            case .properties: scope = .properties
-            case .payouts: scope = .payouts
-            case .total: scope = .all
-            }
-
-            // 导入管理器会在独立 SwiftData 上下文中后台恢复，完成回调在主线程更新界面。
-            backupManager.importAllData(from: data, modelContext: modelContext, scope: scope) { success, message in
-                isRestoring = false
-                restoreSuccess = success
-                restoreMessage = message
-                showRestoreAlert = true
-            }
-        } catch {
-            isRestoring = false
-            restoreSuccess = false
-            restoreMessage = "读取备份失败：\(error.localizedDescription)"
-            showRestoreAlert = true
-        }
-    }
-
-    private func deleteBackup(_ url: URL) {
-        if backupManager.deleteBackup(url, type: type) {
-            loadBackups()
-        } else {
-            restoreSuccess = false
-            restoreMessage = "删除备份失败，请检查文件权限后重试"
-            showRestoreAlert = true
-        }
-    }
-}
-
 
 struct WheelDateTimeField: View {
     let label: String

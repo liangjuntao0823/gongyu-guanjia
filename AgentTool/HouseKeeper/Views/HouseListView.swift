@@ -33,6 +33,7 @@ struct HouseListView: View {
     @State private var currentShareStep: ShareStep? = nil
     @State private var isGenerating = false
     @State private var generateTip = ""
+    @State private var generateProgress = 0.0   // v1.13 需求13：上传百分比进度
     @State private var shareError: String?
     // v1.12：多选模式批量操作——批量已租 / 批量删除（保留原有多选分享逻辑不动）
     @State private var showBatchDeleteConfirm = false
@@ -165,11 +166,15 @@ struct HouseListView: View {
                     ZStack {
                         Color.black.opacity(0.35).ignoresSafeArea()
                         VStack(spacing: 12) {
-                            ProgressView()
+                            ProgressView(value: generateProgress)
+                                .progressViewStyle(.linear)
                                 .tint(.white)
                             Text(generateTip)
                                 .font(.footnote)
                                 .foregroundColor(.white)
+                            Text("\(Int(generateProgress * 100))%")
+                                .font(.caption)
+                                .foregroundColor(.white.opacity(0.85))
                         }
                         .padding(20)
                         .background(Color.black.opacity(0.6))
@@ -617,10 +622,13 @@ struct HouseListView: View {
             phone: profile.phone
         )
         isGenerating = true
-        generateTip = "正在生成分享卡片，上传照片和视频…"
+        generateTip = "正在上传照片和视频…"
+        generateProgress = 0
         Task {
             do {
-                let url = try await CosUploader.shareCard(mediaFiles: files, roomKey: roomKey, info: info, mode: mode, config: config)
+                let url = try await CosUploader.shareCard(mediaFiles: files, roomKey: roomKey, info: info, mode: mode, config: config) { p in
+                    Task { @MainActor in self.generateProgress = p }
+                }
                 await MainActor.run {
                     isGenerating = false
                     shareQueue = [url]
@@ -690,10 +698,13 @@ struct HouseListView: View {
 
         isGenerating = true
         generateTip = "正在生成合集分享卡片（共 \(sortedShareable.count) 套）…"
+        generateProgress = 0
 
         Task {
             do {
-                let url = try await CosUploader.shareCollection(rooms: rooms, mode: mode, config: config)
+                let url = try await CosUploader.shareCollection(rooms: rooms, mode: mode, config: config) { p in
+                    Task { @MainActor in self.generateProgress = p }
+                }
                 await MainActor.run {
                     isGenerating = false
                     shareQueue = [url]

@@ -12,7 +12,6 @@ struct PayoutView: View {
     @State private var payoutToDelete: PayoutRecord?
     @State private var showDeleteConfirm = false
     @State private var exportURL: ExportURL?
-    @State private var showingRestore = false
     @State private var searchText = ""
     @State private var showRefreshTip = false
     @State private var refreshVersion = 0
@@ -215,9 +214,6 @@ struct PayoutView: View {
                     Button { exportTemplate() } label: {
                         Label("导出Excel模板", systemImage: "doc.text")
                     }
-                    Button { showingRestore = true } label: {
-                        Label("恢复数据", systemImage: "square.and.arrow.down")
-                    }
                 } label: {
                     Image(systemName: "ellipsis.circle").foregroundColor(.themeAccent)
                 }
@@ -234,11 +230,6 @@ struct PayoutView: View {
             PayoutDetailView(payout: payout, onSave: refreshPayoutCards)
         }
         .sheet(item: $exportURL) { url in ShareSheet(activityItems: [url.url]) }
-        .sheet(isPresented: $showingRestore) {
-            RestoreBackupView(type: .payouts) { success in
-                showingRestore = false
-            }
-        }
         .alert("删除到回收站", isPresented: $showDeleteConfirm) {
             Button("取消", role: .cancel) { payoutToDelete = nil }
             Button("确定删除", role: .destructive) {
@@ -1045,7 +1036,7 @@ struct AddPayoutView: View {
         NavigationStack {
             Form {
                 Section("基本信息") {
-                    TextRow(label: "房号", text: $roomNumber)
+                    TextRow(label: "房号", text: $roomNumber, allowSpaces: false)
                     TextRow(label: "管理人", text: $manager)
                     Picker("户型", selection: $unitType) { Text("请选择").tag(""); ForEach(unitTypes, id: \.self) { Text($0).tag($0) } }
                 }

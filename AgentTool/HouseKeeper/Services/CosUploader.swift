@@ -191,7 +191,8 @@ enum CosUploader {
     ///   ③H5 图片点击放大后支持左右滑动切换上一张/下一张；④视频不自动播放（点击才播，preload=none）；
     ///   ⑤户型标题去重（户型已含「上/下」时不再重复拼接房号后缀）
     /// 入参全部为值类型（ShareMediaFile / ShareHouseInfo），Task 内不触碰 SwiftData 模型，避免跨线程访问闪退
-    static func shareCard(mediaFiles: [ShareMediaFile], roomKey: String, info: ShareHouseInfo, mode: ShareMode, config: CosConfig) async throws -> URL {
+    /// v1.13 需求13：progress 回调（0~1），按「需上传媒体数 + 固定任务」估算总进度；缓存命中复用链接时直接回调 1.0
+    static func shareCard(mediaFiles: [ShareMediaFile], roomKey: String, info: ShareHouseInfo, mode: ShareMode, config: CosConfig, progress: ((Double) -> Void)? = nil) async throws -> URL {
         guard !mediaFiles.isEmpty else { throw CosError.missingMedia }
         // v1.20：微信渲染卡片必须走自定义域名；没填就不生成链接，直接告诉用户去哪填
         guard !config.customDomain.isEmpty else { throw CosError.customDomainMissing }
@@ -212,6 +213,7 @@ enum CosUploader {
            Set(cached.mediaFiles) == Set(mediaFiles),
            cached.info == info,
            let cachedURL = URL(string: cached.shareURL) {
+            progress?(1.0)
             return cachedURL
         }
 
@@ -223,6 +225,13 @@ enum CosUploader {
            (cached.compressOnShare ?? false) == compressOnShare {
             let cachedSet = Set(cached.mediaFiles)
             toUpload = mediaFiles.filter { !cachedSet.contains($0) }
+        }
+
+        // v1.13 需求13：进度按「需上传任务数」估算——媒体（每项含压缩+上传+可能缩略图）1 项 + 封面 1 项 + 二维码 1 项 + 页面 1 项
+        let totalTasks = max(1, toUpload.count + (mediaFiles.contains { $0.kind == "image" } ? 1 : 0) + (hasQR ? 1 : 0) + 1)
+        var completedTasks = 0
+        func reportProgress(_ taskFraction: Double) {
+            progress?(min(Double(completedTasks) + taskFraction, Double(totalTasks)) / Double(totalTasks))
         }
 
         // 2. 媒体排序（v1.21 模板要求）：视频置顶第一位、图片在后
@@ -259,11 +268,15 @@ enum CosUploader {
                     data = compressed
                     contentType = "image/jpeg"
                 }
-                try await upload(data: data, to: remotePath, contentType: contentType, config: config)
+                try await uploadWithProgress(data: data, to: remotePath, contentType: contentType, config: config) { p in
+                    // 媒体项自身进度占 1 个任务
+                    reportProgress(Double(p))
+                }
                 // v1.25：视频同时上传首帧封面图（几十 KB），页面封面用图片而非视频流
                 if isVideo, let thumbData = makeVideoThumbJPEG(from: url) {
                     try? await upload(data: thumbData, to: "h/\(roomKey)/\(item.name).vthumb.jpg", contentType: "image/jpeg", config: config)
                 }
+                completedTasks += 1
             }
             let absURL = try presignedGetURL(for: remotePath, expires: shareLinkExpires, config: config).absoluteString
             if isVideo {
@@ -282,19 +295,25 @@ enum CosUploader {
            let coverData = makeCoverJPEG(from: MediaStore.url(for: firstImage.name, roomKey: roomKey)) {
             let coverPath = "h/\(roomKey)/cover"
             do {
-                try await upload(data: coverData, to: coverPath, contentType: "image/jpeg", config: config)
+                try await uploadWithProgress(data: coverData, to: coverPath, contentType: "image/jpeg", config: config) { p in
+                    reportProgress(Double(p))
+                }
                 coverSrc = try presignedGetURL(for: coverPath, expires: shareLinkExpires, config: config).absoluteString
             } catch {
                 // 封面失败不阻塞：沿用第一张原图
             }
+            completedTasks += 1
         }
 
         // 4.1 名片微信二维码（v1.27）：设置页已上传时，压成小图覆盖写到 COS 固定路径 h/_qrcode/qr.jpg；
         //     页面用固定路径签名 URL 引用 → 之后更换二维码，已发出的旧链接也自动显示新图
         var qrSrc = ""
         if hasQR, let qrData = makeQRCodeJPEG() {
-            try? await upload(data: qrData, to: "h/_qrcode/qr.jpg", contentType: "image/jpeg", config: config)
+            try? await uploadWithProgress(data: qrData, to: "h/_qrcode/qr.jpg", contentType: "image/jpeg", config: config) { p in
+                reportProgress(Double(p))
+            }
             qrSrc = (try? presignedGetURL(for: "h/_qrcode/qr.jpg", expires: shareLinkExpires, config: config).absoluteString) ?? ""
+            completedTasks += 1
         }
 
         // 5. 生成并上传分享页（路径无扩展名；两模式独立页面）。链接追加版本参数 v（内容更新 → v 变 → 微信重新抓卡片）
@@ -328,7 +347,12 @@ enum CosUploader {
                 coverSrc: coverSrc, qrSrc: qrSrc, shareLink: versionedURL.absoluteString
             )
         }
-        try await upload(data: Data(html.utf8), to: pagePath, contentType: "text/html; charset=utf-8", config: config)
+        try await uploadWithProgress(data: Data(html.utf8), to: pagePath, contentType: "text/html; charset=utf-8", config: config) { p in
+            // 页面是最后一项：占剩余任务
+            reportProgress(Double(p))
+        }
+        completedTasks += 1
+        progress?(1.0)
 
         // 6. 更新缓存（按模式分文件；含自定义域名、压缩开关与模板版本，任一变化后旧缓存自动失效）
         ShareCacheStore.save(roomKey: roomKey, mode: mode.rawValue, record: ShareCacheRecord(
@@ -349,7 +373,8 @@ enum CosUploader {
     /// v1.22：多选分享 → 生成【合集 H5 卡片】。一次分享一个链接，好友点开看到 N 套房源列表，
     /// 点某套进入该套详情（视频置顶、图片单列、名片底部）。脱敏/完整两模式各自独立合集页面与缓存。
     /// 缓存：媒体+信息+配置全同 → 零上传复用上次链接；否则全量上传覆盖写（与单套共享媒体对象路径）。
-    static func shareCollection(rooms: [ShareCollectionItem], mode: ShareMode, config: CosConfig) async throws -> URL {
+    /// v1.13 需求13：progress 回调（0~1），按「所有套的需上传媒体数 + 固定任务」估算总进度
+    static func shareCollection(rooms: [ShareCollectionItem], mode: ShareMode, config: CosConfig, progress: ((Double) -> Void)? = nil) async throws -> URL {
         guard !config.customDomain.isEmpty else { throw CosError.customDomainMissing }
         let validRooms = rooms.filter { !$0.mediaFiles.isEmpty }
         guard !validRooms.isEmpty else { throw CosError.missingMedia }
@@ -378,7 +403,17 @@ enum CosUploader {
            cached.info.phone == phone,
            Set(cached.collectionRooms ?? []) == Set(validRooms),
            let url = URL(string: cached.shareURL) {
+            progress?(1.0)
             return url
+        }
+
+        // v1.13 需求13：进度按「所有套的需上传媒体数 + 每套封面 + 二维码 + 页面」估算总任务数
+        let mediaTaskCount = validRooms.reduce(0) { $0 + $1.mediaFiles.count }
+        let coverTaskCount = validRooms.filter { $0.mediaFiles.contains { $0.kind == "image" } }.count
+        let totalTasks = max(1, mediaTaskCount + coverTaskCount + (hasQR ? 1 : 0) + 1)
+        var completedTasks = 0
+        func reportProgress(_ taskFraction: Double) {
+            progress?(min(Double(completedTasks) + taskFraction, Double(totalTasks)) / Double(totalTasks))
         }
 
         // 1. 上传每套媒体（覆盖写，与单套分享共享 h/<roomKey>/<name> 路径）+ 每套封面
@@ -409,11 +444,14 @@ enum CosUploader {
                     data = compressed
                     contentType = "image/jpeg"
                 }
-                try await upload(data: data, to: remotePath, contentType: contentType, config: config)
+                try await uploadWithProgress(data: data, to: remotePath, contentType: contentType, config: config) { p in
+                    reportProgress(Double(p))
+                }
                 // v1.25：视频同时上传首帧封面图（几十 KB），页面封面用图片而非视频流
                 if isVideo, let thumbData = makeVideoThumbJPEG(from: url) {
                     try? await upload(data: thumbData, to: "h/\(item.roomKey)/\(m.name).vthumb.jpg", contentType: "image/jpeg", config: config)
                 }
+                completedTasks += 1
                 let absURL = try presignedGetURL(for: remotePath, expires: shareLinkExpires, config: config).absoluteString
                 if isVideo {
                     // v1.25：video 无 src、无 poster、无 autoplay；封面用独立首帧图；点击封面 playVideo 才注入 src 并播放
@@ -428,10 +466,13 @@ enum CosUploader {
                let coverData = makeCoverJPEG(from: MediaStore.url(for: firstImage.name, roomKey: item.roomKey)) {
                 let coverPath = "h/\(item.roomKey)/cover"
                 do {
-                    try await upload(data: coverData, to: coverPath, contentType: "image/jpeg", config: config)
+                    try await uploadWithProgress(data: coverData, to: coverPath, contentType: "image/jpeg", config: config) { p in
+                        reportProgress(Double(p))
+                    }
                     coverSrc = try presignedGetURL(for: coverPath, expires: shareLinkExpires, config: config).absoluteString
                 } catch {
                 }
+                completedTasks += 1
             }
             prepared.append(PreparedRoom(item: item, videoTags: videoTags, imageURLs: imageAbsURLs, coverSrc: coverSrc))
         }
@@ -442,12 +483,19 @@ enum CosUploader {
         // v1.27：名片微信二维码——固定路径覆盖写，旧合集链接自动显示新二维码
         var qrSrc = ""
         if hasQR, let qrData = makeQRCodeJPEG() {
-            try? await upload(data: qrData, to: "h/_qrcode/qr.jpg", contentType: "image/jpeg", config: config)
+            try? await uploadWithProgress(data: qrData, to: "h/_qrcode/qr.jpg", contentType: "image/jpeg", config: config) { p in
+                reportProgress(Double(p))
+            }
             qrSrc = (try? presignedGetURL(for: "h/_qrcode/qr.jpg", expires: shareLinkExpires, config: config).absoluteString) ?? ""
+            completedTasks += 1
         }
         let pagePath = "h/_collection/\(sortedKeys).\(mode.pageSuffix)"
         let html = buildCollectionHTML(rooms: prepared, mode: mode, name: name, phone: phone, coverSrc: collectionCover, qrSrc: qrSrc)
-        try await upload(data: Data(html.utf8), to: pagePath, contentType: "text/html; charset=utf-8", config: config)
+        try await uploadWithProgress(data: Data(html.utf8), to: pagePath, contentType: "text/html; charset=utf-8", config: config) { p in
+            reportProgress(Double(p))
+        }
+        completedTasks += 1
+        progress?(1.0)
 
         let shareURL = try presignedGetURL(for: pagePath, expires: shareLinkExpires, config: config)
         let versionedURL = appendVersionParameter(shareURL, version: "\(Int(Date().timeIntervalSince1970))")
@@ -1121,9 +1169,31 @@ enum CosUploader {
         }
     }
 
+    /// v1.13 需求13：带字节级进度的上传（房源分享上传到桶时显示百分比）。
+    /// progress 0~1 回调（后台线程回调，调用方自行切主线程）。
+    internal static func uploadWithProgress(data: Data, to remotePath: String, contentType: String, config: CosConfig, progress: @escaping (Double) -> Void) async throws {
+        let url = try presignedPutURL(for: remotePath, contentType: contentType, config: config)
+        var request = URLRequest(url: url)
+        request.httpMethod = "PUT"
+        request.setValue(contentType, forHTTPHeaderField: "Content-Type")
+
+        let delegate = CosUploadProgressDelegate(onProgress: progress)
+        let session = URLSession(configuration: .ephemeral, delegate: delegate, delegateQueue: nil)
+        let task = session.uploadTask(with: request, from: data)
+        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
+            delegate.onCompletion = { error in
+                if let error = error {
+                    cont.resume(throwing: error)
+                } else {
+                    cont.resume()
+                }
+            }
+            task.resume()
+        }
+    }
+
     /// 从 COS 错误响应 XML 中提取 Error Code 与 Message
-    internal static func extractCosError(from data: Data) -> String {
-        guard let text = String(data: data, encoding: .utf8) else { return "" }
+    internal static func extractCosError(from data: Data) -> String {        guard let text = String(data: data, encoding: .utf8) else { return "" }
         func value(of tag: String) -> String? {
             guard let start = text.range(of: "<\(tag)>")?.upperBound,
                   let end = text[start...].range(of: "</\(tag)>")?.lowerBound else { return nil }
@@ -1164,6 +1234,78 @@ enum CosUploader {
         try presignedURL(for: path, method: "GET", expires: expires, headers: [], config: config)
     }
 
+    /// v1.13：ListObjectsV2 列出桶内对象（前缀匹配，分页自动翻页）。
+    /// 返回 [(对象路径, 大小, 修改时间)]，路径为含前缀的完整对象 key（如 backups/快速_xxx.zip）。
+    /// 用途：①备份查看页「刷新」实时同步桶内备份；②回收站彻底删除房源时列出 h/<房号>/ 前缀对象
+    /// delimiter 传 "/" 时只返回该前缀下的「直接对象」（不含子目录内对象），用于跳过 backups/media/ 海量媒体镜像
+    internal static func listObjects(prefix: String, delimiter: String? = nil, config: CosConfig) async throws -> [(name: String, size: Int64, date: Date)] {
+        var result: [(name: String, size: Int64, date: Date)] = []
+        var continuationToken: String?
+        repeat {
+            var params: [(String, String)] = [("list-type", "2"), ("prefix", prefix), ("encoding-type", "url")]
+            if let delimiter = delimiter {
+                params.append(("delimiter", delimiter))
+            }
+            if let token = continuationToken {
+                params.append(("continuation-token", token))
+            }
+            let url = try presignedURL(for: "", method: "GET", expires: 300, headers: [], params: params, config: config)
+            var request = URLRequest(url: url)
+            request.httpMethod = "GET"
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+                throw CosError.uploadFailed("云端列表获取失败（HTTP \((response as? HTTPURLResponse)?.statusCode ?? 0)）" + extractCosError(from: data))
+            }
+            guard let xml = String(data: data, encoding: .utf8) else { break }
+            // 解析 <Contents> 块：<Key>…</Key><LastModified>…</LastModified><Size>…</Size>
+            let blocks = extractContentsBlocks(from: xml)
+            for block in blocks {
+                guard let key = tagValue("Key", in: block) else { continue }
+                let size = Int64(tagValue("Size", in: block) ?? "0") ?? 0
+                let date = parseCOSDate(tagValue("LastModified", in: block))
+                result.append((name: percentDecode(key), size: size, date: date))
+            }
+            // 分页：IsTruncated=true 且带 NextContinuationToken
+            if let truncated = tagValue("IsTruncated", in: xml), truncated == "true",
+               let next = tagValue("NextContinuationToken", in: xml), !next.isEmpty {
+                continuationToken = percentDecode(next)
+            } else {
+                continuationToken = nil
+            }
+        } while continuationToken != nil
+        return result
+    }
+
+    /// 从 ListObjectsV2 响应 XML 中切出所有 <Contents>…</Contents> 块
+    private static func extractContentsBlocks(from xml: String) -> [String] {
+        var blocks: [String] = []
+        var rest = xml[...]
+        while let start = rest.range(of: "<Contents>"), let end = rest[start.upperBound...].range(of: "</Contents>") {
+            blocks.append(String(rest[start.upperBound..<end.lowerBound]))
+            rest = rest[end.upperBound...]
+        }
+        return blocks
+    }
+
+    /// 取 XML 单标签文本
+    private static func tagValue(_ tag: String, in xml: String) -> String? {
+        guard let start = xml.range(of: "<\(tag)>")?.upperBound,
+              let end = xml[start...].range(of: "</\(tag)>")?.lowerBound else { return nil }
+        return String(xml[start..<end])
+    }
+
+    /// COS LastModified 格式：2026-10-23T01:26:00.000Z（ISO8601）
+    private static func parseCOSDate(_ text: String?) -> Date {
+        guard let text = text, !text.isEmpty else { return .distantPast }
+        let iso = ISO8601DateFormatter()
+        return iso.date(from: text) ?? .distantPast
+    }
+
+    /// encoding-type=url 时 Key/Token 为百分号编码，解码回原样
+    private static func percentDecode(_ s: String) -> String {
+        s.removingPercentEncoding ?? s
+    }
+
     /// COS V5 签名：q-sign-algorithm=sha1;q-ak=...;q-sign-time=...;q-key-time=...;q-header-list=...;q-url-param-list=...;q-signature=...
     /// 关键（严格按 COS 官方规范文档 436/7778 及官方 Python SDK cos_auth.py）：
     /// 1. HttpString = HttpMethod\nUriPathname\nHttpParameters\nHttpHeaders\n —— 恰好 3 个换行分隔 4 段，末尾再一个换行（参数为空时是两个连续换行）
@@ -1172,6 +1314,11 @@ enum CosUploader {
     /// 3. HttpHeaders 的 key 小写、value 按 RFC3986 编码、按字典序拼接
     /// 4. q-header-list 用分号分隔参与签名的 header key
     internal static func presignedURL(for path: String, method: String, expires: Int, headers: [(String, String)], config: CosConfig) throws -> URL {
+        try presignedURL(for: path, method: method, expires: expires, headers: headers, params: [], config: config)
+    }
+
+    /// v1.13：带 URL query 参数的预签名（ListObjects 等需要）。query 参数 key 按字典序参与 HttpParameters 段与 q-url-param-list。
+    internal static func presignedURL(for path: String, method: String, expires: Int, headers: [(String, String)], params: [(String, String)], config: CosConfig) throws -> URL {
         let now = Int(Date().timeIntervalSince1970)
         let signTime = "\(now);\(now + expires)"
         let keyTime = signTime
@@ -1188,10 +1335,15 @@ enum CosUploader {
         let headerList = pairs.map(\.key).joined(separator: ";")
         let headerValue = pairs.map { "\($0.key)=\($0.value)" }.joined(separator: "&")
 
+        // v1.13：URL query 参数（ListObjects 等）——key 原样（已小写）、value RFC3986 编码，按字典序
+        let sortedParams = params.map { (key: $0.0.lowercased(), value: urlEncode($0.1)) }.sorted { $0.key < $1.key }
+        let paramList = sortedParams.map(\.key).joined(separator: ";")
+        let paramValue = sortedParams.map { "\($0.key)=\($0.value)" }.joined(separator: "&")
+
         let signKey = HMAC_SHA1(key: config.secretKey, message: keyTime)
         // HttpString 段结构：method\n路径\n参数\n请求头\n（参数为空时是两个连续换行）
         // 路径必须用未编码的 rawPath 参与签名（官方规范），请求 URL 才用 encodedPath
-        let httpString = "\(method.lowercased())\n\(rawPath)\n\n\(headerValue)\n"
+        let httpString = "\(method.lowercased())\n\(rawPath)\n\(paramValue)\n\(headerValue)\n"
         let sha1Http = SHA1(hexString: httpString)
         let stringToSign = "sha1\n\(signTime)\n\(sha1Http)\n"
         let signature = HMAC_SHA1(key: signKey, message: stringToSign)
@@ -1200,7 +1352,10 @@ enum CosUploader {
         comps.scheme = "https"
         comps.host = hostValue
         comps.percentEncodedPath = encodedPath
-        comps.percentEncodedQuery = "q-sign-algorithm=sha1&q-ak=\(config.secretId)&q-sign-time=\(signTime)&q-key-time=\(keyTime)&q-header-list=\(headerList)&q-url-param-list=&q-signature=\(signature)"
+        // query 拼接：业务参数 + 签名参数
+        var queryParts = sortedParams.map { "\($0.key)=\($0.value)" }
+        queryParts.append("q-sign-algorithm=sha1&q-ak=\(config.secretId)&q-sign-time=\(signTime)&q-key-time=\(keyTime)&q-header-list=\(headerList)&q-url-param-list=\(paramList)&q-signature=\(signature)")
+        comps.percentEncodedQuery = queryParts.joined(separator: "&")
         guard let url = comps.url else { throw CosError.invalidConfig }
         return url
     }
@@ -1350,6 +1505,31 @@ enum CosUploader {
     private static func SHA1(hexString: String) -> String {
         let data = Data(hexString.utf8)
         return Insecure.SHA1.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
+}
+
+// MARK: - v1.13 上传进度 Delegate（分享上传百分比进度）
+
+private final class CosUploadProgressDelegate: NSObject, URLSessionTaskDelegate {
+    private let onProgress: (Double) -> Void
+    var onCompletion: ((Error?) -> Void)?
+    private var lastReported: Double = -1
+
+    init(onProgress: @escaping (Double) -> Void) {
+        self.onProgress = onProgress
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didSendBodyData bytesSent: Int64, totalBytesSent: Int64, totalBytesExpectedToSend: Int64) {
+        guard totalBytesExpectedToSend > 0 else { return }
+        let p = min(Double(totalBytesSent) / Double(totalBytesExpectedToSend), 1.0)
+        if p - lastReported >= 0.01 || p >= 1.0 {
+            lastReported = p
+            onProgress(p)
+        }
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        onCompletion?(error)
     }
 }
 

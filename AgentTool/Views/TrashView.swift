@@ -341,7 +341,8 @@ struct TrashView: View {
         NotificationCenter.default.post(name: HouseListView.houseStoreChanged, object: nil)
     }
 
-    /// 彻底删除房源：先移除本地全部文件（整个房号目录 + 分享缓存），再删模型记录
+    /// 彻底删除房源：先移除本地全部文件（整个房号目录 + 分享缓存），再删模型记录；
+    /// v1.13 需求19：同步删除桶里 h/<roomKey>/ 下的房源文件夹（未配置云端/桶里没有则静默跳过，不阻塞本地删除）
     private func deleteHousePermanently(_ item: House) {
         guard let ctx = houseModelContext else { return }
         MediaStore.deleteHouseDirectory(roomKey: item.mediaRoomKey)
@@ -349,6 +350,8 @@ struct TrashView: View {
         try? ctx.save()
         reloadHouses()
         NotificationCenter.default.post(name: HouseListView.houseStoreChanged, object: nil)
+        let roomKey = item.mediaRoomKey
+        Task { await CloudBackupService.deleteHouseRemoteFolder(roomKey: roomKey, config: nil) }
     }
 
     private func deleteHouse(_ item: House) {
@@ -405,6 +408,7 @@ struct TrashView: View {
 
     private func clearHouses() {
         guard let ctx = houseModelContext else { return }
+        let roomKeys = houses.map { $0.mediaRoomKey }
         for item in houses {
             MediaStore.deleteHouseDirectory(roomKey: item.mediaRoomKey)
             ctx.delete(item)
@@ -412,6 +416,10 @@ struct TrashView: View {
         try? ctx.save()
         reloadHouses()
         NotificationCenter.default.post(name: HouseListView.houseStoreChanged, object: nil)
+        // v1.13 需求19：同步删除桶里各房源文件夹
+        for roomKey in roomKeys {
+            Task { await CloudBackupService.deleteHouseRemoteFolder(roomKey: roomKey, config: nil) }
+        }
     }
 
     private func clearAll() {
@@ -445,6 +453,11 @@ struct TrashView: View {
             try? ctx.save()
             reloadHouses()
             NotificationCenter.default.post(name: HouseListView.houseStoreChanged, object: nil)
+            // v1.13 需求19：同步删除桶里各房源文件夹
+            for item in houseTargets {
+                let roomKey = item.mediaRoomKey
+                Task { await CloudBackupService.deleteHouseRemoteFolder(roomKey: roomKey, config: nil) }
+            }
         }
         selectedIDs.removeAll()
     }

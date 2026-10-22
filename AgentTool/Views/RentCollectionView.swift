@@ -12,7 +12,6 @@ struct RentCollectionView: View {
     @State private var selectedDueDay: Int? = nil
     @State private var showUtility = false
     @State private var exportURL: ExportURL?
-    @State private var showingRestore = false
     @State private var showRefreshTip = false
     @State private var refreshID = UUID()
     @State private var highlightedCardID: UUID?
@@ -222,11 +221,6 @@ struct RentCollectionView: View {
                         } label: {
                             Label("导出Excel模板", systemImage: "doc.text")
                         }
-                        Button {
-                            showingRestore = true
-                        } label: {
-                            Label("恢复数据", systemImage: "square.and.arrow.down")
-                        }
                     } label: {
                         Image(systemName: "ellipsis.circle")
                             .foregroundColor(.themeAccent)
@@ -254,11 +248,6 @@ struct RentCollectionView: View {
             .sheet(isPresented: $showUtility) { NavigationStack { UtilityView(onWriteSuccess: { refreshRentList() }) } }
             .sheet(item: $exportURL) { url in
                 ShareSheet(activityItems: [url.url])
-            }
-            .sheet(isPresented: $showingRestore) {
-                RestoreBackupView(type: .properties) { success in
-                    showingRestore = false
-                }
             }
             .alert("删除到回收站", isPresented: $showDeleteConfirm) {
                 Button("取消", role: .cancel) { propertyToDelete = nil }
@@ -1124,7 +1113,7 @@ struct AddPropertyView: View {
         NavigationStack {
             Form {
                 Section("基本信息") {
-                    TextRow(label: "房号", text: $roomNumber)
+                    TextRow(label: "房号", text: $roomNumber, allowSpaces: false)
                     TextRow(label: "房东", text: $landlord)
                     Picker("户型", selection: $unitType) { Text("请选择").tag(""); ForEach(unitTypes, id: \.self) { Text($0).tag($0) } }
                     Picker("房源类型", selection: $propertyType) { ForEach(types, id: \.self) { Text($0).tag($0) } }

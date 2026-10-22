@@ -26,7 +26,6 @@ struct DealsView: View {
     @State private var editingExpense: MiscExpense?
     @State private var showImportExport = false
     @State private var exportURL: ExportURL?
-    @State private var showingRestore = false
 
     private let availableYears = [2024, 2025, 2026, 2027, 2028, 2029, 2030, 2031, 2032, 2033, 2034, 2035]
 
@@ -174,11 +173,6 @@ struct DealsView: View {
                         } label: {
                             Label("导出Excel模板", systemImage: "doc.text")
                         }
-                        Button {
-                            showingRestore = true
-                        } label: {
-                            Label("恢复数据", systemImage: "square.and.arrow.down")
-                        }
                     } label: {
                         Image(systemName: "ellipsis.circle")
                             .foregroundColor(.themeAccent)
@@ -215,11 +209,6 @@ struct DealsView: View {
             }
             .sheet(item: $exportURL) { export in
                 ShareSheet(activityItems: [export.url])
-            }
-            .sheet(isPresented: $showingRestore) {
-                RestoreBackupView(type: .deals) { success in
-                    showingRestore = false
-                }
             }
             .alert("删除到回收站", isPresented: $showDeleteConfirm) {
                 Button("取消", role: .cancel) {
@@ -816,7 +805,7 @@ struct AddDealView: View {
             Form {
                 Section("基本信息") {
                     WheelDateField(label: "成交日期", date: $date)
-                    TextRow(label: "房号", text: $roomNumber)
+                    TextRow(label: "房号", text: $roomNumber, allowSpaces: false)
                     TextRow(label: "房东", text: $landlord)
                     Picker("户型", selection: $unitType) {
                         Text("请选择").tag("")
@@ -932,7 +921,7 @@ struct EditDealView: View {
             Form {
                 Section("基本信息") {
                     WheelDateField(label: "成交日期", date: $date)
-                    TextRow(label: "房号", text: $roomNumber)
+                    TextRow(label: "房号", text: $roomNumber, allowSpaces: false)
                     TextRow(label: "房东", text: $landlord)
                     Picker("户型", selection: $unitType) {
                         Text("请选择").tag("")

@@ -23,6 +23,8 @@ struct BackupFileBrowseViewV5: View {
     @State private var legacyJSONs: [(type: DataBackupManager.BackupType, url: URL)] = []
     @State private var cloudRecords: [CloudBackupService.CloudRecord] = []
     @State private var reloadTick = 0
+    /// v1.13：查看备份页顶部「快速备份 / 全量备份」板块切换（0=快速，1=全量）
+    @State private var selectedSection = 0
 
     // 上传进度
     @State private var uploadingName: String?
@@ -42,6 +44,9 @@ struct BackupFileBrowseViewV5: View {
     @State private var restoreStats: RestoreStatsV5?
     @State private var restoreError: String?
 
+    // v1.13 需求7：云端刷新
+    @State private var isRefreshingCloud = false
+
     struct DeleteTarget { let name: String; let isCloud: Bool }
     struct RestoreTarget {
         let localURL: URL?
@@ -58,66 +63,169 @@ struct BackupFileBrowseViewV5: View {
     }
 
     /// v1.12：List 内容拆独立属性（防 type-check 超时）
+    /// v1.13：改为「快速备份 / 全量备份」两大板块切换，每个板块内分「本地备份」「云端备份」两组
     private var backupSections: some View {
         Group {
-                if mode == .browse {
-                    Section {
-                        Button {
-                            // 快速备份（含账本+房源+清单，自动上传云端）
-                            performBackup(kind: .fast)
-                        } label: {
-                            Label("快速备份", systemImage: "bolt.circle")
+                // 顶部板块切换
+                Section {
+                    Picker("备份板块", selection: $selectedSection) {
+                        Text("快速备份").tag(0)
+                        Text("全量备份").tag(1)
+                    }
+                    .pickerStyle(.segmented)
+                    .listRowBackground(Color.clear)
+                    .padding(.vertical, 2)
+
+                    // v1.13：一键打开「备份」文件夹（文件 App 定位到备份目录）
+                    Button {
+                        openBackupFolder()
+                    } label: {
+                        Label("打开备份文件夹", systemImage: "folder")
+                    }
+                } header: {
+                    Text("查看备份")
+                } footer: {
+                    Text(selectedSection == 0
+                         ? "快速备份：账本 + 房源信息 + 媒体清单（不含照片视频文件），备份后自动上传云端。"
+                         : "全量备份：账本 + 房源 + 全部照片视频，备份后可在下方手动上传云端。")
+                }
+
+                if selectedSection == 0 {
+                    // —— 快速备份板块 ——
+                    if mode == .browse {
+                        Section {
+                            Button {
+                                // 快速备份（含账本+房源+清单，自动上传云端）
+                                performBackup(kind: .fast)
+                            } label: {
+                                Label("新建快速备份", systemImage: "bolt.circle")
+                            }
+                        } footer: {
+                            Text("快速备份：账本 + 房源信息 + 媒体清单（不含照片视频文件），备份后自动上传云端。")
                         }
-                        Button {
-                            // 全量备份（含照片视频），完成后手动上传
-                            performBackup(kind: .full)
-                        } label: {
-                            Label("全量备份", systemImage: "externaldrive.fill")
+                    }
+
+                    Section {
+                        if fastBackups.isEmpty {
+                            Text("暂无本地快速备份")
+                                .foregroundColor(.secondary)
+                        } else {
+                            ForEach(fastBackups, id: \.path) { url in
+                                backupRow(url: url, kind: .fast)
+                            }
+                        }
+                    } header: {
+                        Text("本地备份")
+                    }
+
+                    Section {
+                        if isRefreshingCloud {
+                            HStack(spacing: 8) {
+                                ProgressView()
+                                Text("正在刷新云端…")
+                                    .foregroundColor(.secondary)
+                            }
+                        } else if fastCloudRecords.isEmpty {
+                            Text("暂无云端快速备份")
+                                .foregroundColor(.secondary)
+                        } else {
+                            ForEach(fastCloudRecords, id: \.name) { record in
+                                cloudRow(record)
+                            }
+                        }
+                    } header: {
+                        HStack {
+                            Text("云端备份")
+                            Spacer()
+                            Button {
+                                refreshCloud()
+                            } label: {
+                                if isRefreshingCloud {
+                                    ProgressView()
+                                } else {
+                                    Image(systemName: "arrow.clockwise")
+                                }
+                            }
+                            .disabled(isRefreshingCloud)
+                            .buttonStyle(.borderless)
                         }
                     } footer: {
-                        Text("快速备份：账本 + 房源信息 + 媒体清单（不含照片视频文件），备份后自动上传云端。\n全量备份：账本 + 房源 + 全部照片视频，备份后可在下方手动上传云端。")
+                        Text("云端备份保留最近 10 份自动备份（快速_ 前缀），全量手动上传的备份不会自动清理。")
                     }
-                }
+                } else {
+                    // —— 全量备份板块 ——
+                    if mode == .browse {
+                        Section {
+                            Button {
+                                // 全量备份（含照片视频），完成后手动上传
+                                performBackup(kind: .full)
+                            } label: {
+                                Label("新建全量备份", systemImage: "externaldrive.fill")
+                            }
+                        } footer: {
+                            Text("全量备份：账本 + 房源 + 全部照片视频，备份后可在下方手动上传云端。")
+                        }
+                    }
 
-                if !fastBackups.isEmpty {
                     Section {
-                        ForEach(fastBackups, id: \.path) { url in
-                            backupRow(url: url, kind: .fast)
+                        if fullBackups.isEmpty {
+                            Text("暂无本地全量备份")
+                                .foregroundColor(.secondary)
+                        } else {
+                            ForEach(fullBackups, id: \.path) { url in
+                                backupRow(url: url, kind: .full)
+                            }
                         }
                     } header: {
-                        Text("快速备份")
+                        Text("本地备份")
                     }
-                }
 
-                if !fullBackups.isEmpty {
                     Section {
-                        ForEach(fullBackups, id: \.path) { url in
-                            backupRow(url: url, kind: .full)
+                        if isRefreshingCloud {
+                            HStack(spacing: 8) {
+                                ProgressView()
+                                Text("正在刷新云端…")
+                                    .foregroundColor(.secondary)
+                            }
+                        } else if fullCloudRecords.isEmpty {
+                            Text("暂无云端全量备份")
+                                .foregroundColor(.secondary)
+                        } else {
+                            ForEach(fullCloudRecords, id: \.name) { record in
+                                cloudRow(record)
+                            }
                         }
                     } header: {
-                        Text("全量备份")
-                    }
-                }
-
-                if !cloudRecords.isEmpty {
-                    Section {
-                        ForEach(cloudRecords, id: \.name) { record in
-                            cloudRow(record)
+                        HStack {
+                            Text("云端备份")
+                            Spacer()
+                            Button {
+                                refreshCloud()
+                            } label: {
+                                if isRefreshingCloud {
+                                    ProgressView()
+                                } else {
+                                    Image(systemName: "arrow.clockwise")
+                                }
+                            }
+                            .disabled(isRefreshingCloud)
+                            .buttonStyle(.borderless)
                         }
-                    } header: {
-                        Text("云端备份")
                     } footer: {
                         Text("云端备份保留最近 10 份自动备份（快速_ 前缀），全量手动上传的备份不会自动清理。")
                     }
                 }
 
+                // v1.13：旧版备份收纳进折叠入口（点开才展开，功能不变）
                 if !legacyJSONs.isEmpty {
                     Section {
-                        ForEach(legacyJSONs, id: \.url.path) { item in
-                            legacyRow(item)
+                        DisclosureGroup {
+                            ForEach(legacyJSONs, id: \.url.path) { item in
+                                legacyRow(item)
+                            }
+                        } label: {
+                            Label("旧版备份（JSON）· \(legacyJSONs.count) 个", systemImage: "archivebox")
                         }
-                    } header: {
-                        Text("旧版备份（JSON）")
                     } footer: {
                         Text("旧版分板块 JSON 备份（v1.11 及更早），可继续查看、恢复或删除，数据不丢失。")
                     }
@@ -132,6 +240,14 @@ struct BackupFileBrowseViewV5: View {
         }
     }
 
+    /// v1.13：按板块过滤的云端记录
+    private var fastCloudRecords: [CloudBackupService.CloudRecord] {
+        cloudRecords.filter { $0.name.hasPrefix("快速_") }
+    }
+    private var fullCloudRecords: [CloudBackupService.CloudRecord] {
+        cloudRecords.filter { $0.name.hasPrefix("全量_") }
+    }
+
     /// v1.12：List 拆独立属性（防 type-check 超时）
     private var backupList: some View {
         List {
@@ -140,7 +256,8 @@ struct BackupFileBrowseViewV5: View {
             .navigationTitle(mode == .browse ? "备份文件" : "恢复备份")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
+                // v1.13：完成按钮从左上角移到右上角
+                ToolbarItem(placement: .topBarTrailing) {
                     Button("完成") { dismiss() }
                 }
             }
@@ -313,12 +430,50 @@ struct BackupFileBrowseViewV5: View {
 
     // MARK: - 刷新
 
+    /// v1.13：一键打开「备份」文件夹（文件 App 定位到备份目录；个别系统版本不支持定位子目录时兜底打开文件 App）
+    private func openBackupFolder() {
+        let backupRoot = DataRoot.url()
+        UIApplication.shared.open(backupRoot) { success in
+            if !success, let root = URL(string: "shareddocuments://") {
+                UIApplication.shared.open(root)
+            }
+        }
+    }
+
     private func reload() {
         let all = BackupV5Manager.listLocalBackups()
         fastBackups = all.filter { $0.lastPathComponent.hasPrefix("快速_") }
-        fullBackups = all.filter { $0.lastPathComponent.hasPrefix("全量_") }
+        // v1.13 需求17：外部导入的 zip（无 快速_/全量_ 前缀）归入全量备份组，确保导入后可查看/恢复
+        fullBackups = all.filter { url in
+            let name = url.lastPathComponent
+            return name.hasPrefix("全量_") || (!name.hasPrefix("快速_") && !name.hasPrefix("下载_"))
+        }
         cloudRecords = CloudBackupService.cloudRecords()
         legacyJSONs = listLegacyBackups()
+    }
+
+    /// v1.13 需求7：实时刷新桶内备份并同步显示
+    private func refreshCloud() {
+        guard let config = CosConfig.load(), config.isValid else {
+            showMessageInContext("未配置云端（腾讯云 COS）。请先到「设置 → 远程配置」填写并保存验证后再刷新。")
+            return
+        }
+        isRefreshingCloud = true
+        Task {
+            do {
+                try await CloudBackupService.refreshCloudRecords(config: config)
+                await MainActor.run {
+                    isRefreshingCloud = false
+                    reloadTick += 1
+                    showMessageInContext("云端备份已刷新，与桶内文件同步一致")
+                }
+            } catch {
+                await MainActor.run {
+                    isRefreshingCloud = false
+                    showMessageInContext("云端刷新失败：\(error.localizedDescription)")
+                }
+            }
+        }
     }
 
     private func listLegacyBackups() -> [(type: DataBackupManager.BackupType, url: URL)] {
@@ -428,6 +583,11 @@ struct BackupFileBrowseViewV5: View {
             showMessageInContext("未配置云端（腾讯云 COS）。")
             return
         }
+        // v1.13 需求15：本地已有该备份 → 提示无需下载，不重复下载
+        if let existing = CloudBackupService.localCopyIfExists(name: record.name) {
+            showMessageInContext("本地已存在该备份：\(existing.lastPathComponent)\n无需重复下载，可直接在本地备份中恢复。")
+            return
+        }
         uploadingName = record.name
         uploadProgress = 0
         uploadStage = "正在从云端下载…"
@@ -497,10 +657,11 @@ struct BackupFileBrowseViewV5: View {
         Task {
             do {
                 if let cloudName = target.cloudName {
-                    // 云端：先下载（进本地）再恢复
+                    // 云端：先查本地是否已有该备份（v1.13 需求15：有 → 直接按本地恢复，无 → 自动下载到本地后恢复）
                     guard let config = CosConfig.load(), config.isValid else {
                         throw BackupV5Error.invalidBackup("未配置云端（腾讯云 COS）")
                     }
+                    restoreStage = "正在检查本地备份…"
                     let local = try await CloudBackupService.downloadBackup(name: cloudName, config: config)
                     let stats = try await BackupV5Manager.restore(
                         zipURL: local, mainContext: modelContext, houseContext: houseCtx,
@@ -668,11 +829,12 @@ struct BackupLogsView: View {
             .navigationTitle("操作日志")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                // v1.13：左右上角对调——左上角「清空」，右上角「完成」
                 ToolbarItem(placement: .topBarLeading) {
-                    Button("完成") { dismiss() }
+                    Button("清空") { BackupLogStore.clear(); logs = [] }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("清空") { BackupLogStore.clear(); logs = [] }
+                    Button("完成") { dismiss() }
                 }
             }
         }

@@ -50,7 +50,11 @@ struct HouseEditView: View {
                         Text("房号")
                             .foregroundColor(.secondary)
                             .frame(width: 64, alignment: .leading)
-                        TextField("如 2334 或 2-1418", text: $roomNo)
+                        // v1.13 需求18：房号输入不允许含空格（避免不小心加空格导致信息重复/查重失效）
+                        TextField("如 2334 或 2-1418", text: Binding(
+                            get: { roomNo },
+                            set: { roomNo = $0.replacingOccurrences(of: " ", with: "") }
+                        ))
                             .keyboardType(.numbersAndPunctuation)
                             .foregroundColor(showDuplicateHint ? .red : .primary)
                             .onChange(of: roomNo) { _, newValue in

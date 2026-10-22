@@ -1,7 +1,7 @@
 import Foundation
 
 // MARK: - v1.12 操作日志（幂等与校验：每次备份/恢复/上传/同步记录 时间/类型/结果/校验和）
-// 本地 UserDefaults 存储（上限 200 条，先进先出），设置页可查看。
+// 本地 UserDefaults 存储（v1.13 需求8：只保留最近一个月；上限 200 条），设置页可查看。
 
 struct BackupLogEntry: Codable {
     var date: Date
@@ -15,6 +15,8 @@ struct BackupLogEntry: Codable {
 enum BackupLogStore {
     private static let key = "backupLogs.v1"
     private static let maxCount = 200
+    /// v1.13 需求8：日志只保留最近 30 天
+    private static let retentionDays = 30
 
     static func all() -> [BackupLogEntry] {
         guard let data = UserDefaults.standard.data(forKey: key),
@@ -25,6 +27,9 @@ enum BackupLogStore {
     static func log(category: String, action: String, result: String, detail: String = "", checksum: String = "") {
         var list = all()
         list.insert(BackupLogEntry(date: Date(), category: category, action: action, result: result, detail: detail, checksum: checksum), at: 0)
+        // v1.13 需求8：超过一个月的日志自动清理
+        let cutoff = Calendar.current.date(byAdding: .day, value: -retentionDays, to: Date()) ?? Date()
+        list = list.filter { $0.date >= cutoff }
         if list.count > maxCount { list = Array(list.prefix(maxCount)) }
         if let data = try? JSONEncoder().encode(list) {
             UserDefaults.standard.set(data, forKey: key)

@@ -350,6 +350,40 @@ enum ZipStore {
     private static func le64Value(_ v: UInt32) -> UInt64 { UInt64(v) }
 }
 
+/// v1.13：校验 zip 是否损坏的独立错误（供 CRC 全量核对使用）
+enum ZipCRCMismatchError: LocalizedError {
+    case mismatch(path: String)
+    var errorDescription: String? {
+        switch self {
+        case .mismatch(let path): return "备份文件内容校验失败：\(path)（文件可能已损坏）"
+        }
+    }
+}
+
+extension ZipStore {
+    /// v1.13：逐文件 CRC 核对（云端下载完整性校验）。
+    /// 遍历中央目录，对每个非目录条目读取其数据段并计算 CRC32，与中央目录记录比对。
+    /// 任一条目不匹配即抛 ZipCRCMismatchError；全部通过返回 true。
+    static func verifyAllEntriesCRC(at url: URL) throws -> Bool {
+        let data = try Data(contentsOf: url)
+        let entries = try parseCentralDirectory(data)
+        for entry in entries {
+            let start = Int(entry.localHeaderOffset)
+            guard start + 30 <= data.count else { throw ZipError.corrupted }
+            let nameLen = Int(le16Value(data, at: start + 26))
+            let extraLen = Int(le16Value(data, at: start + 28))
+            let dataStart = start + 30 + nameLen + extraLen
+            let length = Int(entry.uncompressedSize)
+            guard dataStart + length <= data.count else { throw ZipError.corrupted }
+            let actual = crc32(of: data.subdata(in: dataStart..<(dataStart + length)))
+            guard actual == entry.crc32 else {
+                throw ZipCRCMismatchError.mismatch(path: entry.path)
+            }
+        }
+        return true
+    }
+}
+
 enum ZipError: LocalizedError {
     case corrupted
     case entryNotFound(String)
