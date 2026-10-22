@@ -294,13 +294,15 @@ final class CloudBackupService {
         var request = URLRequest(url: url)
         request.httpMethod = "DELETE"
         let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
-            // 404 = 对象不存在（已被删过/未上传过），视为已删除成功；其余错误抛给上层
-            if let code = http.statusCode, code == 404 {
-                return
-            }
-            throw CosUploader.CosError.uploadFailed("云端删除失败（HTTP \(http.statusCode)）" + CosUploader.extractCosError(from: data))
+        let http = response as? HTTPURLResponse
+        if let status = http?.statusCode, (200...299).contains(status) {
+            return   // 删除成功
         }
+        // 404 = 对象不存在（已被删过/未上传过），视为已删除成功；其余错误抛给上层
+        if let status = http?.statusCode, status == 404 {
+            return
+        }
+        throw CosUploader.CosError.uploadFailed("云端删除失败（HTTP \(http?.statusCode ?? 0)）" + CosUploader.extractCosError(from: data))
     }
 
     /// 删除房源在桶里的整个文件夹（h/<roomKey>/ 下全部对象）。
