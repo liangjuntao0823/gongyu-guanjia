@@ -5,6 +5,7 @@ struct HouseListView: View {
     /// 房源板块使用独立 HouseStore 容器的专属 context（由 App 注入）。
     /// 不能用主容器的 modelContext——iOS 17 早期版本多配置容器上查询会崩溃（闪退根因）。
     @Environment(\.houseModelContext) private var houseModelContext
+    @EnvironmentObject private var tabRouter: TabRouter   // v1.6：设置入口切到主设置 Tab
     @State private var houses: [House] = []
 
     static let houseStoreChanged = Notification.Name("houseStoreChanged")
@@ -80,8 +81,9 @@ struct HouseListView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    NavigationLink {
-                        HouseSettingsView()
+                    // v1.6：房源设置已合并进主 App 设置页，此按钮一键切到「设置」Tab
+                    Button {
+                        tabRouter.selectedTab = 6
                     } label: {
                         Image(systemName: "gearshape")
                     }

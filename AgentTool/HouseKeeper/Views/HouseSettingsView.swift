@@ -71,116 +71,22 @@ enum KeychainFix {
 /// 设置页（v1.22 重构：归拢成两个入口——远程配置 / 名片信息）
 /// 远程配置：腾讯云 COS 存储桶、密钥、自定义域名（用于分享房源卡片链接）
 /// 名片信息：分享 H5 页面与微信卡片上显示的姓名/电话（默认：梁涛 / 13288251132）
-struct HouseSettingsView: View {
-    @State private var refreshedTip: String?
-    @State private var showClearCacheConfirm = false
+///
+/// v1.6（公寓管家）：独立设置页取消——房源分享相关设置合并进主 App「设置 → 房源分享」分组，
+/// 本文件保留远程配置（CosConfigView）、名片信息（ShareProfileView）、恢复列表（ConfigRestoreListView）、
+/// 钥匙串修复（KeychainFix）与配置备份（CosConfigBackup）等子页面与工具，供主设置页复用。
 
-    var body: some View {
-        Form {
-            Section {
-                NavigationLink {
-                    CosConfigView()
-                } label: {
-                    Label("远程配置", systemImage: "server.rack")
-                }
-                NavigationLink {
-                    ShareProfileView()
-                } label: {
-                    Label("名片信息", systemImage: "person.crop.circle")
-                }
-            } footer: {
-                Text("远程配置：腾讯云 COS 存储桶、密钥与自定义域名，用于把房源的图片/视频上传并生成分享卡片链接。名片信息：分享 H5 页面和微信卡片上显示的姓名与电话。")
+/// 「备份」子文件夹总大小（数据库、Media/、二维码、分享缓存等都在这里）
+func houseDocumentsSizeText() -> String {
+    var total: Int64 = 0
+    if let enumerator = FileManager.default.enumerator(at: DataRoot.url(), includingPropertiesForKeys: [.fileSizeKey]) {
+        for case let url as URL in enumerator {
+            if let values = try? url.resourceValues(forKeys: [.fileSizeKey]), let size = values.fileSize {
+                total += Int64(size)
             }
-
-            // v1.23：分享时压缩开关——视频压到 720p、图片轻压缩（参照微信非原图质量），
-            // 大幅降低上传流量与 COS 流量费用；关掉则按原文件原样上传
-            // v1.3：开关默认开启（未设置过时按开启处理）
-            Section {
-                Toggle("分享时压缩视频和图片", isOn: Binding(
-                    get: { shareCompressionEnabled },
-                    set: { UserDefaults.standard.set($0, forKey: "compressOnShare") }
-                ))
-            } footer: {
-                Text("开启后：视频压缩到 720p 再上传，图片做轻压缩（不牺牲观感，参照微信「不加载原图」的画质），分享更快、更省流量。")
-            }
-
-            // v1.25：分享缓存管理——改了分享页面样式后想立刻重新生成链接时手动刷新；
-            // 平时不需要：App 每次更新页面模板后旧缓存会自动失效，下次分享自动重新生成
-            // v1.3：增加二级确认，防止误触导致全部链接失效
-            Section {
-                Button {
-                    showClearCacheConfirm = true
-                } label: {
-                    Label("刷新分享缓存", systemImage: "arrow.clockwise.circle")
-                }
-            } footer: {
-                Text("平时无需操作：App 更新页面设计后，旧缓存会自动失效、分享自动生成新页面。仅当您想立刻重置全部缓存（例如改了页面样式想马上生效）时才需要点这里。")
-            }
-
-            // v1.30：数据备份——全部数据默认存放在「备份」子文件夹（数据库 + Media + 二维码 + 分享缓存），
-            // 根目录保持整洁；复制「备份」子文件夹 = 备份，放回 = 恢复（微信式文件夹备份）
-            Section {
-                HStack {
-                    Label("数据文件夹大小", systemImage: "externaldrive")
-                    Spacer()
-                    Text(Self.documentsSizeText())
-                        .foregroundColor(.secondary)
-                }
-                // v1.35：已收录房源套数——以本地 Media/ 房号文件夹数量为准
-                HStack {
-                    Label {
-                        Text(verbatim: "已收录房源")
-                    } icon: {
-                        Image(systemName: "building.2")
-                    }
-                    Spacer()
-                    Text("\(MediaStore.houseCount()) 套")
-                        .foregroundColor(.secondary)
-                }
-                Button {
-                    if let url = URL(string: "shareddocuments://") {
-                        UIApplication.shared.open(url)
-                    }
-                } label: {
-                    Label("打开「文件」App 查看数据文件夹", systemImage: "folder")
-                }
-            } footer: {
-                Text("本 App 的全部数据（房源数据库、图片视频、二维码）默认存放在「公寓管家」文件夹内的「备份」子文件夹。备份：长按「备份」文件夹 → 拷贝/共享到电脑、网盘或微信；恢复：重装后把「备份」文件夹放回原位即可，房源信息和图片视频全部还原。")
-            }
-        }
-        .navigationTitle("设置")
-        .navigationBarTitleDisplayMode(.inline)
-        .confirmationDialog("刷新分享缓存", isPresented: $showClearCacheConfirm, titleVisibility: .visible) {
-            Button("清空并刷新", role: .destructive) {
-                ShareCacheStore.clearAll()
-                refreshedTip = "分享缓存已清空 ✅\n下次分享会重新上传并生成新链接（所有房源）"
-            }
-            Button("取消", role: .cancel) {}
-        } message: {
-            Text("将清空全部房源的分享缓存，下次分享时重新上传并生成新链接。确定继续吗？")
-        }
-        .alert("刷新分享缓存", isPresented: Binding(
-            get: { refreshedTip != nil },
-            set: { if !$0 { refreshedTip = nil } }
-        )) {
-            Button("好", role: .cancel) {}
-        } message: {
-            Text(refreshedTip ?? "")
         }
     }
-
-    /// v1.30：「备份」子文件夹总大小（数据库、Media/、二维码、分享缓存等都在这里）
-    private static func documentsSizeText() -> String {
-        var total: Int64 = 0
-        if let enumerator = FileManager.default.enumerator(at: DataRoot.url(), includingPropertiesForKeys: [.fileSizeKey]) {
-            for case let url as URL in enumerator {
-                if let values = try? url.resourceValues(forKeys: [.fileSizeKey]), let size = values.fileSize {
-                    total += Int64(size)
-                }
-            }
-        }
-        return ByteCountFormatter.string(fromByteCount: total, countStyle: .file)
-    }
+    return ByteCountFormatter.string(fromByteCount: total, countStyle: .file)
 }
 
 // MARK: - 远程配置（腾讯云 COS）

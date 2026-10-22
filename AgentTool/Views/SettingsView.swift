@@ -22,6 +22,9 @@ struct SettingsView: View {
     @State private var showMigration = false
     @State private var showBillTemplate = false
     @State private var showTrash = false   // v1.3：回收站入口从工作台移至设置页
+    // v1.6：房源分享设置合并进主设置（原房源板块独立设置页取消）
+    @State private var showHouseCacheConfirm = false
+    @State private var houseCacheTip: String?
     @AppStorage("notificationSound_rent") private var rentSound = "system"
     @AppStorage("notificationSound_expiry") private var expirySound = "system"
     @AppStorage("notificationSound_payout") private var payoutSound = "system"
@@ -169,6 +172,54 @@ struct SettingsView: View {
                                 .foregroundColor(.secondary)
                         }
                     }
+                }
+
+                // MARK: 房源分享（v1.6：原房源板块独立设置页合并至此）
+                Section {
+                    NavigationLink {
+                        CosConfigView()
+                    } label: {
+                        Label("远程配置", systemImage: "server.rack")
+                    }
+                    NavigationLink {
+                        ShareProfileView()
+                    } label: {
+                        Label("名片信息", systemImage: "person.crop.circle")
+                    }
+                    Toggle("分享时压缩视频和图片", isOn: Binding(
+                        get: { shareCompressionEnabled },
+                        set: { UserDefaults.standard.set($0, forKey: "compressOnShare") }
+                    ))
+                    Button {
+                        showHouseCacheConfirm = true
+                    } label: {
+                        Label("刷新分享缓存", systemImage: "arrow.clockwise.circle")
+                    }
+                    HStack {
+                        Label("数据文件夹大小", systemImage: "externaldrive")
+                        Spacer()
+                        Text(houseDocumentsSizeText())
+                            .foregroundColor(.secondary)
+                    }
+                    HStack {
+                        Label {
+                            Text(verbatim: "已收录房源")
+                        } icon: {
+                            Image(systemName: "building.2")
+                        }
+                        Spacer()
+                        Text("\(MediaStore.houseCount()) 套")
+                            .foregroundColor(.secondary)
+                    }
+                    Button {
+                        if let url = URL(string: "shareddocuments://") {
+                            UIApplication.shared.open(url)
+                        }
+                    } label: {
+                        Label("打开「文件」App 查看数据文件夹", systemImage: "folder")
+                    }
+                } footer: {
+                    Text("远程配置：腾讯云 COS 存储桶、密钥与自定义域名，用于上传房源图片/视频并生成微信分享卡片链接。名片信息：分享 H5 页面和微信卡片上显示的姓名与电话。压缩开启后视频压到 720p、图片轻压缩，分享更快更省流量。房源数据（数据库、图片视频、二维码）默认存放在「公寓管家」文件夹内的「备份」子文件夹，长按拷贝/共享即为备份，重装后放回原位即可还原。")
                 }
 
                 // MARK: 自定义铃声
@@ -346,6 +397,24 @@ struct SettingsView: View {
             .sheet(isPresented: $showTrash) {
                 TrashView()
             }
+            // v1.6：房源分享缓存刷新（二级确认，防止误触导致全部链接失效）
+            .confirmationDialog("刷新分享缓存", isPresented: $showHouseCacheConfirm, titleVisibility: .visible) {
+                Button("清空并刷新", role: .destructive) {
+                    ShareCacheStore.clearAll()
+                    houseCacheTip = "分享缓存已清空 ✅\n下次分享会重新上传并生成新链接（所有房源）"
+                }
+                Button("取消", role: .cancel) {}
+            } message: {
+                Text("将清空全部房源的分享缓存，下次分享时重新上传并生成新链接。确定继续吗？")
+            }
+            .alert("刷新分享缓存", isPresented: Binding(
+                get: { houseCacheTip != nil },
+                set: { if !$0 { houseCacheTip = nil } }
+            )) {
+                Button("好", role: .cancel) {}
+            } message: {
+                Text(houseCacheTip ?? "")
+            }
         }
     }
 
@@ -414,6 +483,7 @@ struct SettingsView: View {
 // MARK: - 版本更新介绍
 struct VersionHistoryView: View {
     let versions: [(version: String, date: String, changes: [String])] = [
+        ("v1.6", "2026-10-22", ["设置统一：房源板块独立设置页取消，全部合并进主 App「设置 → 房源分享」分组（远程配置/名片信息/分享压缩/刷新缓存/房源数据）", "房源板块左上角设置按钮：一键跳转主「设置」页，全 App 只保留一个设置入口", "UI 按房源管家设置页原生 iOS 风格统一（Form 分组 + 小字说明）", "配色恢复为原租房管家深绿主题"]),
         ("v1.4", "2026-10-22", ["回收站入口调整：移至设置页右上角（图标+文字按钮），不再占用数据管理列表", "工作台「新增房源」：不再跳转房源板块，改为直接弹出登记表单（与新增收租/新增成交一致），保存后房源列表自动刷新"]),
         ("v1.3", "2026-10-22", ["房源板块：户型筛选支持多选（可同时筛选多种户型）", "房源设置：刷新分享缓存增加二次确认，防止误触", "房源设置：移除底部版本号", "分享压缩开关默认开启（此前默认关闭，视频按原文件上传）", "工作台：回收站入口移至设置页，空位新增「新增房源」入口"]),
         ("v1.2", "2026-10-22", ["修复：房源板块闪退（根治）——租房管家与房源管家数据改为两个独立存储容器，房源页面使用专属数据上下文，规避 iOS 17 早期版本多存储配置崩溃问题", "房源数据仍独立存放 Documents/备份/（housekeeper.store），拷贝还原方式不变"]),
