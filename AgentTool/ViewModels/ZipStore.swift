@@ -5,7 +5,7 @@ import Foundation
 // 自实现最小 zip 读写：本地文件头 + 中央目录 + EOCD，method=STORE（媒体多为 jpg/mov 已压缩格式，再压无意义）。
 // 支持：整包写入、解析中央目录、按需提取单文件、全量解压到目录。
 
-enum ZipEntry {
+struct ZipEntry {
     let path: String
     let crc32: UInt32
     let compressedSize: UInt64
@@ -188,7 +188,7 @@ enum ZipStore {
 
     // MARK: - 内部实现
 
-    private static func localHeaderData(nameData: Data, crc: UInt32, size: UInt64, offset: inout UInt64) -> Data {
+    static func localHeaderData(nameData: Data, crc: UInt32, size: UInt64, offset: inout UInt64) -> Data {
         var lfh = Data()
         lfh.append(le32(0x04034B50))
         lfh.append(le16(20))
@@ -208,7 +208,7 @@ enum ZipStore {
         return lfh
     }
 
-    private static func centralRecordData(nameData: Data, crc: UInt32, size: UInt64, localHeaderOffset: UInt64) -> Data {
+    static func centralRecordData(nameData: Data, crc: UInt32, size: UInt64, localHeaderOffset: UInt64) -> Data {
         var cd = Data()
         cd.append(le32(0x02014B50))
         cd.append(le16(20))
@@ -231,7 +231,7 @@ enum ZipStore {
         return cd
     }
 
-    private static func appendCentralAndEOCD(central: [Data], bodyCount: Int, centralRecords: inout [Data], to full: inout Data, startOffset: UInt64) {
+    static func appendCentralAndEOCD(central: [Data], bodyCount: Int, centralRecords: inout [Data], to full: inout Data, startOffset: UInt64) {
         let cdStart = startOffset
         var cdData = Data()
         for cd in central { cdData.append(cd) }

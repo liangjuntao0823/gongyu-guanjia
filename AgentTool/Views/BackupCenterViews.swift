@@ -53,7 +53,13 @@ struct BackupFileBrowseViewV5: View {
 
     var body: some View {
         NavigationStack {
-            List {
+            backupList
+        }
+    }
+
+    /// v1.12：List 内容拆独立属性（防 type-check 超时）
+    private var backupSections: some View {
+        Group {
                 if mode == .browse {
                     Section {
                         Button {
@@ -115,7 +121,14 @@ struct BackupFileBrowseViewV5: View {
                             .foregroundColor(.secondary)
                     }
                 }
-            }
+        }
+    }
+
+    /// v1.12：List 拆独立属性（防 type-check 超时）
+    private var backupList: some View {
+        List {
+            backupSections
+        }
             .navigationTitle(mode == .browse ? "备份文件" : "恢复备份")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -178,7 +191,6 @@ struct BackupFileBrowseViewV5: View {
             }
             .onAppear { reload() }
             .onChange(of: reloadTick) { _, _ in reload() }
-        }
     }
 
     // MARK: - 行
