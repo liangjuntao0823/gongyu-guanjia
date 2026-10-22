@@ -3,6 +3,14 @@ import SwiftData
 import UniformTypeIdentifiers
 import PhotosUI
 
+// v1.7：设置页滚动偏移（顶部横线动态显示用，iOS 17 兼容写法）
+private struct SettingsScrollOffsetKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
 struct SettingsView: View {
     @Environment(\.modelContext) private var modelContext
     @State private var showMessage = ""
@@ -344,6 +352,18 @@ struct SettingsView: View {
     /// v1.7：tint 改为 iOS 原生蓝（房源管家风格设置页配色）；顶部横线随滚动动态显示
     private var settingsForm: some View {
         Form {
+                // v1.7：顶部滚动标记——报告自身在「settingsScroll」坐标系中的 y，
+                // 页面在顶部时 y≈0（不显示横线），向下滚动后 y<0（顶栏固定，显示横线）
+                Color.clear
+                    .frame(height: 0)
+                    .background(
+                        GeometryReader { proxy in
+                            Color.clear.preference(
+                                key: SettingsScrollOffsetKey.self,
+                                value: proxy.frame(in: .named("settingsScroll")).minY
+                            )
+                        }
+                    )
                 dataSection
                 syncSection
                 autoBackupSection
@@ -353,19 +373,18 @@ struct SettingsView: View {
                 ringtoneSection
                 aboutSection
             }
+            .coordinateSpace(name: "settingsScroll")
+            .onPreferenceChange(SettingsScrollOffsetKey.self) { value in
+                settingsScrollY = value
+            }
             .tint(Color(red: 0.0, green: 0.478, blue: 1.0))   // iOS 系统蓝 #007AFF
             .overlay(alignment: .top) {
                 // v1.7：页面在顶部时不显示横线；向下滑动（顶栏固定）才出现分隔线
                 Rectangle()
                     .fill(Color.themeBorder)
                     .frame(height: 0.5)
-                    .opacity(settingsScrollY > 1 ? 1 : 0)
-                    .animation(.easeOut(duration: 0.15), value: settingsScrollY > 1)
-            }
-            .onScrollGeometryChange(for: CGFloat.self) { proxy in
-                max(0, proxy.contentOffset.y)
-            } action: { _, newY in
-                settingsScrollY = newY
+                    .opacity(settingsScrollY < -1 ? 1 : 0)
+                    .animation(.easeOut(duration: 0.15), value: settingsScrollY < -1)
             }
             .navigationTitle("设置")
             .navigationBarTitleDisplayMode(.inline)
