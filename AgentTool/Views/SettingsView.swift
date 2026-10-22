@@ -421,7 +421,7 @@ struct SettingsView: View {
 
     var body: some View {
         NavigationStack {
-            settingsForm
+            settingsFormFull
         }
     }
 
@@ -505,6 +505,11 @@ struct SettingsView: View {
                     Text("")
                 }
             }
+    }
+
+    /// v1.12：挂载链拆分（避免单一表达式 type-check 超时）
+    private var settingsFormFull: some View {
+        settingsForm
             .sheet(isPresented: $showVersionHistory) {
                 VersionHistoryView()
             }

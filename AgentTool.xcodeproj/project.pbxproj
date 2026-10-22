@@ -45,6 +45,12 @@
 		A10000010000000000000105 /* HouseEditView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000105 /* HouseEditView.swift */; };
 		A10000010000000000000106 /* HouseListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000106 /* HouseListView.swift */; };
 		A10000010000000000000107 /* HouseSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000107 /* HouseSettingsView.swift */; };
+		A10000010000000000000108 /* BackupLogStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000108 /* BackupLogStore.swift */; };
+		A10000010000000000000109 /* BackupV5Manager.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000109 /* BackupV5Manager.swift */; };
+		A10000010000000000000110 /* CloudBackupService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000110 /* CloudBackupService.swift */; };
+		A10000010000000000000111 /* CrashLogCollector.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000111 /* CrashLogCollector.swift */; };
+		A10000010000000000000112 /* ZipStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000112 /* ZipStore.swift */; };
+		A10000010000000000000113 /* BackupCenterViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000113 /* BackupCenterViews.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -88,6 +94,12 @@
 		B10000010000000000000105 /* HouseEditView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HouseEditView.swift; sourceTree = "<group>"; };
 		B10000010000000000000106 /* HouseListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HouseListView.swift; sourceTree = "<group>"; };
 		B10000010000000000000107 /* HouseSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HouseSettingsView.swift; sourceTree = "<group>"; };
+		B10000010000000000000108 /* BackupLogStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupLogStore.swift; sourceTree = "<group>"; };
+		B10000010000000000000109 /* BackupV5Manager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupV5Manager.swift; sourceTree = "<group>"; };
+		B10000010000000000000110 /* CloudBackupService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudBackupService.swift; sourceTree = "<group>"; };
+		B10000010000000000000111 /* CrashLogCollector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrashLogCollector.swift; sourceTree = "<group>"; };
+		B10000010000000000000112 /* ZipStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZipStore.swift; sourceTree = "<group>"; };
+		B10000010000000000000113 /* BackupCenterViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupCenterViews.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -184,6 +196,11 @@
 			children = (
 				B10000010000000000000005 /* DataManager.swift */,
 				B10000010000000000000096 /* DataBackupManager.swift */,
+				B10000010000000000000108 /* BackupLogStore.swift */,
+				B10000010000000000000109 /* BackupV5Manager.swift */,
+				B10000010000000000000110 /* CloudBackupService.swift */,
+				B10000010000000000000111 /* CrashLogCollector.swift */,
+				B10000010000000000000112 /* ZipStore.swift */,
 				B30000010000000000000001 /* LocalNotificationManager.swift */,
 			);
 			path = ViewModels;
@@ -211,6 +228,7 @@
 				B10000010000000000000009 /* PayoutView.swift */,
 				B10000010000000000000010 /* ProfitView.swift */,
 				B10000010000000000000095 /* SettingsView.swift */,
+				B10000010000000000000113 /* BackupCenterViews.swift */,
 				B10000010000000000000011 /* UtilityView.swift */,
 				B10000010000000000000099 /* TrashView.swift */,
 				B10000010000000000000015 /* Theme.swift */,
@@ -378,6 +396,12 @@
 				A10000010000000000000105 /* HouseEditView.swift in Sources */,
 				A10000010000000000000106 /* HouseListView.swift in Sources */,
 				A10000010000000000000107 /* HouseSettingsView.swift in Sources */,
+				A10000010000000000000108 /* BackupLogStore.swift in Sources */,
+				A10000010000000000000109 /* BackupV5Manager.swift in Sources */,
+				A10000010000000000000110 /* CloudBackupService.swift in Sources */,
+				A10000010000000000000111 /* CrashLogCollector.swift in Sources */,
+				A10000010000000000000112 /* ZipStore.swift in Sources */,
+				A10000010000000000000113 /* BackupCenterViews.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -445,7 +469,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDevelopmentRegion = "zh_CN";
 INFOPLIST_KEY_CFBundleDisplayName = "公寓管家";
-				// v1.12: 删除硬编码版本覆盖（设置页显示 5.0 根因），统一由 MARKETING_VERSION 生效
+				/* v1.12: 删除硬编码版本覆盖（设置页显示 5.0 根因），统一由 MARKETING_VERSION 生效 */
 INFOPLIST_KEY_NSCameraUsageDescription = "用于扫描公寓管家的手动同步和迁移二维码。";
 INFOPLIST_KEY_NSLocalNetworkUsageDescription = "仅在你点击同步时连接同一局域网内的公寓管家电脑版。";
 				INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsLocalNetworking = YES;
@@ -480,7 +504,7 @@ INFOPLIST_KEY_NSLocalNetworkUsageDescription = "仅在你点击同步时连接�
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDevelopmentRegion = "zh_CN";
 INFOPLIST_KEY_CFBundleDisplayName = "公寓管家";
-				// v1.12: 删除硬编码版本覆盖（设置页显示 5.0 根因），统一由 MARKETING_VERSION 生效
+				/* v1.12: 删除硬编码版本覆盖（设置页显示 5.0 根因），统一由 MARKETING_VERSION 生效 */
 INFOPLIST_KEY_NSCameraUsageDescription = "用于扫描公寓管家的手动同步和迁移二维码。";
 INFOPLIST_KEY_NSLocalNetworkUsageDescription = "仅在你点击同步时连接同一局域网内的公寓管家电脑版。";
 				INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsLocalNetworking = YES;
@@ -503,8 +527,8 @@ INFOPLIST_KEY_NSLocalNetworkUsageDescription = "仅在你点击同步时连接�
 			};
 			name = Release;
 		};
-		WD = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGN_ENTITLEMENTS = AgentToolWidget/AgentToolWidget.entitlements; CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 12; INFOPLIST_FILE = AgentToolWidget/Info.plist; IPHONEOS_DEPLOYMENT_TARGET = 17.0; MARKETING_VERSION = 1.11; PRODUCT_BUNDLE_IDENTIFIER = com.gj.tg.widget; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = iphoneos; SKIP_INSTALL = YES; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2"; }; name = Debug; };
-		WR = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGN_ENTITLEMENTS = AgentToolWidget/AgentToolWidget.entitlements; CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 12; INFOPLIST_FILE = AgentToolWidget/Info.plist; IPHONEOS_DEPLOYMENT_TARGET = 17.0; MARKETING_VERSION = 1.11; PRODUCT_BUNDLE_IDENTIFIER = com.gj.tg.widget; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = iphoneos; SKIP_INSTALL = YES; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2"; }; name = Release; };
+		WD = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGN_ENTITLEMENTS = AgentToolWidget/AgentToolWidget.entitlements; CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 13; INFOPLIST_FILE = AgentToolWidget/Info.plist; IPHONEOS_DEPLOYMENT_TARGET = 17.0; MARKETING_VERSION = 1.12; PRODUCT_BUNDLE_IDENTIFIER = com.gj.tg.widget; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = iphoneos; SKIP_INSTALL = YES; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2"; }; name = Debug; };
+		WR = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGN_ENTITLEMENTS = AgentToolWidget/AgentToolWidget.entitlements; CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 13; INFOPLIST_FILE = AgentToolWidget/Info.plist; IPHONEOS_DEPLOYMENT_TARGET = 17.0; MARKETING_VERSION = 1.12; PRODUCT_BUNDLE_IDENTIFIER = com.gj.tg.widget; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = iphoneos; SKIP_INSTALL = YES; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2"; }; name = Release; };
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
