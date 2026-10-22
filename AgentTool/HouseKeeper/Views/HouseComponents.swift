@@ -3,15 +3,15 @@ import UIKit
 import AVKit
 import Photos
 
-// MARK: - 主题色（沿用网页版配色方向：深墨蓝 + 暖白 + 琥珀）
+// MARK: - 主题色（合体后统一跟随主 App 深绿主题：主题绿主色 + 主题绿强调 + 统一底色）
 
 enum AppTheme {
-    /// 深墨蓝主色
-    static let primary = Color(red: 0.20, green: 0.28, blue: 0.40)
-    /// 暖白背景
-    static let background = Color(red: 0.98, green: 0.96, blue: 0.93)
-    /// 琥珀价格强调
-    static let accent = Color(red: 0.87, green: 0.55, blue: 0.22)
+    /// 深绿主色（对齐主板块 themeSidebar）
+    static let primary = Color.themeSidebar
+    /// 统一底色（对齐主板块 themeBg）
+    static let background = Color.themeBg
+    /// 价格强调（对齐主板块 themeAccent）
+    static let accent = Color.themeAccent
 }
 
 // MARK: - 状态徽章

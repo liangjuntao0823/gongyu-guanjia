@@ -587,14 +587,18 @@ struct SwipeActionItem: Identifiable {
 struct SwipeActionRow<Content: View>: View {
     let content: Content
     let actions: [SwipeActionItem]
+    var contentBackground: Color
+    var onTap: (() -> Void)?
     @State private var offset: CGFloat = 0
     @State private var isOpen = false
     @State private var dragStart: CGFloat = 0
 
     private var actionWidth: CGFloat { CGFloat(actions.count) * 72 + CGFloat(actions.count - 1) * 8 + 32 }
 
-    init(actions: [SwipeActionItem], @ViewBuilder content: () -> Content) {
+    init(actions: [SwipeActionItem], contentBackground: Color = .themePanel, onTap: (() -> Void)? = nil, @ViewBuilder content: () -> Content) {
         self.actions = actions
+        self.contentBackground = contentBackground
+        self.onTap = onTap
         self.content = content()
     }
 
@@ -626,7 +630,7 @@ struct SwipeActionRow<Content: View>: View {
 
             // 内容层
             content
-                .background(Color.themePanel)
+                .background(contentBackground)
                 .offset(x: offset)
                 .gesture(
                     DragGesture()
@@ -661,6 +665,9 @@ struct SwipeActionRow<Content: View>: View {
                 .onTapGesture {
                     if isOpen {
                         withAnimation(.spring(response: 0.3)) { offset = 0; isOpen = false }
+                    } else {
+                        // 菜单未展开时放行点击（如跳转详情），由外部 onTap 回调接管
+                        onTap?()
                     }
                 }
         }

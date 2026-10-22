@@ -171,6 +171,7 @@ struct CosConfigView: View {
     @State private var showRestoreList = false
     @State private var showImporter = false
     @State private var confirmClear = false
+    @State private var showBrowseConfig = false   // v1.7：查看 COS 配置备份文件（内部浏览组件，只读）
 
     init() {
         // v1.34：新装 App 默认配置全部为空，由用户自行填写（不再预填 ap-hongkong）
@@ -248,9 +249,9 @@ struct CosConfigView: View {
             }
 
             // v1.34：备份 / 恢复配置（文件方式）——备份生成「桶名_地域_日期.json」文件，
-            // v1.35：备份文件直接生成到「房源管家」→「备份」文件夹，不再弹出文件选择器
-            // v1.36：恢复改为 App 内列表选择（租房管家式写法，避免系统文件选择器点击无反应）
-            Section(header: Text("备份 / 恢复配置"), footer: Text("点「备份配置到文件」后，备份文件（桶名_地域_日期.json，含密钥）会直接生成到 iOS「文件」App → 我的 iPhone → 房源管家 → 「备份」文件夹，随整个「备份」文件夹一起备份即可。换机 / 重装 / 误改后，点「从备份文件恢复配置」在列表中选择备份文件（或从其他位置导入）即可一键还原。含密钥内容请勿外泄。")) {
+            // v1.35：备份文件直接生成到「公寓管家」→「备份」文件夹，不再弹出文件选择器
+            // v1.36：恢复改为 App 内列表选择（列表选择式写法，避免系统文件选择器点击无反应）
+            Section(header: Text("备份 / 恢复配置"), footer: Text("点「备份配置到文件」后，备份文件（桶名_地域_日期.json，含密钥）会直接生成到 iOS「文件」App → 我的 iPhone → 公寓管家 → 「备份」文件夹，随整个「备份」文件夹一起备份即可。换机 / 重装 / 误改后，点「从备份文件恢复配置」在列表中选择备份文件（或从其他位置导入）即可一键还原。含密钥内容请勿外泄。")) {
                 Button {
                     prepareBackupFile()
                 } label: {
@@ -260,6 +261,12 @@ struct CosConfigView: View {
                     showRestoreList = true
                 } label: {
                     Label("从备份文件恢复配置", systemImage: "square.and.arrow.down")
+                }
+                // v1.7：查看配置备份文件（内部浏览组件，只读；与恢复选文件同款窗口）
+                Button {
+                    showBrowseConfig = true
+                } label: {
+                    Label("查看备份文件", systemImage: "folder")
                 }
                 // v1.34：清空全部配置并断开与桶的连接
                 Button(role: .destructive) {
@@ -293,13 +300,16 @@ struct CosConfigView: View {
                     handleRestoreFile(url)
                 },
                 onImportOther: {
-                    // 先关列表再弹系统选择器（延迟 0.35s 避免 sheet 交替冲突，租房管家同款写法）
+                    // 先关列表再弹系统选择器（延迟 0.35s 避免 sheet 交替冲突，列表选择式写法）
                     showRestoreList = false
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
                         showImporter = true
                     }
                 }
             )
+        }
+        .sheet(isPresented: $showBrowseConfig) {
+            CosBackupBrowseView()
         }
         .fileImporter(isPresented: $showImporter, allowedContentTypes: [.json], allowsMultipleSelection: false) { result in
             switch result {
@@ -392,7 +402,7 @@ struct CosConfigView: View {
         let target = DataRoot.url().appendingPathComponent(backupFileName)
         do {
             try json.data(using: .utf8)?.write(to: target, options: .atomic)
-            savedTip = "配置备份成功 ✅\n文件已生成到：文件 App → 我的 iPhone → 房源管家 → 备份\n\(backupFileName)\n（随「备份」文件夹一起拷贝/共享即可留底）"
+            savedTip = "配置备份成功 ✅\n文件已生成到：文件 App → 我的 iPhone → 公寓管家 → 备份\n\(backupFileName)\n（随「备份」文件夹一起拷贝/共享即可留底）"
         } catch {
             savedTip = "生成备份文件失败：\(error.localizedDescription)"
         }
@@ -466,9 +476,9 @@ struct CosConfigView: View {
     }
 }
 
-// MARK: - 恢复配置（v1.36：租房管家式列表选择，替代系统文件选择器避免点击无反应）
+// MARK: - 恢复配置（v1.36：列表式选择，替代系统文件选择器避免点击无反应）
 
-/// 列出「备份」文件夹内的 .json 备份文件，点击直接恢复（与租房管家 RestoreBackupView 同款写法）；
+/// 列出「备份」文件夹内的 .json 备份文件，点击直接恢复（与主 App 恢复备份同款列表写法）；
 /// 列表底部提供「从其他位置选择」用系统文件选择器兜底（保留自由选择路径的能力）
 struct ConfigRestoreListView: View {
     let onPick: (URL) -> Void
@@ -486,7 +496,7 @@ struct ConfigRestoreListView: View {
                             .foregroundColor(.secondary)
                         Text("「备份」文件夹里还没有备份文件")
                             .font(.headline)
-                        Text("请先点「备份配置到文件」生成备份，或把备份 .json 文件放进 iOS「文件」App → 我的 iPhone → 房源管家 → 备份 文件夹")
+                        Text("请先点「备份配置到文件」生成备份，或把备份 .json 文件放进 iOS「文件」App → 我的 iPhone → 公寓管家 → 备份 文件夹")
                             .font(.footnote)
                             .foregroundColor(.secondary)
                             .multilineTextAlignment(.center)
@@ -565,6 +575,98 @@ struct ConfigRestoreListView: View {
         let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
         return ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file)
     }
+}
+
+// MARK: - v1.7 查看 COS 配置备份文件（内部浏览组件，只读）
+
+/// 列出「备份」文件夹根目录的 .json 配置备份文件（桶名_地域_日期.json），只读查看，不跳文件 App。
+struct CosBackupBrowseView: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var files: [ConfigBackupFileEntry] = []
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if files.isEmpty {
+                    VStack(spacing: 12) {
+                        Image(systemName: "tray")
+                            .font(.system(size: 44))
+                            .foregroundColor(.secondary)
+                        Text("还没有配置备份文件")
+                            .font(.headline)
+                        Text("点「备份配置到文件」生成后，备份文件会出现在这里（桶名_地域_日期.json）")
+                            .font(.footnote)
+                            .foregroundColor(.secondary)
+                            .multilineTextAlignment(.center)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    List {
+                        Section("配置备份文件") {
+                            ForEach(files) { file in
+                                VStack(alignment: .leading, spacing: 4) {
+                                    HStack {
+                                        Text(file.name)
+                                            .font(.subheadline.weight(.medium))
+                                            .lineLimit(1)
+                                        Spacer()
+                                        Text(file.sizeText)
+                                            .font(.footnote)
+                                            .foregroundColor(.secondary)
+                                    }
+                                    Text(file.dateText)
+                                        .font(.footnote)
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+                        }
+                    }
+                    .listStyle(.insetGrouped)
+                }
+            }
+            .navigationTitle("查看备份文件")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("关闭") { dismiss() }
+                }
+            }
+            .onAppear(perform: loadFiles)
+        }
+    }
+
+    private func loadFiles() {
+        let dir = DataRoot.url()
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []
+        var entries: [ConfigBackupFileEntry] = []
+        for name in names where name.hasSuffix(".json") {
+            let url = dir.appendingPathComponent(name)
+            let attrs = try? FileManager.default.attributesOfItem(atPath: url.path)
+            let size = (attrs?[.size] as? NSNumber)?.int64Value ?? 0
+            let date = attrs?[.modificationDate] as? Date ?? .distantPast
+            entries.append(ConfigBackupFileEntry(
+                name: name,
+                sizeText: ByteCountFormatter.string(fromByteCount: size, countStyle: .file),
+                dateText: Self.dateFormatter.string(from: date)
+            ))
+        }
+        entries.sort { $0.dateText > $1.dateText }
+        files = entries
+    }
+
+    private static let dateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd HH:mm"
+        f.locale = Locale(identifier: "zh_CN")
+        return f
+    }()
+}
+
+struct ConfigBackupFileEntry: Identifiable {
+    let id = UUID()
+    let name: String
+    let sizeText: String
+    let dateText: String
 }
 
 // MARK: - 名片信息

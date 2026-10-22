@@ -36,6 +36,9 @@ struct HouseEditView: View {
     @State private var towerTouched = false
     /// 编辑前原房号目录 key（房号变更时迁移媒体目录）
     @State private var originalRoomKey = ""
+    /// v1.7：房号实时查重——输入时即提示（变红），与保存时校验同一口径
+    @State private var duplicateHint: House?
+    @State private var showDuplicateHint = false
 
     private var isEditing: Bool { house != nil }
 
@@ -49,6 +52,7 @@ struct HouseEditView: View {
                             .frame(width: 64, alignment: .leading)
                         TextField("如 2334 或 2-1418", text: $roomNo)
                             .keyboardType(.numbersAndPunctuation)
+                            .foregroundColor(showDuplicateHint ? .red : .primary)
                             .onChange(of: roomNo) { _, newValue in
                                 guard !towerTouched else { return }
                                 if newValue.hasPrefix("2-") || newValue.hasPrefix("2－") {
@@ -57,6 +61,17 @@ struct HouseEditView: View {
                                     tower = 1
                                 }
                             }
+                            .onChange(of: roomNo) { _, newValue in
+                                // v1.7：输入房号时实时查重（同座同房号视为重复，变红提示）
+                                checkDuplicate(for: newValue)
+                            }
+                    }
+                    // v1.7：重复房号实时提示（类似注册账号检测是否可用）
+                    if showDuplicateHint, let dup = duplicateHint {
+                        Text("该房号已收录：\(dup.tower == 2 ? "2-" : "")\(dup.roomNo)（\(dup.layout.isEmpty ? "户型未填" : dup.layout)，\(dup.status.label)）\n同一座同一房号不能重复添加")
+                            .font(.caption)
+                            .foregroundColor(.red)
+                            .padding(.leading, 64)
                     }
 
                     HStack {
@@ -255,6 +270,48 @@ struct HouseEditView: View {
         originalRoomKey = house.mediaRoomKey
     }
 
+    // MARK: - v1.7 房号查重（实时提示 + 保存校验同一口径）
+
+    /// 房号归一化：剥离「2- / 2－ / 1-」座号前缀，只留房号本体（2座保留前缀语义由 tower 承载）
+    private func normalizedRoom(_ s: String) -> String {
+        var t = s.trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "2－", with: "2-")
+        if t.hasPrefix("2-") { t = String(t.dropFirst(2)) }
+        if t.hasPrefix("1-") { t = String(t.dropFirst(2)) }
+        return t
+    }
+
+    /// 查重：同座同房号视为重复；排除自己与已进回收站的房源
+    private func duplicateCheck(for rawRoomNo: String, tower: Int = 0) -> House? {
+        let clean = normalizedRoom(rawRoomNo)
+        guard !clean.isEmpty else { return nil }
+        guard let ctx = houseModelContext else { return nil }
+        let effectiveTower = tower > 0 ? tower : self.tower
+        let all = (try? ctx.fetch(FetchDescriptor<House>())) ?? []
+        return all.first { other in
+            if other.isDeleted { return false }
+            let isSelf = house.map { other.id == $0.id } ?? false
+            guard !isSelf else { return false }
+            return other.tower == effectiveTower && normalizedRoom(other.roomNo) == clean
+        }
+    }
+
+    /// 输入时实时检测：命中重复 → 变红提示；清空或无重复 → 复位
+    private func checkDuplicate(for rawRoomNo: String) {
+        guard !normalizedRoom(rawRoomNo).isEmpty else {
+            showDuplicateHint = false
+            duplicateHint = nil
+            return
+        }
+        if let dup = duplicateCheck(for: rawRoomNo) {
+            showDuplicateHint = true
+            duplicateHint = dup
+        } else {
+            showDuplicateHint = false
+            duplicateHint = nil
+        }
+    }
+
     private func save() {
         let trimmedRoomNo = roomNo.trimmingCharacters(in: .whitespacesAndNewlines)
             .replacingOccurrences(of: "2－", with: "2-")
@@ -267,13 +324,8 @@ struct HouseEditView: View {
         }
 
         // v1.30：登记查重——以房号为唯一标准（同一座、同一房号视为同一套，禁止重复收录）。
-        // 编辑房源时若座号/房号都没变，不查（避免把自己误判为重复）；新增必查。
-        let allHouses = (try? modelContext.fetch(FetchDescriptor<House>())) ?? []
-        let duplicate = allHouses.first { other in
-            let isSelf = house.map { other.id == $0.id } ?? false
-            return !isSelf && other.tower == tower && other.roomNo == cleanRoomNo
-        }
-        if let duplicate {
+        // v1.7：实时提示与保存校验统一走 duplicateCheck（归一化房号 + 排除自身 + 排除回收站房源）。
+        if let duplicate = duplicateCheck(for: roomNo, tower: tower) {
             errorMessage = "这套房源已收录过：\(duplicate.tower == 2 ? "2-" : "")\(duplicate.roomNo)（\(duplicate.layout.isEmpty ? "户型未填" : duplicate.layout)，\(duplicate.status.label)）\n同一座同一房号不能重复添加"
             showError = true
             return

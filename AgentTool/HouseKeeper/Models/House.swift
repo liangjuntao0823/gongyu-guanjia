@@ -30,6 +30,9 @@ final class House {
     var statusRaw: String
     var createdAt: Date
     var updatedAt: Date
+    /// 软删除标记：删除房源先进回收站（不删文件），回收站彻底删除才移除
+    var isDeleted: Bool
+    var deletedAt: Date?
 
     @Relationship(deleteRule: .cascade, inverse: \MediaItem.house)
     var mediaItems: [MediaItem]
@@ -60,6 +63,8 @@ final class House {
         self.statusRaw = status.rawValue
         self.createdAt = Date()
         self.updatedAt = Date()
+        self.isDeleted = false
+        self.deletedAt = nil
         self.mediaItems = []
     }
 }

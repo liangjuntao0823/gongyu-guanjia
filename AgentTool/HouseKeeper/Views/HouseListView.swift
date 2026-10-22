@@ -5,7 +5,6 @@ struct HouseListView: View {
     /// 房源板块使用独立 HouseStore 容器的专属 context（由 App 注入）。
     /// 不能用主容器的 modelContext——iOS 17 早期版本多配置容器上查询会崩溃（闪退根因）。
     @Environment(\.houseModelContext) private var houseModelContext
-    @EnvironmentObject private var tabRouter: TabRouter   // v1.6：设置入口切到主设置 Tab
     @State private var houses: [House] = []
 
     static let houseStoreChanged = Notification.Name("houseStoreChanged")
@@ -15,6 +14,14 @@ struct HouseListView: View {
     @State private var statusFilter: HouseStatus? = .available   // 首页默认显示待租房源
     @State private var layoutFilters: Set<String> = []   // v1.3：户型筛选支持多选，空 = 全部户型
     @State private var showAdd = false
+
+    // 卡片左滑菜单（编辑 / 分享 / 删除）
+    @State private var showEditHouse: House?
+    @State private var singleShareHouse: House?
+    @State private var showSingleSharePicker = false
+    @State private var showDeleteConfirm = false
+    @State private var deleteTarget: House?
+    @State private var showDetailHouse: House?
 
     // v1.22：首页多选分享——一次选多套，生成【一个合集分享卡片】（好友点开链接即可查看全部 N 套），
     // 不再逐套生成链接逐次弹微信，避免 App 与微信来回跳转
@@ -77,17 +84,10 @@ struct HouseListView: View {
                     houseList
                 }
             }
-            .navigationTitle("房源管家")
+            .navigationTitle("公寓管家")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    // v1.6：房源设置已合并进主 App 设置页，此按钮一键切到「设置」Tab
-                    Button {
-                        tabRouter.selectedTab = 6
-                    } label: {
-                        Image(systemName: "gearshape")
-                    }
-                }
+                // v1.7：房源设置已合并进主 App 设置页，左上角设置按钮移除（无独立设置入口）
                 ToolbarItem(placement: .topBarTrailing) {
                     if isSelecting {
                         Button("取消") { exitMultiSelect() }
@@ -99,11 +99,12 @@ struct HouseListView: View {
                             } label: {
                                 Image(systemName: "checkmark.circle")
                             }
+                            // v1.7：+ 按钮样式与其他板块一致（plus.circle.fill + 主题绿）
                             Button {
                                 showAdd = true
                             } label: {
-                                Image(systemName: "plus")
-                                    .font(.body.weight(.semibold))
+                                Image(systemName: "plus.circle.fill")
+                                    .foregroundColor(.themeAccent)
                             }
                         }
                     }
@@ -112,6 +113,12 @@ struct HouseListView: View {
             .sheet(isPresented: $showAdd) {
                 HouseEditView(house: nil)
             }
+            .sheet(item: $showEditHouse) { house in
+                HouseEditView(house: house)
+            }
+            .navigationDestination(item: $showDetailHouse) { house in
+                HouseDetailView(house: house)
+            }
             // v1.22：多选分享——选「脱敏 / 完整」后生成一个合集卡片链接
             .confirmationDialog("选择分享方式", isPresented: $showShareModePicker, titleVisibility: .visible) {
                 Button("发给客户（隐藏版）") { generateShareQueue(mode: .masked) }
@@ -119,6 +126,25 @@ struct HouseListView: View {
                 Button("取消", role: .cancel) {}
             } message: {
                 Text("已选 \(selectedHouseIDs.count) 套，将生成一个合集分享卡片：好友点开链接即可查看全部房源，每套单独一页（含实拍图/视频）。隐藏版不显示房号/价格/房东，完整版显示全部信息。")
+            }
+            // 卡片左滑「分享」：单套分享，选「脱敏 / 完整」后生成单张卡片链接
+            .confirmationDialog("选择分享方式", isPresented: $showSingleSharePicker, titleVisibility: .visible) {
+                Button("发给客户（隐藏版）") { generateSingleShare(mode: .masked) }
+                Button("发给同事（完整版）") { generateSingleShare(mode: .full) }
+                Button("取消", role: .cancel) {}
+            } message: {
+                Text("隐藏版只显示户型、位置和您的联系方式；完整版额外显示房号、价格、房东和密码。")
+            }
+            // 卡片左滑「删除」：二级确认后移入回收站（不删除照片视频文件）
+            .confirmationDialog("删除这套房源？", isPresented: $showDeleteConfirm, titleVisibility: .visible) {
+                Button("移入回收站", role: .destructive) {
+                    if let target = deleteTarget {
+                        softDeleteHouse(target)
+                    }
+                }
+                Button("取消", role: .cancel) {}
+            } message: {
+                Text("删除后进入「设置 → 回收站」可恢复；照片和视频保留在本地，彻底删除时才会移除。")
             }
             .sheet(item: $currentShareStep, onDismiss: {
                 // 上一张分享面板关闭后自动弹下一张；全部发完自动退出多选
@@ -165,10 +191,11 @@ struct HouseListView: View {
         }
     }
 
-    /// 从独立 HouseStore 配置拉取房源（按创建时间倒序，与原来 @Query 一致）
+    /// 从独立 HouseStore 配置拉取房源（按创建时间倒序，与原来 @Query 一致；v1.7：排除已进回收站的软删除房源）
     private func reloadHouses() {
         guard let ctx = houseModelContext else { return }
         var descriptor = FetchDescriptor<House>(sortBy: [SortDescriptor(\House.createdAt, order: .reverse)])
+        descriptor.predicate = #Predicate<House> { !$0.isDeleted }
         houses = (try? ctx.fetch(descriptor)) ?? []
     }
 
@@ -365,12 +392,26 @@ struct HouseListView: View {
                                 }
                                 .buttonStyle(.plain)
                             } else {
-                                NavigationLink {
-                                    HouseDetailView(house: house)
-                                } label: {
+                                // v1.7：卡片左滑菜单（编辑 / 分享 / 删除），点击卡片进入详情
+                                SwipeActionRow(
+                                    actions: [
+                                        SwipeActionItem(title: "编辑", icon: "square.and.pencil", color: AppTheme.primary) {
+                                            showEditHouse = house
+                                        },
+                                        SwipeActionItem(title: "分享", icon: "square.and.arrow.up", color: Color.themeAccentDark) {
+                                            singleShareHouse = house
+                                            showSingleSharePicker = true
+                                        },
+                                        SwipeActionItem(title: "删除", icon: "trash", color: Color.themeRed) {
+                                            deleteTarget = house
+                                            showDeleteConfirm = true
+                                        }
+                                    ],
+                                    contentBackground: .clear,
+                                    onTap: { showDetailHouse = house }
+                                ) {
                                     HouseCardView(house: house)
                                 }
-                                .buttonStyle(.plain)
                             }
                         }
                     }
@@ -433,10 +474,68 @@ struct HouseListView: View {
         currentShareStep = nil
     }
 
+    /// v1.7：卡片左滑「删除」→ 软删除进回收站（标记 isDeleted，不删除照片/视频文件）
+    private func softDeleteHouse(_ house: House) {
+        guard let ctx = houseModelContext else { return }
+        house.isDeleted = true
+        house.deletedAt = Date()
+        try? ctx.save()
+        NotificationCenter.default.post(name: Self.houseStoreChanged, object: nil)
+    }
+
+    /// v1.7：卡片左滑「分享」→ 单套分享卡片（脱敏 / 完整），生成链接后弹系统分享面板
+    /// 注意：Task 内只传值类型，绝不直接访问 SwiftData @Model（跨线程读取模型会闪退）
+    private func generateSingleShare(mode: ShareMode) {
+        guard let house = singleShareHouse else { return }
+        guard let config = CosConfig.load(), config.isValid else {
+            shareError = "请先到「设置 → 房源分享 → 远程配置」填写云存储配置（腾讯云 COS）并保存验证，再分享卡片链接"
+            return
+        }
+        guard !house.mediaItems.isEmpty else {
+            shareError = "这套房源还没有照片或视频，先编辑添加素材再分享"
+            return
+        }
+        let files = house.mediaItems.map { ShareMediaFile(name: $0.fileName, kind: $0.kind) }
+        let roomKey = house.mediaRoomKey
+        let profile = CosUploader.loadShareProfile()
+        let info = ShareHouseInfo(
+            displayRoomNo: house.displayRoomNo,
+            towerLabel: house.towerLabel,
+            layout: house.layout,
+            statusLabel: house.status.label,
+            priceText: house.priceText,
+            landlord: house.landlord,
+            password: house.password,
+            remark: house.remark,
+            name: profile.name,
+            phone: profile.phone
+        )
+        isGenerating = true
+        generateTip = "正在生成分享卡片，上传照片和视频…"
+        Task {
+            do {
+                let url = try await CosUploader.shareCard(mediaFiles: files, roomKey: roomKey, info: info, mode: mode, config: config)
+                await MainActor.run {
+                    isGenerating = false
+                    shareQueue = [url]
+                    shareIndex = 0
+                    currentShareStep = ShareStep(url: url)
+                    singleShareHouse = nil
+                }
+            } catch {
+                await MainActor.run {
+                    isGenerating = false
+                    shareError = error.localizedDescription
+                    singleShareHouse = nil
+                }
+            }
+        }
+    }
+
     private func startMultiShare() {
         guard !selectedHouseIDs.isEmpty else { return }
         guard let config = CosConfig.load(), config.isValid else {
-            shareError = "请先点击左上角「设置」，填写云存储配置（腾讯云 COS）并保存验证，再分享卡片链接"
+            shareError = "请先到「设置 → 房源分享 → 远程配置」填写云存储配置（腾讯云 COS）并保存验证，再分享卡片链接"
             return
         }
         // 过滤出有素材的房源（无照片视频的无法生成卡片）
@@ -452,7 +551,7 @@ struct HouseListView: View {
     /// 注意：值类型（ShareCollectionItem）在主线程构建完成，Task 内只传递值，绝不直接访问 SwiftData @Model（跨线程读取模型会闪退）
     private func generateShareQueue(mode: ShareMode) {
         guard let config = CosConfig.load(), config.isValid else {
-            shareError = "请先点击左上角「设置」，填写云存储配置（腾讯云 COS）并保存验证，再分享卡片链接"
+            shareError = "请先到「设置 → 房源分享 → 远程配置」填写云存储配置（腾讯云 COS）并保存验证，再分享卡片链接"
             return
         }
         let shareable = houses.filter { selectedHouseIDs.contains($0.id) && !$0.mediaItems.isEmpty }

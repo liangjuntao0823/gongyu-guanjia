@@ -20,8 +20,8 @@ struct AgentToolApp: App {
         UserDefaults.standard.synchronize()
         LocalNotificationManager.shared.configure()
 
-        // 房源管家板块数据存独立 store（Documents/备份/housekeeper.store + Media 文件夹），
-        // 与租房管家经营数据（默认 default.store）完全隔离：复制「备份」文件夹即可整体还原房源数据
+        // 房源板块数据存独立 store（Documents/备份/housekeeper.store + Media 文件夹），
+        // 与主 App 经营数据（默认 default.store）完全隔离：复制「备份」文件夹即可整体还原房源数据
         BackupGuide.ensureExists()
 
         // 关键：两个数据体系必须用【两个独立 ModelContainer】，不能合成一个多配置容器——
@@ -67,7 +67,7 @@ struct AgentToolApp: App {
         }
     }
 
-    /// 创建两个持久化 ModelContainer（租房管家经营数据 → 默认 store；房源管家数据 → Documents/备份/housekeeper.store）
+    /// 创建两个持久化 ModelContainer（主 App 经营数据 → 默认 store；房源数据 → Documents/备份/housekeeper.store）
     private static func makePersistentContainers() throws -> (ModelContainer, ModelContainer) {
         let mainSchema = Schema([
             Property.self, RentMonthRecord.self, UtilityQuarterRecord.self, UtilitySettlementRecord.self, TodoItem.self,
@@ -117,7 +117,7 @@ struct AgentToolApp: App {
 }
 
 // 房源板块专用 ModelContext（独立 HouseStore 容器）。
-// 租房管家页面继续用主容器的 @Environment(\.modelContext)；房源页面用 houseModelContext。
+// 主 App 页面继续用主容器的 @Environment(\.modelContext)；房源页面用 houseModelContext。
 private struct HouseModelContextKey: EnvironmentKey {
     static let defaultValue: ModelContext? = nil
 }
@@ -150,10 +150,13 @@ struct MainTabView: View {
     private let automaticBackupTimer = Timer.publish(every: 30, on: .main, in: .common).autoconnect() // 记录已访问的tab，默认工作台已访问
 
     init() {
+        // v1.7：去掉系统导航栏底部阴影分隔线（所有板块顶部与滚动后都不再出现系统横线）；
+        // 设置页需要的「滚动后才显示」分隔线由 SettingsView 用滚动检测 overlay 动态绘制
         let navAppearance = UINavigationBarAppearance()
         navAppearance.configureWithOpaqueBackground()
         navAppearance.backgroundColor = UIColor(Color.themeBg)
         navAppearance.titleTextAttributes = [.foregroundColor: UIColor(Color.themeText)]
+        navAppearance.shadowColor = .clear
         UINavigationBar.appearance().standardAppearance = navAppearance
         UINavigationBar.appearance().scrollEdgeAppearance = navAppearance
     }

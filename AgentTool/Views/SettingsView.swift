@@ -22,6 +22,8 @@ struct SettingsView: View {
     @State private var showMigration = false
     @State private var showBillTemplate = false
     @State private var showTrash = false   // v1.3：回收站入口从工作台移至设置页
+    @State private var showBackupBrowse = false   // v1.7：查看备份文件（内部浏览组件，只读）
+    @State private var settingsScrollY: CGFloat = 0   // v1.7：设置页滚动检测（顶部标题横线动态显示）
     // v1.6：房源分享设置合并进主设置（原房源板块独立设置页取消）
     @State private var showHouseCacheConfirm = false
     @State private var houseCacheTip: String?
@@ -91,13 +93,14 @@ struct SettingsView: View {
     }
 
     // MARK: - 设置页 Section 分组（v1.6 拆分，避免 Form 表达式 type-check 超时）
+    // v1.7：备份/恢复仅针对租房数据（成交/收租/包租/汇总/待办），房源数据走「房源分享 → 数据文件夹」整文件夹备份
     private var dataSection: some View {
         Section {
             Button { showBackupSheet = true } label: {
-                Label("备份数据", systemImage: "square.and.arrow.down")
+                Label("备份租房数据（不含房源）", systemImage: "square.and.arrow.down")
             }
             Button { showRestoreSheet = true } label: {
-                Label("恢复数据", systemImage: "square.and.arrow.up")
+                Label("恢复租房数据（不含房源）", systemImage: "square.and.arrow.up")
             }
             Button { showClearSheet = true } label: {
                 HStack {
@@ -109,8 +112,12 @@ struct SettingsView: View {
                         .foregroundColor(.secondary)
                 }
             }
+            // v1.7：查看备份文件——内部浏览组件（与恢复备份文件选文件同款窗口），不跳文件 App
+            Button { showBackupBrowse = true } label: {
+                Label("查看备份文件", systemImage: "folder")
+            }
         } footer: {
-            Text("备份与恢复均为手动操作，建议重要数据每次修改后及时备份。")
+            Text("备份与恢复仅针对租房数据（成交 / 收租 / 包租 / 汇总 / 待办），不包含房源。房源数据（数据库、图片、视频）请到「房源分享 → 打开『文件』App 查看数据文件夹」，长按「备份」文件夹拷贝/共享即为备份，重装后放回原位即可还原。备份与恢复均为手动操作，建议重要数据每次修改后及时备份。")
         }
     }
 
@@ -334,6 +341,7 @@ struct SettingsView: View {
     }
 
     /// v1.6：设置页主体拆为独立属性（避免 body 表达式 type-check 超时）
+    /// v1.7：tint 改为 iOS 原生蓝（房源管家风格设置页配色）；顶部横线随滚动动态显示
     private var settingsForm: some View {
         Form {
                 dataSection
@@ -344,6 +352,20 @@ struct SettingsView: View {
                 houseShareSection
                 ringtoneSection
                 aboutSection
+            }
+            .tint(Color(red: 0.0, green: 0.478, blue: 1.0))   // iOS 系统蓝 #007AFF
+            .overlay(alignment: .top) {
+                // v1.7：页面在顶部时不显示横线；向下滑动（顶栏固定）才出现分隔线
+                Rectangle()
+                    .fill(Color.themeBorder)
+                    .frame(height: 0.5)
+                    .opacity(settingsScrollY > 1 ? 1 : 0)
+                    .animation(.easeOut(duration: 0.15), value: settingsScrollY > 1)
+            }
+            .onScrollGeometryChange(for: CGFloat.self) { proxy in
+                max(0, proxy.contentOffset.y)
+            } action: { _, newY in
+                settingsScrollY = newY
             }
             .navigationTitle("设置")
             .navigationBarTitleDisplayMode(.inline)
@@ -422,6 +444,10 @@ struct SettingsView: View {
             }
             .sheet(isPresented: $showTrash) {
                 TrashView()
+            }
+            // v1.7：查看备份文件（内部浏览组件，只读；与恢复备份文件选文件同款窗口）
+            .sheet(isPresented: $showBackupBrowse) {
+                BackupFileBrowseView()
             }
             // v1.6：房源分享缓存刷新（二级确认，防止误触导致全部链接失效）
             .confirmationDialog("刷新分享缓存", isPresented: $showHouseCacheConfirm, titleVisibility: .visible) {
@@ -508,6 +534,7 @@ struct SettingsView: View {
 // MARK: - 版本更新介绍
 struct VersionHistoryView: View {
     let versions: [(version: String, date: String, changes: [String])] = [
+        ("v1.7", "2026-10-23", ["品牌全局统一：所有「房源管家 / 租房管家」残留文案替换为「公寓管家」（含备份提示、数据文件夹说明）", "房源板块底色统一为主 App 深绿主题（背景 / 主色 / 强调色对齐，不再暖白/深墨蓝/琥珀）", "设置页图标与字体配色改为 iOS 原生蓝（房源管家风格）", "设置页顶部横线动态化：页面在顶部不显示，向下滑动、顶栏固定后才显示分隔线", "登记房源房号实时查重：输入即检测，重复房号变红提示（与保存时校验同口径，兼容 1- / 2- 前缀）", "房源板块：移除左上角设置按钮（已合并至主设置）；右上角 + 按钮样式与其他板块统一", "房源卡片左滑菜单：编辑 / 分享 / 删除（删除二次确认后移入回收站，不再直接删照片视频文件）", "回收站：新增房源板块（软删除房源可还原/彻底删除，彻底删除才移除本地文件）；顶部增加板块分类标签筛选；清空支持清空单个板块或全部", "备份/恢复文案更新：「备份租房数据（不含房源）」「恢复租房数据（不含房源）」，补充房源数据备份/恢复说明", "新增「查看备份文件」：设置页数据管理与远程配置备份 COS 处均可用内部浏览组件查看备份文件，不再跳文件 App"]),
         ("v1.6", "2026-10-22", ["设置统一：房源板块独立设置页取消，全部合并进主 App「设置 → 房源分享」分组（远程配置/名片信息/分享压缩/刷新缓存/房源数据）", "房源板块左上角设置按钮：一键跳转主「设置」页，全 App 只保留一个设置入口", "UI 按房源管家设置页原生 iOS 风格统一（Form 分组 + 小字说明）", "配色恢复为原租房管家深绿主题"]),
         ("v1.4", "2026-10-22", ["回收站入口调整：移至设置页右上角（图标+文字按钮），不再占用数据管理列表", "工作台「新增房源」：不再跳转房源板块，改为直接弹出登记表单（与新增收租/新增成交一致），保存后房源列表自动刷新"]),
         ("v1.3", "2026-10-22", ["房源板块：户型筛选支持多选（可同时筛选多种户型）", "房源设置：刷新分享缓存增加二次确认，防止误触", "房源设置：移除底部版本号", "分享压缩开关默认开启（此前默认关闭，视频按原文件上传）", "工作台：回收站入口移至设置页，空位新增「新增房源」入口"]),
@@ -1135,4 +1162,102 @@ struct BillTemplateSettingsView: View {
             showAlert = true
         }
     }
+}
+
+// MARK: - v1.7 查看备份文件（内部浏览组件，只读）
+/// 列出全部板块（成交 / 收租 / 包租 / 总备份）的备份文件：文件名 + 板块 + 大小 + 时间。
+/// 与「恢复备份文件」选文件同款内部列表窗口，不跳系统「文件」App。
+struct BackupFileBrowseView: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var files: [BackupFileEntry] = []
+    private let backupManager = DataBackupManager.shared
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if files.isEmpty {
+                    VStack(spacing: 12) {
+                        Image(systemName: "tray")
+                            .font(.system(size: 44))
+                            .foregroundColor(.secondary)
+                        Text("还没有备份文件")
+                            .font(.headline)
+                        Text("在「备份租房数据」里选择板块并备份后，文件会出现在这里")
+                            .font(.footnote)
+                            .foregroundColor(.secondary)
+                            .multilineTextAlignment(.center)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    List {
+                        Section("全部备份文件") {
+                            ForEach(files) { file in
+                                VStack(alignment: .leading, spacing: 4) {
+                                    HStack {
+                                        Text(file.name)
+                                            .font(.subheadline.weight(.medium))
+                                            .lineLimit(1)
+                                        Spacer()
+                                        Text(file.sizeText)
+                                            .font(.footnote)
+                                            .foregroundColor(.secondary)
+                                    }
+                                    Text("\(file.typeLabel) · \(file.dateText)")
+                                        .font(.footnote)
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle("查看备份文件")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("关闭") { dismiss() }
+                }
+            }
+            .onAppear(perform: loadFiles)
+        }
+    }
+
+    private func loadFiles() {
+        var entries: [BackupFileEntry] = []
+        let types: [(DataBackupManager.BackupType, String)] = [
+            (.deals, "成交备份"),
+            (.properties, "收租备份"),
+            (.payouts, "包租备份"),
+            (.total, "总备份")
+        ]
+        for (type, label) in types {
+            for url in backupManager.listBackups(in: type) {
+                let size = (try? backupManager.backupFileSize(at: url, type: type)) ?? 0
+                let date = (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+                entries.append(BackupFileEntry(
+                    name: url.lastPathComponent,
+                    typeLabel: label,
+                    sizeText: ByteCountFormatter.string(fromByteCount: size, countStyle: .file),
+                    dateText: Self.dateFormatter.string(from: date)
+                ))
+            }
+        }
+        entries.sort { $0.dateText > $1.dateText }
+        files = entries
+    }
+
+    private static let dateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd HH:mm"
+        f.locale = Locale(identifier: "zh_CN")
+        return f
+    }()
+}
+
+struct BackupFileEntry: Identifiable {
+    let id = UUID()
+    let name: String
+    let typeLabel: String
+    let sizeText: String
+    let dateText: String
 }

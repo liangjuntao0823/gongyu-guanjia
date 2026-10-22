@@ -67,7 +67,7 @@ struct HouseDetailView: View {
             Button("删除房源", role: .destructive) { deleteHouse() }
             Button("取消", role: .cancel) {}
         } message: {
-            Text("将同时删除该房源的照片和视频，且无法恢复。")
+            Text("删除后进入「设置 → 回收站」可恢复；照片和视频保留在本地，彻底删除时才会移除。")
         }
         .confirmationDialog("选择分享方式", isPresented: $showShareModePicker, titleVisibility: .visible) {
             // v1.21：脱敏版隐藏房号/价格/房东，发给找房客户；完整版显示全部信息，发给同事
@@ -429,10 +429,12 @@ struct HouseDetailView: View {
     }
 
     private func deleteHouse() {
-        // v1.35：同步删除本地全部文件（整个房号目录 + 分享缓存），磁盘不留残留
-        MediaStore.deleteHouseDirectory(roomKey: house.mediaRoomKey)
-        modelContext.delete(house)
-        try? modelContext.save()
+        // v1.7：删除改为软删除进回收站——不再同步删除照片/视频文件；
+        // 文件（整个房号目录 + 分享缓存）在「设置 → 回收站」彻底删除该房源时才移除
+        guard let ctx = houseModelContext else { return }
+        house.isDeleted = true
+        house.deletedAt = Date()
+        try? ctx.save()
         NotificationCenter.default.post(name: HouseListView.houseStoreChanged, object: nil)
         dismiss()
     }
@@ -440,7 +442,7 @@ struct HouseDetailView: View {
     /// 分享入口（v1.21）：先做前置校验（配置 / 素材），再弹「脱敏 / 完整」选择器
     private func shareHouseCard() {
         guard let config = CosConfig.load(), config.isValid else {
-            shareError = "请先在首页左上角「设置」里填写云存储配置（腾讯云 COS），再分享卡片链接"
+            shareError = "请先到「设置 → 房源分享 → 远程配置」填写云存储配置（腾讯云 COS），再分享卡片链接"
             return
         }
         guard !house.mediaItems.isEmpty else {
@@ -455,7 +457,7 @@ struct HouseDetailView: View {
     /// 否则跨线程读取模型会闪退（分享闪退修复根因）
     private func startShare(mode: ShareMode) {
         guard let config = CosConfig.load(), config.isValid else {
-            shareError = "请先在首页左上角「设置」里填写云存储配置（腾讯云 COS），再分享卡片链接"
+            shareError = "请先到「设置 → 房源分享 → 远程配置」填写云存储配置（腾讯云 COS），再分享卡片链接"
             return
         }
         // 先在主线程把所有数据拷成值类型，Task 里不再触碰 SwiftData 模型

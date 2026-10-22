@@ -1,10 +1,32 @@
 import SwiftUI
 import SwiftData
 
+// MARK: - 回收站板块分类（v1.7：顶部标签按板块筛选 + 分区清空）
+enum TrashFilter: String, CaseIterable, Identifiable {
+    case all, house, deal, property, income, expense, payout, todo
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .all: return "全部"
+        case .house: return "房源"
+        case .deal: return "成交"
+        case .property: return "收租"
+        case .income: return "杂项收入"
+        case .expense: return "杂项支出"
+        case .payout: return "包租"
+        case .todo: return "待办"
+        }
+    }
+}
+
 // MARK: - 回收站（软删除记录统一管理）
 struct TrashView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
+    /// v1.7：房源数据在独立 HouseStore 容器，回收站查房源需用专属 context
+    @Environment(\.houseModelContext) private var houseModelContext
 
     @Query(filter: #Predicate<DealRecord> { $0.isDeleted }, sort: \DealRecord.deletedAt, order: .reverse) private var deals: [DealRecord]
     @Query(filter: #Predicate<MiscIncome> { $0.isDeleted }, sort: \MiscIncome.deletedAt, order: .reverse) private var incomes: [MiscIncome]
@@ -13,6 +35,10 @@ struct TrashView: View {
     @Query(filter: #Predicate<PayoutRecord> { $0.isDeleted }, sort: \PayoutRecord.deletedAt, order: .reverse) private var payouts: [PayoutRecord]
     @Query(filter: #Predicate<TodoItem> { $0.isDeleted }, sort: \TodoItem.deletedAt, order: .reverse) private var todos: [TodoItem]
 
+    /// v1.7：房源软删除记录（独立容器手动拉取，不入 @Query）
+    @State private var houses: [House] = []
+
+    @State private var filter: TrashFilter = .all   // v1.7：板块分类筛选
     @State private var isSelecting = false
     @State private var selectedIDs = Set<UUID>()
     @State private var pendingDeleteItem: TrashItem?
@@ -21,31 +47,83 @@ struct TrashView: View {
     @State private var showBatchDeleteConfirm = false
     @State private var showBatchRestoreConfirm = false
 
-    private var totalCount: Int { deals.count + incomes.count + expenses.count + properties.count + payouts.count + todos.count }
+    private var totalCount: Int { deals.count + incomes.count + expenses.count + properties.count + payouts.count + todos.count + houses.count }
+
+    /// 当前筛选口径下的记录数（决定列表与空态）
+    private var filteredTotal: Int {
+        switch filter {
+        case .all: return totalCount
+        case .house: return houses.count
+        case .deal: return deals.count
+        case .property: return properties.count
+        case .income: return incomes.count
+        case .expense: return expenses.count
+        case .payout: return payouts.count
+        case .todo: return todos.count
+        }
+    }
 
     @ViewBuilder private var mainContent: some View {
-        if totalCount == 0 { emptyView } else { recordList }
+        if filteredTotal == 0 { emptyView } else { recordList }
     }
 
     private var emptyView: some View {
         VStack(spacing: 12) {
             Image(systemName: "trash").font(.system(size: 44)).foregroundColor(.themeText3)
-            Text("回收站是空的").font(.system(size: 15)).foregroundColor(.themeText3)
+            Text(filter == .all ? "回收站是空的" : "「\(filter.title)」暂无记录")
+                .font(.system(size: 15)).foregroundColor(.themeText3)
         }.frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    // v1.7：顶部板块分类标签（全部 / 房源 / 成交 / 收租 / 杂项收入 / 杂项支出 / 包租 / 待办）
+    private var filterBar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(TrashFilter.allCases) { item in
+                    Button {
+                        filter = item
+                        if !isSelecting { selectedIDs.removeAll() }
+                    } label: {
+                        Text(item.title)
+                            .font(.footnote.weight(filter == item ? .semibold : .regular))
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(filter == item ? Color.themeAccent : Color.themePanel)
+                            .foregroundColor(filter == item ? .white : .primary)
+                            .clipShape(Capsule())
+                            .overlay(Capsule().stroke(Color.themeBorder, lineWidth: filter == item ? 0 : 1))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 16)
+        }
+        .padding(.vertical, 8)
+        .background(Color.themeBg)
     }
 
     private var recordList: some View {
         List {
-            if !deals.isEmpty { dealSection }
-            if !properties.isEmpty { propertySection }
-            if !incomes.isEmpty { incomeSection }
-            if !expenses.isEmpty { expenseSection }
-            if !payouts.isEmpty { payoutSection }
-            if !todos.isEmpty { todoSection }
+            if (filter == .all || filter == .house) && !houses.isEmpty { houseSection }
+            if (filter == .all || filter == .deal) && !deals.isEmpty { dealSection }
+            if (filter == .all || filter == .property) && !properties.isEmpty { propertySection }
+            if (filter == .all || filter == .income) && !incomes.isEmpty { incomeSection }
+            if (filter == .all || filter == .expense) && !expenses.isEmpty { expenseSection }
+            if (filter == .all || filter == .payout) && !payouts.isEmpty { payoutSection }
+            if (filter == .all || filter == .todo) && !todos.isEmpty { todoSection }
         }
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
         .background(Color.themeBg)
+    }
+
+    // v1.7：房源板块（软删除房源在此还原 / 彻底删除；彻底删除才移除本地照片视频文件）
+    private var houseSection: some View {
+        Section("房源（\(houses.count)）") {
+            ForEach(houses) { item in
+                trashRow(title: "\(item.displayRoomNo) · \(item.landlord.isEmpty ? "无房东" : item.landlord)", detail: "租金 \(item.price)元/月", id: item.id, deletedAt: item.deletedAt, onRestore: { restoreHouse(item) }, onDelete: { deleteHouse(item) })
+            }
+        }
     }
 
     private var dealSection: some View {
@@ -117,10 +195,17 @@ struct TrashView: View {
 
     var body: some View {
         NavigationStack {
-            mainContent
+            VStack(spacing: 0) {
+                filterBar
+                mainContent
+            }
             .navigationTitle("回收站")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { toolbarContent }
+            .onAppear(perform: reloadHouses)
+            .onReceive(NotificationCenter.default.publisher(for: HouseListView.houseStoreChanged)) { _ in
+                reloadHouses()
+            }
             .alert("还原记录", isPresented: Binding(get: { pendingRestoreItem != nil }, set: { if !$0 { pendingRestoreItem = nil } })) {
                 Button("取消", role: .cancel) { pendingRestoreItem = nil }
                 Button("还原") { if let item = pendingRestoreItem { item.delete() }; pendingRestoreItem = nil }
@@ -129,10 +214,18 @@ struct TrashView: View {
                 Button("取消", role: .cancel) { pendingDeleteItem = nil }
                 Button("永久删除", role: .destructive) { if let item = pendingDeleteItem { permanentlyDelete(item) }; pendingDeleteItem = nil }
             } message: { Text("永久删除后无法恢复，确定删除这条记录吗？") }
-            .alert("清空回收站", isPresented: $showClearAllConfirm) {
+            // v1.7：清空支持「单个板块 / 全部板块」（二次确认）
+            .confirmationDialog("清空回收站", isPresented: $showClearAllConfirm, titleVisibility: .visible) {
+                Button("清空全部板块", role: .destructive) { clearFilter(.all) }
+                Button("只清空房源", role: .destructive) { clearFilter(.house) }
+                Button("只清空成交", role: .destructive) { clearFilter(.deal) }
+                Button("只清空收租", role: .destructive) { clearFilter(.property) }
+                Button("只清空杂项收入", role: .destructive) { clearFilter(.income) }
+                Button("只清空杂项支出", role: .destructive) { clearFilter(.expense) }
+                Button("只清空包租", role: .destructive) { clearFilter(.payout) }
+                Button("只清空待办", role: .destructive) { clearFilter(.todo) }
                 Button("取消", role: .cancel) { }
-                Button("全部清空", role: .destructive) { clearAll() }
-            } message: { Text("将永久删除回收站里全部 \(totalCount) 条记录，且无法恢复。确定清空吗？") }
+            } message: { Text("将永久删除所选板块回收站里的记录，且无法恢复。确定清空吗？") }
             .alert("批量永久删除", isPresented: $showBatchDeleteConfirm) {
                 Button("取消", role: .cancel) { }
                 Button("永久删除", role: .destructive) { batchDelete() }
@@ -227,7 +320,42 @@ struct TrashView: View {
         if selectedIDs.contains(id) { selectedIDs.remove(id) } else { selectedIDs.insert(id) }
     }
 
+    // MARK: - 房源（独立容器）
+
+    /// 拉取已软删除的房源（按删除时间倒序）
+    private func reloadHouses() {
+        guard let ctx = houseModelContext else { return }
+        var descriptor = FetchDescriptor<House>(sortBy: [SortDescriptor(\House.deletedAt, order: .reverse)])
+        descriptor.predicate = #Predicate<House> { $0.isDeleted }
+        houses = (try? ctx.fetch(descriptor)) ?? []
+    }
+
+    /// 还原房源：解除软删除标记，照片视频仍在本地
+    private func restoreHouse(_ item: House) {
+        guard let ctx = houseModelContext else { return }
+        item.isDeleted = false
+        item.deletedAt = nil
+        try? ctx.save()
+        reloadHouses()
+        NotificationCenter.default.post(name: HouseListView.houseStoreChanged, object: nil)
+    }
+
+    /// 彻底删除房源：先移除本地全部文件（整个房号目录 + 分享缓存），再删模型记录
+    private func deleteHousePermanently(_ item: House) {
+        guard let ctx = houseModelContext else { return }
+        MediaStore.deleteHouseDirectory(roomKey: item.mediaRoomKey)
+        ctx.delete(item)
+        try? ctx.save()
+        reloadHouses()
+        NotificationCenter.default.post(name: HouseListView.houseStoreChanged, object: nil)
+    }
+
+    private func deleteHouse(_ item: House) {
+        pendingDeleteItem = TrashItem(id: item.id, delete: { deleteHousePermanently(item) })
+    }
+
     // MARK: - 操作
+
     private func restore(_ item: DealRecord) { item.isDeleted = false; item.deletedAt = nil; save() }
     private func restore(_ item: MiscIncome) { item.isDeleted = false; item.deletedAt = nil; save() }
     private func restore(_ item: MiscExpense) { item.isDeleted = false; item.deletedAt = nil; save() }
@@ -244,6 +372,47 @@ struct TrashView: View {
 
     private func permanentlyDelete(_ item: TrashItem) { item.delete() }
 
+    /// v1.7：按板块清空（全部 / 房源 / 成交 / 收租 / 杂项收入 / 杂项支出 / 包租 / 待办）
+    private func clearFilter(_ type: TrashFilter) {
+        switch type {
+        case .house:
+            clearHouses()
+        case .deal:
+            deals.forEach { modelContext.delete($0) }
+            save()
+        case .property:
+            properties.forEach { modelContext.delete($0) }
+            save()
+        case .income:
+            incomes.forEach { modelContext.delete($0) }
+            save()
+        case .expense:
+            expenses.forEach { modelContext.delete($0) }
+            save()
+        case .payout:
+            payouts.forEach { modelContext.delete($0) }
+            save()
+        case .todo:
+            todos.forEach { modelContext.delete($0) }
+            save()
+        case .all:
+            clearAll()
+        }
+        isSelecting = false
+        selectedIDs.removeAll()
+    }
+
+    private func clearHouses() {
+        guard let ctx = houseModelContext else { return }
+        for item in houses {
+            MediaStore.deleteHouseDirectory(roomKey: item.mediaRoomKey)
+            ctx.delete(item)
+        }
+        try? ctx.save()
+        reloadHouses()
+        NotificationCenter.default.post(name: HouseListView.houseStoreChanged, object: nil)
+    }
+
     private func clearAll() {
         deals.forEach { modelContext.delete($0) }
         incomes.forEach { modelContext.delete($0) }
@@ -252,6 +421,7 @@ struct TrashView: View {
         payouts.forEach { modelContext.delete($0) }
         todos.forEach { modelContext.delete($0) }
         save()
+        clearHouses()
         isSelecting = false
         selectedIDs.removeAll()
     }
@@ -264,6 +434,17 @@ struct TrashView: View {
         payouts.filter { selectedIDs.contains($0.id) }.forEach { modelContext.delete($0) }
         todos.filter { selectedIDs.contains($0.id) }.forEach { modelContext.delete($0) }
         save()
+        // 房源批量永久删除：同时移除本地文件
+        let houseTargets = houses.filter { selectedIDs.contains($0.id) }
+        if !houseTargets.isEmpty, let ctx = houseModelContext {
+            for item in houseTargets {
+                MediaStore.deleteHouseDirectory(roomKey: item.mediaRoomKey)
+                ctx.delete(item)
+            }
+            try? ctx.save()
+            reloadHouses()
+            NotificationCenter.default.post(name: HouseListView.houseStoreChanged, object: nil)
+        }
         selectedIDs.removeAll()
     }
 
@@ -275,6 +456,17 @@ struct TrashView: View {
         payouts.filter { selectedIDs.contains($0.id) }.forEach { $0.isDeleted = false; $0.deletedAt = nil }
         todos.filter { selectedIDs.contains($0.id) }.forEach { $0.isDeleted = false; $0.deletedAt = nil }
         save()
+        // 房源批量还原
+        let houseTargets = houses.filter { selectedIDs.contains($0.id) }
+        if !houseTargets.isEmpty, let ctx = houseModelContext {
+            for item in houseTargets {
+                item.isDeleted = false
+                item.deletedAt = nil
+            }
+            try? ctx.save()
+            reloadHouses()
+            NotificationCenter.default.post(name: HouseListView.houseStoreChanged, object: nil)
+        }
         selectedIDs.removeAll()
     }
 
