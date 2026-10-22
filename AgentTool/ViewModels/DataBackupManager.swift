@@ -651,7 +651,7 @@ class DataBackupManager {
 
     // MARK: - 备份文件管理
     /// v1.13 需求16：旧版分板块 JSON 统一收纳到 Documents/备份/旧版备份/<板块>/（不再在根目录生成 成交备份/收租备份/… 文件夹）
-    func backupFolderURL(for type: BackupType) -> URL {
+    static func backupFolderURL(for type: BackupType) -> URL {
         let legacyRoot = DataRoot.url().appendingPathComponent("旧版备份", isDirectory: true)
         return legacyRoot.appendingPathComponent(type.rawValue, isDirectory: true)
     }

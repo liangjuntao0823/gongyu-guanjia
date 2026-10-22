@@ -145,10 +145,10 @@ struct AgentToolApp: App {
                 } message: {
                     Text(storageWarning ?? "")
                 }
-        }
-        // v1.13 需求17：其他 App 用「用其他 App 打开」把备份 zip 发过来时，复制进本地备份目录并提示去恢复
-        .onOpenURL { url in
-            BackupImportHandler.handleIncomingZip(url)
+                // v1.13 需求17：其他 App 用「用其他 App 打开」把备份 zip 发过来时，复制进本地备份目录并提示去恢复
+                .onOpenURL { url in
+                    BackupImportHandler.handleIncomingZip(url)
+                }
         }
         .modelContainer(mainContainer)
     }
