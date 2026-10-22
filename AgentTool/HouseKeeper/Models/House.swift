@@ -30,12 +30,17 @@ final class House {
     var statusRaw: String
     var createdAt: Date
     var updatedAt: Date
-    /// 软删除标记：删除房源先进回收站（不删文件），回收站彻底删除才移除
-    var isDeleted: Bool
+    /// 软删除标记：删除房源先进回收站（不删文件），回收站彻底删除才移除。
+    /// v1.8：改为可选字段——旧版本数据库没有此列，可选属性添加无需迁移、直接兼容（iOS 17 自动迁移对
+    /// 带 unique 属性的模型加「非可选」字段会打不开库，这是 v1.7 存储异常的根因）
+    var isDeleted: Bool?
     var deletedAt: Date?
 
     @Relationship(deleteRule: .cascade, inverse: \MediaItem.house)
     var mediaItems: [MediaItem]
+
+    /// 是否已移入回收站（旧数据无此字段 → nil 视为未删除）
+    var isTrashed: Bool { isDeleted ?? false }
 
     var status: HouseStatus {
         get { HouseStatus(rawValue: statusRaw) ?? .available }

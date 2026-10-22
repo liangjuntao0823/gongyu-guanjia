@@ -7,7 +7,9 @@ extension Color {
     static let themeAccent = Color(hex: "0FA48B")
     static let themeAccentDark = Color(hex: "0B7A66")
     static let themeAccentWeak = Color(hex: "E2F4EF")
-    static let themeBg = Color(hex: "F4F6F3")
+    /// v1.8：页面背景统一为 iOS 系统分组灰（#F2F2F7，与设置页 Form 默认背景一致），
+    /// 各功能板块不再用偏绿的 #F4F6F3，观感更接近系统原生设置页
+    static let themeBg = Color(hex: "F2F2F7")
     static let themePanel = Color.white
     static let themeText = Color(hex: "1C2D29")
     static let themeText2 = Color(hex: "5F716C")

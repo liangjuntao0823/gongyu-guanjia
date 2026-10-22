@@ -84,7 +84,7 @@ struct HouseListView: View {
                     houseList
                 }
             }
-            .navigationTitle("公寓管家")
+            .navigationTitle("房源管理")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 // v1.7：房源设置已合并进主 App 设置页，左上角设置按钮移除（无独立设置入口）
@@ -195,7 +195,7 @@ struct HouseListView: View {
     private func reloadHouses() {
         guard let ctx = houseModelContext else { return }
         var descriptor = FetchDescriptor<House>(sortBy: [SortDescriptor(\House.createdAt, order: .reverse)])
-        descriptor.predicate = #Predicate<House> { !$0.isDeleted }
+        descriptor.predicate = #Predicate<House> { $0.isDeleted != true }
         houses = (try? ctx.fetch(descriptor)) ?? []
     }
 

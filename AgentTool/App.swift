@@ -24,6 +24,10 @@ struct AgentToolApp: App {
         // 与主 App 经营数据（默认 default.store）完全隔离：复制「备份」文件夹即可整体还原房源数据
         BackupGuide.ensureExists()
 
+        // v1.8：先把此前「容器初始化失败时自动隔离」的主库文件找回原位（仅当当前默认 store 不存在时执行）。
+        // 防误移：目标位置已存在同名文件则不覆盖。数据找回后再正常打开，避免用户主经营数据留在隔离区。
+        Self.recoverQuarantinedStores()
+
         // 关键：两个数据体系必须用【两个独立 ModelContainer】，不能合成一个多配置容器——
         // iOS 17 早期版本在主 context 上查询非默认配置的模型会直接崩溃（房源板块闪退根因）。
         // 每个容器单配置、单 store，是最稳定的 SwiftData 用法（与两个原 App 各自的行为一致）。
@@ -62,6 +66,33 @@ struct AgentToolApp: App {
                     storageWarning = "本地数据库无法打开，当前为临时模式；本次新增或修改的数据不会永久保存。请先导出可用数据并重启 APP。错误：\(persistentError.localizedDescription)"
                 } catch {
                     fatalError("数据库和临时存储均无法初始化：\(error.localizedDescription)")
+                }
+            }
+        }
+    }
+
+    /// v1.8：找回被隔离的主库文件（此前容器初始化失败时自动移入 backup_<时间戳> 的 store 文件）。
+    /// 仅在当前默认 store 不存在时执行；目标位置已有同名文件则不覆盖。
+    private static func recoverQuarantinedStores() {
+        let fm = FileManager.default
+        guard let appSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else { return }
+        let defaultStore = appSupport.appendingPathComponent("default.store")
+        if fm.fileExists(atPath: defaultStore.path) { return }
+        let dirs = (try? fm.contentsOfDirectory(at: appSupport, includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
+        let backups = dirs.filter {
+            guard $0.lastPathComponent.hasPrefix("backup_") else { return false }
+            return (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+        }
+        guard let newest = backups.max(by: {
+            ((try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast)
+                < ((try? $1.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast)
+        }) else { return }
+        if let files = try? fm.contentsOfDirectory(at: newest, includingPropertiesForKeys: nil) {
+            for file in files where !file.lastPathComponent.hasPrefix(".") {
+                let dest = appSupport.appendingPathComponent(file.lastPathComponent)
+                if !fm.fileExists(atPath: dest.path) {
+                    try? fm.moveItem(at: file, to: dest)
+                    print("Recovered quarantined store: \(file.lastPathComponent)")
                 }
             }
         }

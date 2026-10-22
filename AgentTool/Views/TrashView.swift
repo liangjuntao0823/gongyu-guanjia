@@ -326,7 +326,7 @@ struct TrashView: View {
     private func reloadHouses() {
         guard let ctx = houseModelContext else { return }
         var descriptor = FetchDescriptor<House>(sortBy: [SortDescriptor(\House.deletedAt, order: .reverse)])
-        descriptor.predicate = #Predicate<House> { $0.isDeleted }
+        descriptor.predicate = #Predicate<House> { $0.isDeleted == true }
         houses = (try? ctx.fetch(descriptor)) ?? []
     }
 

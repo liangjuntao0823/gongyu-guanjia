@@ -289,7 +289,7 @@ struct HouseEditView: View {
         let effectiveTower = tower > 0 ? tower : self.tower
         let all = (try? ctx.fetch(FetchDescriptor<House>())) ?? []
         return all.first { other in
-            if other.isDeleted { return false }
+            if other.isDeleted == true { return false }
             let isSelf = house.map { other.id == $0.id } ?? false
             guard !isSelf else { return false }
             return other.tower == effectiveTower && normalizedRoom(other.roomNo) == clean
