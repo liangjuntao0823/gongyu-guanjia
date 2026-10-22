@@ -378,7 +378,12 @@ struct MainTabView: View {
                 importedZipMessage = "已导入备份「\(name)」到本地备份文件夹。\n立即恢复会用这份备份覆盖当前全部数据；也可稍后到「设置 → 备份数据 → 查看备份文件」查看并恢复。"
             }
         }
-        .overlay {
+        .overlay { importedRestoreFlow }
+    }
+
+    /// v1.14 需求2：外部导入恢复的全部弹层合并进单一 overlay（拆分独立属性，避免 body 单一表达式 type-check 超时）
+    @ViewBuilder private var importedRestoreFlow: some View {
+        ZStack {
             Color.clear.frame(width: 1, height: 1)
                 .alert("已导入备份", isPresented: Binding(
                     get: { importedZipMessage != nil },
@@ -389,8 +394,6 @@ struct MainTabView: View {
                 } message: {
                     Text(importedZipMessage ?? "")
                 }
-        }
-        .overlay {
             Color.clear.frame(width: 1, height: 1)
                 .confirmationDialog("用这个备份恢复？", isPresented: $showImportedRestoreConfirm, titleVisibility: .visible) {
                     Button("恢复", role: .destructive) { startImportedRestore() }
@@ -398,8 +401,6 @@ struct MainTabView: View {
                 } message: {
                     Text("将用刚导入的「\(importedZipName ?? "")」覆盖当前全部数据。恢复前会自动打包当前数据做安全备份，失败自动还原；成功后再清理。")
                 }
-        }
-        .overlay {
             if isRestoringImported {
                 VStack(spacing: 12) {
                     ProgressView(value: importRestoreProgress)
@@ -414,8 +415,6 @@ struct MainTabView: View {
                 .cornerRadius(12)
                 .shadow(radius: 8)
             }
-        }
-        .overlay {
             Color.clear.frame(width: 1, height: 1)
                 .alert("恢复完成", isPresented: Binding(
                     get: { importRestoreStats != nil && importRestoreError == nil },
@@ -435,8 +434,6 @@ struct MainTabView: View {
                         }
                     }
                 }
-        }
-        .overlay {
             Color.clear.frame(width: 1, height: 1)
                 .alert("恢复失败", isPresented: Binding(
                     get: { importRestoreError != nil },
