@@ -651,9 +651,15 @@ class DataBackupManager {
 
     // MARK: - 备份文件管理
     /// v1.13 需求16：旧版分板块 JSON 统一收纳到 Documents/备份/旧版备份/<板块>/（不再在根目录生成 成交备份/收租备份/… 文件夹）
-    static func backupFolderURL(for type: BackupType) -> URL {
+    /// 静态版本：供静态迁移方法使用
+    static func staticBackupFolderURL(for type: BackupType) -> URL {
         let legacyRoot = DataRoot.url().appendingPathComponent("旧版备份", isDirectory: true)
         return legacyRoot.appendingPathComponent(type.rawValue, isDirectory: true)
+    }
+
+    /// 实例便捷入口（内部实现与静态版一致）
+    func backupFolderURL(for type: BackupType) -> URL {
+        DataBackupManager.staticBackupFolderURL(for: type)
     }
 
     /// v1.13 需求16：一次性目录迁移（App 启动时调用，幂等，可重复执行不产生重复文件）
@@ -668,7 +674,7 @@ class DataBackupManager {
         for type in [BackupType.deals, .properties, .payouts, .total] {
             let legacyDir = docs.appendingPathComponent(type.rawValue, isDirectory: true)
             guard fm.fileExists(atPath: legacyDir.path) else { continue }
-            let destDir = backupFolderURL(for: type)
+            let destDir = staticBackupFolderURL(for: type)
             try? fm.createDirectory(at: destDir, withIntermediateDirectories: true)
             if let names = try? fm.contentsOfDirectory(atPath: legacyDir.path) {
                 for name in names where name.lowercased().hasSuffix(".json") {
