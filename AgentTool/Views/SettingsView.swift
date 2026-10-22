@@ -39,6 +39,57 @@ struct SettingsView: View {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
     }
 
+    /// v1.6：房源分享设置（合并自原房源板块独立设置页）
+    private static let houseShareFooter = "远程配置：腾讯云 COS 存储桶、密钥与自定义域名，用于上传房源图片/视频并生成微信分享卡片链接。名片信息：分享 H5 页面和微信卡片上显示的姓名与电话。压缩开启后视频压到 720p、图片轻压缩，分享更快更省流量。房源数据（数据库、图片视频、二维码）默认存放在「公寓管家」文件夹内的「备份」子文件夹，长按拷贝/共享即为备份，重装后放回原位即可还原。"
+    private var houseShareSection: some View {
+        Section {
+            NavigationLink {
+                CosConfigView()
+            } label: {
+                Label("远程配置", systemImage: "server.rack")
+            }
+            NavigationLink {
+                ShareProfileView()
+            } label: {
+                Label("名片信息", systemImage: "person.crop.circle")
+            }
+            Toggle("分享时压缩视频和图片", isOn: Binding(
+                get: { shareCompressionEnabled },
+                set: { UserDefaults.standard.set($0, forKey: "compressOnShare") }
+            ))
+            Button {
+                showHouseCacheConfirm = true
+            } label: {
+                Label("刷新分享缓存", systemImage: "arrow.clockwise.circle")
+            }
+            HStack {
+                Label("数据文件夹大小", systemImage: "externaldrive")
+                Spacer()
+                Text(houseDocumentsSizeText())
+                    .foregroundColor(.secondary)
+            }
+            HStack {
+                Label {
+                    Text(verbatim: "已收录房源")
+                } icon: {
+                    Image(systemName: "building.2")
+                }
+                Spacer()
+                Text("\(MediaStore.houseCount()) 套")
+                    .foregroundColor(.secondary)
+            }
+            Button {
+                if let url = URL(string: "shareddocuments://") {
+                    UIApplication.shared.open(url)
+                }
+            } label: {
+                Label("打开「文件」App 查看数据文件夹", systemImage: "folder")
+            }
+        } footer: {
+            Text(Self.houseShareFooter)
+        }
+    }
+
     var body: some View {
         NavigationStack {
             Form {
@@ -175,52 +226,7 @@ struct SettingsView: View {
                 }
 
                 // MARK: 房源分享（v1.6：原房源板块独立设置页合并至此）
-                Section {
-                    NavigationLink {
-                        CosConfigView()
-                    } label: {
-                        Label("远程配置", systemImage: "server.rack")
-                    }
-                    NavigationLink {
-                        ShareProfileView()
-                    } label: {
-                        Label("名片信息", systemImage: "person.crop.circle")
-                    }
-                    Toggle("分享时压缩视频和图片", isOn: Binding(
-                        get: { shareCompressionEnabled },
-                        set: { UserDefaults.standard.set($0, forKey: "compressOnShare") }
-                    ))
-                    Button {
-                        showHouseCacheConfirm = true
-                    } label: {
-                        Label("刷新分享缓存", systemImage: "arrow.clockwise.circle")
-                    }
-                    HStack {
-                        Label("数据文件夹大小", systemImage: "externaldrive")
-                        Spacer()
-                        Text(houseDocumentsSizeText())
-                            .foregroundColor(.secondary)
-                    }
-                    HStack {
-                        Label {
-                            Text(verbatim: "已收录房源")
-                        } icon: {
-                            Image(systemName: "building.2")
-                        }
-                        Spacer()
-                        Text("\(MediaStore.houseCount()) 套")
-                            .foregroundColor(.secondary)
-                    }
-                    Button {
-                        if let url = URL(string: "shareddocuments://") {
-                            UIApplication.shared.open(url)
-                        }
-                    } label: {
-                        Label("打开「文件」App 查看数据文件夹", systemImage: "folder")
-                    }
-                } footer: {
-                    Text("远程配置：腾讯云 COS 存储桶、密钥与自定义域名，用于上传房源图片/视频并生成微信分享卡片链接。名片信息：分享 H5 页面和微信卡片上显示的姓名与电话。压缩开启后视频压到 720p、图片轻压缩，分享更快更省流量。房源数据（数据库、图片视频、二维码）默认存放在「公寓管家」文件夹内的「备份」子文件夹，长按拷贝/共享即为备份，重装后放回原位即可还原。")
-                }
+                houseShareSection
 
                 // MARK: 自定义铃声
                 Section {
