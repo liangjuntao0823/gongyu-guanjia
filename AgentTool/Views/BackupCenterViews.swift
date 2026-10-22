@@ -80,36 +80,44 @@ struct BackupFileBrowseViewV5: View {
                 }
 
                 if !fastBackups.isEmpty {
-                    Section("快速备份") {
+                    Section {
                         ForEach(fastBackups, id: \.path) { url in
                             backupRow(url: url, kind: .fast)
                         }
+                    } header: {
+                        Text("快速备份")
                     }
                 }
 
                 if !fullBackups.isEmpty {
-                    Section("全量备份") {
+                    Section {
                         ForEach(fullBackups, id: \.path) { url in
                             backupRow(url: url, kind: .full)
                         }
+                    } header: {
+                        Text("全量备份")
                     }
                 }
 
                 if !cloudRecords.isEmpty {
-                    Section("云端备份") {
+                    Section {
                         ForEach(cloudRecords, id: \.name) { record in
                             cloudRow(record)
                         }
+                    } header: {
+                        Text("云端备份")
                     } footer: {
                         Text("云端备份保留最近 10 份自动备份（快速_ 前缀），全量手动上传的备份不会自动清理。")
                     }
                 }
 
                 if !legacyJSONs.isEmpty {
-                    Section("旧版备份（JSON）") {
+                    Section {
                         ForEach(legacyJSONs, id: \.url.path) { item in
                             legacyRow(item)
                         }
+                    } header: {
+                        Text("旧版备份（JSON）")
                     } footer: {
                         Text("旧版分板块 JSON 备份（v1.11 及更早），可继续查看、恢复或删除，数据不丢失。")
                     }
