@@ -29,8 +29,6 @@ struct HouseDetailView: View {
     @State private var isSharing = false           // 生成分享卡片中
     @State private var shareProgress = 0.0         // v1.13 需求13：上传百分比进度
     @State private var shareError: String?
-    // v1.13 需求11：转发朋友圈——有视频+图片时弹二级菜单选「图片 / 视频」
-    @State private var showForwardMenu = false
     @State private var isForwarding = false
 
     var body: some View {
@@ -56,14 +54,6 @@ struct HouseDetailView: View {
         .sheet(isPresented: $showShare) {
             // 注意：UIActivityViewController 不能加 presentationDetents，否则弹分享面板会闪退
             HouseShareSheet(items: shareItems)
-        }
-        .confirmationDialog("转发到朋友圈", isPresented: $showForwardMenu, titleVisibility: .visible) {
-            // v1.13 需求11：有视频+图片时选择转发内容；图片自动取前 9 张（不足取全部）
-            Button("分享图片（前 9 张）") { forwardImages() }
-            Button("分享视频") { forwardVideos() }
-            Button("取消", role: .cancel) {}
-        } message: {
-            Text("这套房源同时有照片和视频，选择要转发到朋友圈的内容。")
         }
         .confirmationDialog("切换房源状态", isPresented: $showStatusConfirm, titleVisibility: .visible) {
             if house.status == .available {
@@ -421,11 +411,11 @@ struct HouseDetailView: View {
             }
             .buttonStyle(.bordered)
 
-            // v1.13 需求11：一键转发朋友圈（图片自动取前 9 张；有视频+图片时弹二级菜单选择）
+            // v1.14 需求5：一键转存到微信（图片前 9 张 + 视频全部进分享面板，用户到微信里选「收藏」，再手动转发朋友圈）
             Button {
-                forwardToMoments()
+                transferToWeChat()
             } label: {
-                Label("转发朋友圈", systemImage: "heart.circle")
+                Label("转存到微信", systemImage: "tray.and.arrow.down")
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 4)
             }
@@ -524,52 +514,24 @@ struct HouseDetailView: View {
         }
     }
 
-    // MARK: - v1.13 需求11：转发朋友圈
+    // MARK: - v1.14 需求5：转存到微信（替代原「转发朋友圈」）
 
-    /// 转发朋友圈入口：有照片+视频 → 弹二级菜单选择；只有照片 → 直接分享前 9 张图片；只有视频 → 直接分享视频
-    private func forwardToMoments() {
+    /// 转存到微信：图片（自动取前 9 张，不足取全部）+ 视频（全部）一次性进系统分享面板，
+    /// 用户到微信里选「收藏」后，可自行在微信内手动转发朋友圈（微信限制视频/多图不能直接转朋友圈）。
+    private func transferToWeChat() {
         guard !house.mediaItems.isEmpty else {
-            shareError = "这套房源还没有照片或视频，先编辑添加素材再转发"
+            shareError = "这套房源还没有照片或视频，先编辑添加素材再转存"
             return
         }
-        let hasImages = house.photos.count > 0
-        let hasVideos = house.videos.count > 0
-        if hasImages && hasVideos {
-            showForwardMenu = true
-        } else if hasImages {
-            forwardImages()
-        } else {
-            forwardVideos()
-        }
-    }
-
-    /// 转发图片：自动取前 9 张（不足 9 张取全部），走系统分享面板
-    private func forwardImages() {
-        let images = house.photos.prefix(9)
-        guard !images.isEmpty else {
-            shareError = "这套房源没有照片"
-            return
-        }
-        let urls = images.map { MediaStore.url(for: $0.fileName, roomKey: house.mediaRoomKey) }
+        let imageURLs = house.photos.prefix(9)
+            .map { MediaStore.url(for: $0.fileName, roomKey: house.mediaRoomKey) }
             .filter { FileManager.default.fileExists(atPath: $0.path) }
-        guard !urls.isEmpty else {
-            shareError = "照片文件不存在，请重新添加"
-            return
-        }
-        isForwarding = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-            isForwarding = false
-            shareItems = urls
-            showShare = true
-        }
-    }
-
-    /// 转发视频：分享全部视频文件，走系统分享面板
-    private func forwardVideos() {
-        let urls = house.videos.map { MediaStore.url(for: $0.fileName, roomKey: house.mediaRoomKey) }
+        let videoURLs = house.videos
+            .map { MediaStore.url(for: $0.fileName, roomKey: house.mediaRoomKey) }
             .filter { FileManager.default.fileExists(atPath: $0.path) }
+        let urls = imageURLs + videoURLs
         guard !urls.isEmpty else {
-            shareError = "视频文件不存在，请重新添加"
+            shareError = "照片或视频文件不存在，请重新添加"
             return
         }
         isForwarding = true

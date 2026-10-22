@@ -43,6 +43,8 @@ struct BackupFileBrowseViewV5: View {
     @State private var restoreStage = ""
     @State private var restoreStats: RestoreStatsV5?
     @State private var restoreError: String?
+    /// v1.14 需求3：云端恢复时记录「本地已有副本直接用本地」或「本地无副本已从云端下载」，完成弹窗与日志展示
+    @State private var restoreSourceNote: String?
 
     // v1.13 需求7：云端刷新
     @State private var isRefreshingCloud = false
@@ -115,7 +117,17 @@ struct BackupFileBrowseViewV5: View {
                             }
                         }
                     } header: {
-                        Text("本地备份")
+                        // v1.14 需求8：本地备份与云端备份一样提供刷新按钮
+                        HStack {
+                            Text("本地备份")
+                            Spacer()
+                            Button {
+                                reload()
+                            } label: {
+                                Image(systemName: "arrow.clockwise")
+                            }
+                            .buttonStyle(.borderless)
+                        }
                     }
 
                     Section {
@@ -177,7 +189,17 @@ struct BackupFileBrowseViewV5: View {
                             }
                         }
                     } header: {
-                        Text("本地备份")
+                        // v1.14 需求8：本地备份与云端备份一样提供刷新按钮
+                        HStack {
+                            Text("本地备份")
+                            Spacer()
+                            Button {
+                                reload()
+                            } label: {
+                                Image(systemName: "arrow.clockwise")
+                            }
+                            .buttonStyle(.borderless)
+                        }
                     }
 
                     Section {
@@ -303,6 +325,12 @@ struct BackupFileBrowseViewV5: View {
                             Text(line)
                         }
                         Text("全部核对无误")
+                        // v1.14 需求3：恢复来源提示（本地复用 or 云端下载）
+                        if let note = restoreSourceNote {
+                            Text(note)
+                                .font(.footnote)
+                                .foregroundColor(.secondary)
+                        }
                     }
                 }
             }
@@ -321,7 +349,9 @@ struct BackupFileBrowseViewV5: View {
     // MARK: - 行
 
     private func backupRow(url: URL, kind: BackupKindV5) -> some View {
-        let name = url.lastPathComponent
+        let rawName = url.lastPathComponent
+        // v1.14 需求1：旧版「下载_」前缀文件剥掉前缀显示（文件名不变），新下载的文件直接用原名
+        let name = rawName.hasPrefix("下载_") ? String(rawName.dropFirst(3)) : rawName
         let size = BackupV5Manager.fileSize(at: url)
         let cloudState = CloudBackupService.uploadState(of: name)
         let dateText = fileDateText(url)
@@ -340,11 +370,10 @@ struct BackupFileBrowseViewV5: View {
                 .foregroundColor(cloudState == "已上传云端" ? .green : .orange)
             if mode == .browse {
                 Menu {
-                    if kind == .full {
-                        Button("上传到云端") { uploadFullBackup(url: url) }
-                    }
+                    // v1.14 需求4：快速备份与全量备份都支持手动上传云端（快速只传 zip 本体，全量再传媒体增量）
+                    Button("上传到云端") { uploadBackup(url: url, kind: kind) }
                     Button("删除", role: .destructive) {
-                        deleteTarget = DeleteTarget(name: name, isCloud: false)
+                        deleteTarget = DeleteTarget(name: rawName, isCloud: false)
                         showDeleteConfirm = true
                     }
                 } label: {
@@ -442,11 +471,17 @@ struct BackupFileBrowseViewV5: View {
 
     private func reload() {
         let all = BackupV5Manager.listLocalBackups()
-        fastBackups = all.filter { $0.lastPathComponent.hasPrefix("快速_") }
+        // v1.14 需求1：旧版「下载_」前缀文件兼容显示——「下载_快速_」归快速组、「下载_全量_」归全量组，
+        // 显示时剥掉「下载_」前缀（见 backupRow）；v1.14 起新下载的文件直接用原名，不再产生「下载_」前缀。
+        fastBackups = all.filter { name in
+            let n = name.lastPathComponent
+            return n.hasPrefix("快速_") || n.hasPrefix("下载_快速_")
+        }
         // v1.13 需求17：外部导入的 zip（无 快速_/全量_ 前缀）归入全量备份组，确保导入后可查看/恢复
         fullBackups = all.filter { url in
             let name = url.lastPathComponent
-            return name.hasPrefix("全量_") || (!name.hasPrefix("快速_") && !name.hasPrefix("下载_"))
+            if name.hasPrefix("快速_") || name.hasPrefix("下载_快速_") { return false }
+            return true
         }
         cloudRecords = CloudBackupService.cloudRecords()
         legacyJSONs = listLegacyBackups()
@@ -540,7 +575,9 @@ struct BackupFileBrowseViewV5: View {
         }
     }
 
-    private func uploadFullBackup(url: URL) {
+    /// v1.14 需求4：手动上传备份到云端。
+    /// 快速备份只传 zip 本体（不含照片视频文件）；全量备份传 zip + 媒体增量（sha1 去重）。
+    private func uploadBackup(url: URL, kind: BackupKindV5) {
         guard let config = CosConfig.load(), config.isValid else {
             showMessageInContext("未配置云端（腾讯云 COS）。请到「设置 → 远程配置」填写并保存验证后再上传。")
             return
@@ -548,30 +585,42 @@ struct BackupFileBrowseViewV5: View {
         uploadingName = url.lastPathComponent
         uploadProgress = 0
         uploadStage = "正在上传备份文件…"
+        let isFast = (kind == .fast)
         Task {
             do {
                 try await CloudBackupService.uploadZip(url: url, config: config) { p in
                     Task { @MainActor in self.uploadProgress = p }
                 }
-                // 媒体增量（按 sha1 去重，已存在跳过）
-                await MainActor.run {
-                    uploadProgress = 0.99
-                    uploadStage = "正在核对照片视频（增量上传）…"
-                }
-                try await CloudBackupService.uploadFullMedia(zipURL: url, config: config) { p in
-                    Task { @MainActor in self.uploadProgress = 0.99 + p * 0.01 }
-                }
-                await MainActor.run {
-                    CloudBackupService.recordUpload(name: url.lastPathComponent, size: BackupV5Manager.fileSize(at: url), date: Date(), isAuto: false)
-                    uploadingName = nil
-                    BackupLogStore.log(category: "上传", action: "全量备份上传", result: "成功", detail: url.lastPathComponent)
-                    showMessageInContext("已上传云端：\(url.lastPathComponent)")
-                    reloadTick += 1
+                if isFast {
+                    // 快速备份：zip 即完整内容，直接完成
+                    await MainActor.run {
+                        CloudBackupService.recordUpload(name: url.lastPathComponent, size: BackupV5Manager.fileSize(at: url), date: Date(), isAuto: false)
+                        uploadingName = nil
+                        BackupLogStore.log(category: "上传", action: "快速备份上传", result: "成功", detail: url.lastPathComponent)
+                        showMessageInContext("已上传云端：\(url.lastPathComponent)")
+                        reloadTick += 1
+                    }
+                } else {
+                    // 媒体增量（按 sha1 去重，已存在跳过）
+                    await MainActor.run {
+                        uploadProgress = 0.99
+                        uploadStage = "正在核对照片视频（增量上传）…"
+                    }
+                    try await CloudBackupService.uploadFullMedia(zipURL: url, config: config) { p in
+                        Task { @MainActor in self.uploadProgress = 0.99 + p * 0.01 }
+                    }
+                    await MainActor.run {
+                        CloudBackupService.recordUpload(name: url.lastPathComponent, size: BackupV5Manager.fileSize(at: url), date: Date(), isAuto: false)
+                        uploadingName = nil
+                        BackupLogStore.log(category: "上传", action: "全量备份上传", result: "成功", detail: url.lastPathComponent)
+                        showMessageInContext("已上传云端：\(url.lastPathComponent)")
+                        reloadTick += 1
+                    }
                 }
             } catch {
                 await MainActor.run {
                     uploadingName = nil
-                    BackupLogStore.log(category: "上传", action: "全量备份上传", result: "失败", detail: error.localizedDescription)
+                    BackupLogStore.log(category: "上传", action: isFast ? "快速备份上传" : "全量备份上传", result: "失败", detail: error.localizedDescription)
                     showMessageInContext("上传失败：\(error.localizedDescription)")
                 }
             }
@@ -654,6 +703,7 @@ struct BackupFileBrowseViewV5: View {
         isRestoring = true
         restoreProgress = 0
         restoreStage = "正在校验备份…"
+        restoreSourceNote = nil
         Task {
             do {
                 if let cloudName = target.cloudName {
@@ -661,7 +711,11 @@ struct BackupFileBrowseViewV5: View {
                     guard let config = CosConfig.load(), config.isValid else {
                         throw BackupV5Error.invalidBackup("未配置云端（腾讯云 COS）")
                     }
-                    restoreStage = "正在检查本地备份…"
+                    // v1.14 需求3：明确提示恢复来源（本地复用 or 云端下载）
+                    let localHit = CloudBackupService.localCopyIfExists(name: cloudName)
+                    restoreStage = (localHit != nil)
+                        ? "本地已有该备份，直接用本地文件恢复…"
+                        : "本地无此备份，正在从云端下载…"
                     let local = try await CloudBackupService.downloadBackup(name: cloudName, config: config)
                     let stats = try await BackupV5Manager.restore(
                         zipURL: local, mainContext: modelContext, houseContext: houseCtx,
@@ -671,7 +725,10 @@ struct BackupFileBrowseViewV5: View {
                     await MainActor.run {
                         isRestoring = false
                         restoreStats = stats
-                        BackupLogStore.log(category: "恢复", action: "云端恢复", result: "成功", detail: stats.summaryLines.joined(separator: " / "))
+                        restoreSourceNote = (localHit != nil)
+                            ? "本次恢复使用本地已有副本，未重复下载云端"
+                            : "本地无该备份，已自动从云端下载到本地后恢复"
+                        BackupLogStore.log(category: "恢复", action: "云端恢复", result: "成功", detail: "\(stats.summaryLines.joined(separator: " / "))；来源：\((localHit != nil) ? "本地已有副本" : "云端下载")")
                     }
                 } else if let url = target.localURL {
                     let stats = try await BackupV5Manager.restore(

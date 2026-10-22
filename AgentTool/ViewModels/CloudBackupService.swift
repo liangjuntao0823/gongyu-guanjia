@@ -187,9 +187,11 @@ final class CloudBackupService {
         }
     }
 
-    /// 下载云端备份 zip 到本地临时文件（流式 downloadTask），返回文件 URL
+    /// 下载云端备份 zip 到本地（流式 downloadTask），返回文件 URL
     /// v1.13 需求15：下载前先检查本地是否已有该备份（同名 zip 或 下载_ 前缀副本）→ 有则直接返回本地文件，不重复下载
     /// v1.13 需求12：下载完成后逐文件 CRC 核对（防损坏/不完整），失败删除临时文件并抛错
+    /// v1.14 需求1：下载落盘直接使用云端原名（快速_/全量_ 前缀），不再加「下载_」前缀，
+    ///              这样 app 备份列表能直接识别并显示下载下来的备份
     static func downloadBackup(name: String, config: CosConfig) async throws -> URL {
         // 需求15：本地已有同名文件 → 直接复用本地，无需下载
         if let existing = localCopyIfExists(name: name) {
@@ -206,8 +208,8 @@ final class CloudBackupService {
             try? FileManager.default.removeItem(at: tempURL)
             throw CosUploader.CosError.uploadFailed("云端下载失败（HTTP \(http.statusCode)）")
         }
-        // 移到本地 Backups 目录（前缀「下载_」避免与本地快速/全量备份混淆）
-        let dest = BackupV5Manager.backupsDirectory.appendingPathComponent("下载_" + name)
+        // v1.14 需求1：落盘用云端原名（与本地快速/全量备份同目录同命名，列表直接可见可恢复）
+        let dest = BackupV5Manager.backupsDirectory.appendingPathComponent(name)
         try? FileManager.default.removeItem(at: dest)
         try FileManager.default.moveItem(at: tempURL, to: dest)
         // 需求12：逐文件 CRC 核对（STORE 模式 zip，中央目录 crc32 与实际数据段比对）

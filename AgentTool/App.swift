@@ -189,9 +189,8 @@ enum BackupImportHandler {
         }
         do {
             try data.write(to: candidate, options: .atomic)
-            // 复制成功后提示（App 启动场景直接展示；已运行场景用通知驱动）
-            let message = "已导入备份「\(destName)」到本地备份文件夹。\n可到「设置 → 备份数据 → 查看备份文件」查看并恢复。"
-            NotificationCenter.default.post(name: .backupZipImported, object: message)
+            // 复制成功后通知（传文件名，App 弹「立即恢复/稍后再说」二级确认；v1.14 需求2）
+            NotificationCenter.default.post(name: .backupZipImported, object: destName)
             BackupLogStore.log(category: "备份", action: "导入外部备份", result: "成功", detail: destName)
         } catch {
             print("导入失败：写入备份目录出错 \(error.localizedDescription)")
@@ -232,7 +231,15 @@ struct MainTabView: View {
 
     @State private var visitedTabs: Set<Int> = [0]
     @State private var automaticBackupMessage: String?
-    @State private var importedZipMessage: String?   // v1.13 需求17：外部 zip 导入提示
+    // v1.13 需求17 / v1.14 需求2：外部 zip 导入 → 二级确认恢复（立即恢复 / 稍后再说），恢复完成弹窗带口径
+    @State private var importedZipName: String?
+    @State private var importedZipMessage: String?
+    @State private var showImportedRestoreConfirm = false
+    @State private var isRestoringImported = false
+    @State private var importRestoreProgress: Double = 0
+    @State private var importRestoreStage = ""
+    @State private var importRestoreStats: RestoreStatsV5?
+    @State private var importRestoreError: String?
     @State private var isCheckingAutomaticBackup = false
     private let automaticBackupTimer = Timer.publish(every: 30, on: .main, in: .common).autoconnect() // 记录已访问的tab，默认工作台已访问
 
@@ -365,8 +372,10 @@ struct MainTabView: View {
                 }
         }
         .onReceive(NotificationCenter.default.publisher(for: .backupZipImported)) { note in
-            if let msg = note.object as? String {
-                importedZipMessage = msg
+            // v1.14 需求2：导入成功后弹「立即恢复 / 稍后再说」二级确认
+            if let name = note.object as? String {
+                importedZipName = name
+                importedZipMessage = "已导入备份「\(name)」到本地备份文件夹。\n立即恢复会用这份备份覆盖当前全部数据；也可稍后到「设置 → 备份数据 → 查看备份文件」查看并恢复。"
             }
         }
         .overlay {
@@ -375,10 +384,105 @@ struct MainTabView: View {
                     get: { importedZipMessage != nil },
                     set: { if !$0 { importedZipMessage = nil } }
                 )) {
-                    Button("知道了", role: .cancel) { importedZipMessage = nil }
+                    Button("立即恢复") { showImportedRestoreConfirm = true }
+                    Button("稍后再说", role: .cancel) { importedZipMessage = nil; importedZipName = nil }
                 } message: {
                     Text(importedZipMessage ?? "")
                 }
+        }
+        .overlay {
+            Color.clear.frame(width: 1, height: 1)
+                .confirmationDialog("用这个备份恢复？", isPresented: $showImportedRestoreConfirm, titleVisibility: .visible) {
+                    Button("恢复", role: .destructive) { startImportedRestore() }
+                    Button("取消", role: .cancel) { showImportedRestoreConfirm = false }
+                } message: {
+                    Text("将用刚导入的「\(importedZipName ?? "")」覆盖当前全部数据。恢复前会自动打包当前数据做安全备份，失败自动还原；成功后再清理。")
+                }
+        }
+        .overlay {
+            if isRestoringImported {
+                VStack(spacing: 12) {
+                    ProgressView(value: importRestoreProgress)
+                        .progressViewStyle(.linear)
+                        .frame(width: 220)
+                    Text(importRestoreStage)
+                        .font(.footnote)
+                        .foregroundColor(.secondary)
+                }
+                .padding(20)
+                .background(Color.themeBg.opacity(0.95))
+                .cornerRadius(12)
+                .shadow(radius: 8)
+            }
+        }
+        .overlay {
+            Color.clear.frame(width: 1, height: 1)
+                .alert("恢复完成", isPresented: Binding(
+                    get: { importRestoreStats != nil && importRestoreError == nil },
+                    set: { if !$0 { importRestoreStats = nil } }
+                )) {
+                    Button("好", role: .cancel) {}
+                } message: {
+                    if let stats = importRestoreStats {
+                        VStack(alignment: .leading, spacing: 4) {
+                            ForEach(stats.summaryLines, id: \.self) { line in
+                                Text(line)
+                            }
+                            Text("全部核对无误")
+                            Text("恢复来源：外部导入的备份")
+                                .font(.footnote)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                }
+        }
+        .overlay {
+            Color.clear.frame(width: 1, height: 1)
+                .alert("恢复失败", isPresented: Binding(
+                    get: { importRestoreError != nil },
+                    set: { if !$0 { importRestoreError = nil } }
+                )) {
+                    Button("好", role: .cancel) {}
+                } message: {
+                    Text(importRestoreError ?? "")
+                }
+        }
+    }
+
+    /// v1.14 需求2：外部导入备份的「立即恢复」——与查看备份页一致：安全快照 → 导入 → 分行统计
+    private func startImportedRestore() {
+        guard let name = importedZipName else { return }
+        guard let houseCtx = houseModelContext else {
+            importRestoreError = "房源数据容器不可用"
+            return
+        }
+        let url = BackupV5Manager.backupsDirectory.appendingPathComponent(name)
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            importRestoreError = "导入的备份文件不存在：\(name)"
+            return
+        }
+        isRestoringImported = true
+        importRestoreProgress = 0
+        importRestoreStage = "正在校验备份…"
+        Task {
+            do {
+                let stats = try await BackupV5Manager.restore(
+                    zipURL: url, mainContext: modelContext, houseContext: houseCtx,
+                    phaseProgress: { p in Task { @MainActor in self.importRestoreProgress = p } },
+                    stageMessage: { s in Task { @MainActor in self.importRestoreStage = s } }
+                )
+                await MainActor.run {
+                    isRestoringImported = false
+                    importRestoreStats = stats
+                    BackupLogStore.log(category: "恢复", action: "外部导入恢复", result: "成功", detail: stats.summaryLines.joined(separator: " / ") + "；来源：外部导入备份")
+                }
+            } catch {
+                await MainActor.run {
+                    isRestoringImported = false
+                    importRestoreError = error.localizedDescription
+                    BackupLogStore.log(category: "恢复", action: "外部导入恢复", result: "失败", detail: error.localizedDescription)
+                }
+            }
         }
     }
 

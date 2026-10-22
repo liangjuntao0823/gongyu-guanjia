@@ -18,16 +18,17 @@ struct HouseListView: View {
     // 卡片左滑菜单（编辑 / 已租 / 删除）
     @State private var showEditHouse: House?
     @State private var singleShareHouse: House?
-    @State private var showSingleSharePicker = false
-    @State private var showDeleteConfirm = false
     @State private var deleteTarget: House?
     @State private var showDetailHouse: House?
+
+    // v1.14 需求6：合并所有 confirmationDialog 为单一枚举弹窗（iOS 17 同一视图多个 confirmationDialog 会互相覆盖，
+    // 导致删除确认弹窗不显示）；按触发源分发文案与按钮
+    @State private var activeDialog: HouseListDialog?
 
     // v1.22：首页多选分享——一次选多套，生成【一个合集分享卡片】（好友点开链接即可查看全部 N 套），
     // 不再逐套生成链接逐次弹微信，避免 App 与微信来回跳转
     @State private var isSelecting = false
     @State private var selectedHouseIDs = Set<UUID>()
-    @State private var showShareModePicker = false
     @State private var shareQueue: [URL] = []
     @State private var shareIndex = 0
     @State private var currentShareStep: ShareStep? = nil
@@ -36,8 +37,16 @@ struct HouseListView: View {
     @State private var generateProgress = 0.0   // v1.13 需求13：上传百分比进度
     @State private var shareError: String?
     // v1.12：多选模式批量操作——批量已租 / 批量删除（保留原有多选分享逻辑不动）
-    @State private var showBatchDeleteConfirm = false
     @State private var batchResultTip: String? = nil
+
+    /// v1.14 需求6：单一弹窗枚举（多选分享 / 单套分享 / 单删 / 批量删）
+    enum HouseListDialog: Identifiable {
+        case multiShare
+        case singleShare
+        case delete
+        case batchDelete
+        var id: Self { self }
+    }
 
     /// 筛选后的房源：默认待租，并按「座号 + 楼层 + 房号」升序排列（1座在前，同座先按楼层、再按房号从小到大）
     /// v1.29（优化评估）：搜索/筛选在内存中进行。房源规模通常为个位数~几十套，
@@ -70,6 +79,17 @@ struct HouseListView: View {
 
     private var layouts: [String] {
         Array(Set(houses.compactMap { $0.layout.isEmpty ? nil : $0.layout })).sorted()
+    }
+
+    /// v1.14 需求6：单一确认弹窗标题（按触发源分发）
+    private var dialogTitle: String {
+        switch activeDialog {
+        case .multiShare: return "选择分享方式"
+        case .singleShare: return "选择分享方式"
+        case .delete: return "删除这套房源？"
+        case .batchDelete: return "删除选中的 \(selectedHouseIDs.count) 套房源？"
+        case nil: return ""
+        }
     }
 
     private var tower1Count: Int { houses.filter { $0.tower == 1 }.count }
@@ -123,32 +143,51 @@ struct HouseListView: View {
             .navigationDestination(item: $showDetailHouse) { house in
                 HouseDetailView(house: house)
             }
-            // v1.22：多选分享——选「脱敏 / 完整」后生成一个合集卡片链接
-            .confirmationDialog("选择分享方式", isPresented: $showShareModePicker, titleVisibility: .visible) {
-                Button("发给客户（隐藏版）") { generateShareQueue(mode: .masked) }
-                Button("发给同事（完整版）") { generateShareQueue(mode: .full) }
-                Button("取消", role: .cancel) {}
-            } message: {
-                Text("已选 \(selectedHouseIDs.count) 套，将生成一个合集分享卡片：好友点开链接即可查看全部房源，每套单独一页（含实拍图/视频）。隐藏版不显示房号/价格/房东，完整版显示全部信息。")
-            }
-            // 卡片左滑「分享」：单套分享，选「脱敏 / 完整」后生成单张卡片链接
-            .confirmationDialog("选择分享方式", isPresented: $showSingleSharePicker, titleVisibility: .visible) {
-                Button("发给客户（隐藏版）") { generateSingleShare(mode: .masked) }
-                Button("发给同事（完整版）") { generateSingleShare(mode: .full) }
-                Button("取消", role: .cancel) {}
-            } message: {
-                Text("隐藏版只显示户型、位置和您的联系方式；完整版额外显示房号、价格、房东和密码。")
-            }
-            // 卡片左滑「删除」：二级确认后移入回收站（不删除照片视频文件）
-            .confirmationDialog("删除这套房源？", isPresented: $showDeleteConfirm, titleVisibility: .visible) {
-                Button("移入回收站", role: .destructive) {
-                    if let target = deleteTarget {
-                        softDeleteHouse(target)
+            // v1.14 需求6：合并为单一 confirmationDialog（iOS 17 同一视图多个 confirmationDialog 会互相覆盖，
+            // 导致删除确认弹窗不显示）。标题/按钮/文案按 activeDialog 分发。
+            .confirmationDialog(
+                dialogTitle,
+                isPresented: Binding(
+                    get: { activeDialog != nil },
+                    set: { if !$0 { activeDialog = nil } }
+                ),
+                titleVisibility: .visible
+            ) {
+                switch activeDialog {
+                case .multiShare:
+                    Button("发给客户（隐藏版）") { generateShareQueue(mode: .masked) }
+                    Button("发给同事（完整版）") { generateShareQueue(mode: .full) }
+                    Button("取消", role: .cancel) {}
+                case .singleShare:
+                    Button("发给客户（隐藏版）") { generateSingleShare(mode: .masked) }
+                    Button("发给同事（完整版）") { generateSingleShare(mode: .full) }
+                    Button("取消", role: .cancel) {}
+                case .delete:
+                    Button("移入回收站", role: .destructive) {
+                        if let target = deleteTarget {
+                            softDeleteHouse(target)
+                        }
                     }
+                    Button("取消", role: .cancel) {}
+                case .batchDelete:
+                    Button("移入回收站", role: .destructive) { batchSoftDelete() }
+                    Button("取消", role: .cancel) {}
+                case nil:
+                    EmptyView()
                 }
-                Button("取消", role: .cancel) {}
             } message: {
-                Text("删除后进入「设置 → 回收站」可恢复；照片和视频保留在本地，彻底删除时才会移除。")
+                switch activeDialog {
+                case .multiShare:
+                    Text("已选 \(selectedHouseIDs.count) 套，将生成一个合集分享卡片：好友点开链接即可查看全部房源，每套单独一页（含实拍图/视频）。隐藏版不显示房号/价格/房东，完整版显示全部信息。")
+                case .singleShare:
+                    Text("隐藏版只显示户型、位置和您的联系方式；完整版额外显示房号、价格、房东和密码。")
+                case .delete:
+                    Text("删除后进入「设置 → 回收站」可恢复；照片和视频保留在本地，彻底删除时才会移除。")
+                case .batchDelete:
+                    Text("删除后进入「设置 → 回收站」可恢复；照片和视频保留在本地，彻底删除时才会移除。")
+                case nil:
+                    Text("")
+                }
             }
             .sheet(item: $currentShareStep, onDismiss: {
                 // 上一张分享面板关闭后自动弹下一张；全部发完自动退出多选
@@ -189,13 +228,6 @@ struct HouseListView: View {
                 Button("好", role: .cancel) {}
             } message: {
                 Text(shareError ?? "")
-            }
-            // v1.12：多选批量删除二级确认（移入回收站，不删照片/视频文件）
-            .confirmationDialog("删除选中的 \(selectedHouseIDs.count) 套房源？", isPresented: $showBatchDeleteConfirm, titleVisibility: .visible) {
-                Button("移入回收站", role: .destructive) { batchSoftDelete() }
-                Button("取消", role: .cancel) {}
-            } message: {
-                Text("删除后进入「设置 → 回收站」可恢复；照片和视频保留在本地，彻底删除时才会移除。")
             }
             // v1.12：批量操作结果提示
             .alert("批量操作", isPresented: Binding(
@@ -432,7 +464,7 @@ struct HouseListView: View {
                                 .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                                     Button(role: .destructive) {
                                         deleteTarget = house
-                                        showDeleteConfirm = true
+                                        activeDialog = .delete
                                     } label: {
                                         Label("删除", systemImage: "trash")
                                     }
@@ -490,8 +522,7 @@ struct HouseListView: View {
                         .disabled(selectedHouseIDs.isEmpty)
                         // v1.12：批量删除——移入回收站（二级确认，不删照片视频）
                         Button(role: .destructive) {
-                            showBatchDeleteConfirm = true
-                        } label: {
+                            activeDialog = .batchDelete                        } label: {
                             Text("删除（\(selectedHouseIDs.count)）")
                                 .font(.subheadline.weight(.semibold))
                                 .frame(maxWidth: .infinity)
@@ -658,8 +689,7 @@ struct HouseListView: View {
             shareError = "选中的房源都没有照片或视频，先编辑添加素材再分享"
             return
         }
-        showShareModePicker = true
-    }
+        activeDialog = .multiShare    }
 
     /// v1.22：生成【合集分享卡片】（一次选 N 套 → 一个链接 → 好友点开看全部），生成后弹一次系统分享面板
     /// 注意：值类型（ShareCollectionItem）在主线程构建完成，Task 内只传递值，绝不直接访问 SwiftData @Model（跨线程读取模型会闪退）
