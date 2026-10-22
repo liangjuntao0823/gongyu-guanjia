@@ -90,6 +90,243 @@ struct SettingsView: View {
         }
     }
 
+    // MARK: - 设置页 Section 分组（v1.6 拆分，避免 Form 表达式 type-check 超时）
+    private var dataSection: some View {
+        Section {
+            Button { showBackupSheet = true } label: {
+                Label("备份数据", systemImage: "square.and.arrow.down")
+            }
+            Button { showRestoreSheet = true } label: {
+                Label("恢复数据", systemImage: "square.and.arrow.up")
+            }
+            Button { showClearSheet = true } label: {
+                HStack {
+                    Label("清空数据", systemImage: "trash")
+                        .foregroundColor(.red)
+                    Spacer()
+                    Text("按板块清空")
+                        .font(.footnote)
+                        .foregroundColor(.secondary)
+                }
+            }
+        } footer: {
+            Text("备份与恢复均为手动操作，建议重要数据每次修改后及时备份。")
+        }
+    }
+
+    private var syncSection: some View {
+        Section {
+            Button { showManualSync = true } label: {
+                HStack {
+                    Label("数据同步", systemImage: "arrow.triangle.2.circlepath")
+                    Spacer()
+                    Text("手动")
+                        .font(.footnote)
+                        .foregroundColor(.secondary)
+                }
+            }
+            Button { showMigration = true } label: {
+                Label("备份与迁移", systemImage: "iphone.and.arrow.forward")
+            }
+        } footer: {
+            Text("跨端同步和迁移只会在你主动操作后执行，不会自动联网。")
+        }
+    }
+
+    private var autoBackupSection: some View {
+        Section {
+            HStack {
+                Label("启用自动备份", systemImage: "clock")
+                Spacer()
+                Toggle("", isOn: $autoBackupEnabled)
+                    .labelsHidden()
+            }
+            .onChange(of: autoBackupEnabled) { _, _ in saveAutoSettings() }
+            if autoBackupEnabled {
+                HStack {
+                    Label("备份频率", systemImage: "calendar")
+                    Spacer()
+                    Picker("", selection: $backupFrequency) {
+                        Text("每天").tag("day")
+                        Text("每周").tag("week")
+                        Text("每月").tag("month")
+                    }
+                    .pickerStyle(.menu)
+                    .tint(.secondary)
+                    .labelsHidden()
+                    .onChange(of: backupFrequency) { _, _ in saveAutoSettings() }
+                }
+                HStack {
+                    Label("备份时间", systemImage: "timer")
+                    Spacer()
+                    Button { if backupHour > 0 { backupHour -= 1 } } label: {
+                        Image(systemName: "minus.circle")
+                            .font(.system(size: 20, weight: .regular))
+                            .foregroundColor(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    Text(String(format: "%02d:00", backupHour))
+                        .font(.system(size: 16, weight: .semibold))
+                        .frame(minWidth: 58)
+                        .multilineTextAlignment(.center)
+                    Button { if backupHour < 23 { backupHour += 1 } } label: {
+                        Image(systemName: "plus.circle")
+                            .font(.system(size: 20, weight: .regular))
+                            .foregroundColor(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .onChange(of: backupHour) { _, _ in saveAutoSettings() }
+            }
+        } footer: {
+            Text("自动备份将保存到总备份文件夹；按天自动备份超过7天会自动清理，手动备份不会被删除。")
+        }
+    }
+
+    private var utilitySection: some View {
+        Section {
+            HStack {
+                Label("电费单价", systemImage: "bolt")
+                Spacer()
+                TextField("0.8", text: $defaultElectricPrice)
+                    .keyboardType(.decimalPad)
+                    .multilineTextAlignment(.trailing)
+                    .frame(width: 90)
+            }
+            HStack {
+                Label("水费单价", systemImage: "drop")
+                Spacer()
+                TextField("5.5", text: $defaultWaterPrice)
+                    .keyboardType(.decimalPad)
+                    .multilineTextAlignment(.trailing)
+                    .frame(width: 90)
+            }
+            HStack {
+                Label("默认总预存", systemImage: "wallet.pass")
+                Spacer()
+                TextField("0", text: $defaultUtilityPrepayment)
+                    .keyboardType(.decimalPad)
+                    .multilineTextAlignment(.trailing)
+                    .frame(width: 90)
+            }
+        } footer: {
+            Text("默认单价和预存仅用于新增房源，不影响已生成的结算记录。")
+        }
+    }
+
+    private var billSection: some View {
+        Section {
+            Button { showBillTemplate = true } label: {
+                HStack {
+                    Label("账单模板设置", systemImage: "textformat.alt")
+                    Spacer()
+                    Text("文本/收款码/预览")
+                        .font(.footnote)
+                        .foregroundColor(.secondary)
+                }
+            }
+        }
+    }
+
+    private var ringtoneSection: some View {
+        Section {
+            HStack {
+                Label("收租提醒", systemImage: "bell")
+                Spacer()
+                Picker("", selection: $rentSound) {
+                    Text("系统音").tag("system")
+                    Text("自定义音").tag("custom")
+                }
+                .pickerStyle(.menu)
+                .tint(.secondary)
+                .labelsHidden()
+            }
+            HStack {
+                Label("到期提醒", systemImage: "alarm")
+                Spacer()
+                Picker("", selection: $expirySound) {
+                    Text("系统音").tag("system")
+                    Text("自定义音").tag("custom")
+                }
+                .pickerStyle(.menu)
+                .tint(.secondary)
+                .labelsHidden()
+            }
+            HStack {
+                Label("包租提醒", systemImage: "bell.badge")
+                Spacer()
+                Picker("", selection: $payoutSound) {
+                    Text("系统音").tag("system")
+                    Text("自定义音").tag("custom")
+                }
+                .pickerStyle(.menu)
+                .tint(.secondary)
+                .labelsHidden()
+            }
+            HStack {
+                Label("待办提醒", systemImage: "list.bullet.clipboard")
+                Spacer()
+                Picker("", selection: $todoSound) {
+                    Text("系统音").tag("system")
+                    Text("自定义音").tag("custom")
+                }
+                .pickerStyle(.menu)
+                .tint(.secondary)
+                .labelsHidden()
+            }
+        } footer: {
+            Text("自定义音使用APP内置铃声；文件不可用时iOS会自动使用系统音。")
+        }
+    }
+
+    private var aboutSection: some View {
+        Section {
+            HStack {
+                Label("应用名称", systemImage: "app")
+                Spacer()
+                Text("公寓管家")
+                    .foregroundColor(.secondary)
+            }
+            HStack {
+                Label("版本", systemImage: "number")
+                Spacer()
+                Text(appVersion)
+                    .foregroundColor(.secondary)
+            }
+            HStack {
+                Label("开发者", systemImage: "person")
+                Spacer()
+                Text("豆包And涛哥")
+                    .foregroundColor(.secondary)
+            }
+            HStack {
+                Label("软件说明", systemImage: "doc.text")
+                Spacer()
+                Text("米兰公馆中介和二房东工作平台")
+                    .font(.footnote)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.trailing)
+            }
+            HStack {
+                Label("数据安全", systemImage: "lock.shield")
+                Spacer()
+                Text("本机加密存储；跨端操作仅手动触发")
+                    .font(.footnote)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.trailing)
+            }
+            Button { showVersionHistory = true } label: {
+                HStack {
+                    Label("版本更新介绍", systemImage: "doc.plaintext")
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(.secondary)
+                }
+            }
+        }
+    }
+
     var body: some View {
         NavigationStack {
             settingsForm
@@ -99,237 +336,14 @@ struct SettingsView: View {
     /// v1.6：设置页主体拆为独立属性（避免 body 表达式 type-check 超时）
     private var settingsForm: some View {
         Form {
-                // MARK: 数据管理
-                Section {
-                    Button { showBackupSheet = true } label: {
-                        Label("备份数据", systemImage: "square.and.arrow.down")
-                    }
-                    Button { showRestoreSheet = true } label: {
-                        Label("恢复数据", systemImage: "square.and.arrow.up")
-                    }
-                    Button { showClearSheet = true } label: {
-                        HStack {
-                            Label("清空数据", systemImage: "trash")
-                                .foregroundColor(.red)
-                            Spacer()
-                            Text("按板块清空")
-                                .font(.footnote)
-                                .foregroundColor(.secondary)
-                        }
-                    }
-                } footer: {
-                    Text("备份与恢复均为手动操作，建议重要数据每次修改后及时备份。")
-                }
-
-                // MARK: 跨端数据
-                Section {
-                    Button { showManualSync = true } label: {
-                        HStack {
-                            Label("数据同步", systemImage: "arrow.triangle.2.circlepath")
-                            Spacer()
-                            Text("手动")
-                                .font(.footnote)
-                                .foregroundColor(.secondary)
-                        }
-                    }
-                    Button { showMigration = true } label: {
-                        Label("备份与迁移", systemImage: "iphone.and.arrow.forward")
-                    }
-                } footer: {
-                    Text("跨端同步和迁移只会在你主动操作后执行，不会自动联网。")
-                }
-
-                // MARK: 自动备份
-                Section {
-                    HStack {
-                        Label("启用自动备份", systemImage: "clock")
-                        Spacer()
-                        Toggle("", isOn: $autoBackupEnabled)
-                            .labelsHidden()
-                    }
-                    .onChange(of: autoBackupEnabled) { _, _ in saveAutoSettings() }
-                    if autoBackupEnabled {
-                        HStack {
-                            Label("备份频率", systemImage: "calendar")
-                            Spacer()
-                            Picker("", selection: $backupFrequency) {
-                                Text("每天").tag("day")
-                                Text("每周").tag("week")
-                                Text("每月").tag("month")
-                            }
-                            .pickerStyle(.menu)
-                            .tint(.secondary)
-                            .labelsHidden()
-                            .onChange(of: backupFrequency) { _, _ in saveAutoSettings() }
-                        }
-                        HStack {
-                            Label("备份时间", systemImage: "timer")
-                            Spacer()
-                            Button { if backupHour > 0 { backupHour -= 1 } } label: {
-                                Image(systemName: "minus.circle")
-                                    .font(.system(size: 20, weight: .regular))
-                                    .foregroundColor(.secondary)
-                            }
-                            .buttonStyle(.plain)
-                            Text(String(format: "%02d:00", backupHour))
-                                .font(.system(size: 16, weight: .semibold))
-                                .frame(minWidth: 58)
-                                .multilineTextAlignment(.center)
-                            Button { if backupHour < 23 { backupHour += 1 } } label: {
-                                Image(systemName: "plus.circle")
-                                    .font(.system(size: 20, weight: .regular))
-                                    .foregroundColor(.secondary)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                        .onChange(of: backupHour) { _, _ in saveAutoSettings() }
-                    }
-                } footer: {
-                    Text("自动备份将保存到总备份文件夹；按天自动备份超过7天会自动清理，手动备份不会被删除。")
-                }
-
-                // MARK: 水电默认设置
-                Section {
-                    HStack {
-                        Label("电费单价", systemImage: "bolt")
-                        Spacer()
-                        TextField("0.8", text: $defaultElectricPrice)
-                            .keyboardType(.decimalPad)
-                            .multilineTextAlignment(.trailing)
-                            .frame(width: 90)
-                    }
-                    HStack {
-                        Label("水费单价", systemImage: "drop")
-                        Spacer()
-                        TextField("5.5", text: $defaultWaterPrice)
-                            .keyboardType(.decimalPad)
-                            .multilineTextAlignment(.trailing)
-                            .frame(width: 90)
-                    }
-                    HStack {
-                        Label("默认总预存", systemImage: "wallet.pass")
-                        Spacer()
-                        TextField("0", text: $defaultUtilityPrepayment)
-                            .keyboardType(.decimalPad)
-                            .multilineTextAlignment(.trailing)
-                            .frame(width: 90)
-                    }
-                } footer: {
-                    Text("默认单价和预存仅用于新增房源，不影响已生成的结算记录。")
-                }
-
-                // MARK: 账单模板
-                Section {
-                    Button { showBillTemplate = true } label: {
-                        HStack {
-                            Label("账单模板设置", systemImage: "textformat.alt")
-                            Spacer()
-                            Text("文本/收款码/预览")
-                                .font(.footnote)
-                                .foregroundColor(.secondary)
-                        }
-                    }
-                }
-
-                // MARK: 房源分享（v1.6：原房源板块独立设置页合并至此）
+                dataSection
+                syncSection
+                autoBackupSection
+                utilitySection
+                billSection
                 houseShareSection
-
-                // MARK: 自定义铃声
-                Section {
-                    HStack {
-                        Label("收租提醒", systemImage: "bell")
-                        Spacer()
-                        Picker("", selection: $rentSound) {
-                            Text("系统音").tag("system")
-                            Text("自定义音").tag("custom")
-                        }
-                        .pickerStyle(.menu)
-                        .tint(.secondary)
-                        .labelsHidden()
-                    }
-                    HStack {
-                        Label("到期提醒", systemImage: "alarm")
-                        Spacer()
-                        Picker("", selection: $expirySound) {
-                            Text("系统音").tag("system")
-                            Text("自定义音").tag("custom")
-                        }
-                        .pickerStyle(.menu)
-                        .tint(.secondary)
-                        .labelsHidden()
-                    }
-                    HStack {
-                        Label("包租提醒", systemImage: "bell.badge")
-                        Spacer()
-                        Picker("", selection: $payoutSound) {
-                            Text("系统音").tag("system")
-                            Text("自定义音").tag("custom")
-                        }
-                        .pickerStyle(.menu)
-                        .tint(.secondary)
-                        .labelsHidden()
-                    }
-                    HStack {
-                        Label("待办提醒", systemImage: "list.bullet.clipboard")
-                        Spacer()
-                        Picker("", selection: $todoSound) {
-                            Text("系统音").tag("system")
-                            Text("自定义音").tag("custom")
-                        }
-                        .pickerStyle(.menu)
-                        .tint(.secondary)
-                        .labelsHidden()
-                    }
-                } footer: {
-                    Text("自定义音使用APP内置铃声；文件不可用时iOS会自动使用系统音。")
-                }
-
-                // MARK: 关于
-                Section {
-                    HStack {
-                        Label("应用名称", systemImage: "app")
-                        Spacer()
-                        Text("公寓管家")
-                            .foregroundColor(.secondary)
-                    }
-                    HStack {
-                        Label("版本", systemImage: "number")
-                        Spacer()
-                        Text(appVersion)
-                            .foregroundColor(.secondary)
-                    }
-                    HStack {
-                        Label("开发者", systemImage: "person")
-                        Spacer()
-                        Text("豆包And涛哥")
-                            .foregroundColor(.secondary)
-                    }
-                    HStack {
-                        Label("软件说明", systemImage: "doc.text")
-                        Spacer()
-                        Text("米兰公馆中介和二房东工作平台")
-                            .font(.footnote)
-                            .foregroundColor(.secondary)
-                            .multilineTextAlignment(.trailing)
-                    }
-                    HStack {
-                        Label("数据安全", systemImage: "lock.shield")
-                        Spacer()
-                        Text("本机加密存储；跨端操作仅手动触发")
-                            .font(.footnote)
-                            .foregroundColor(.secondary)
-                            .multilineTextAlignment(.trailing)
-                    }
-                    Button { showVersionHistory = true } label: {
-                        HStack {
-                            Label("版本更新介绍", systemImage: "doc.plaintext")
-                            Spacer()
-                            Image(systemName: "chevron.right")
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundColor(.secondary)
-                        }
-                    }
-                }
+                ringtoneSection
+                aboutSection
             }
             .navigationTitle("设置")
             .navigationBarTitleDisplayMode(.inline)
