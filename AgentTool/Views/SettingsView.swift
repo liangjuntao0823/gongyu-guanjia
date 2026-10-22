@@ -92,7 +92,13 @@ struct SettingsView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
+            settingsForm
+        }
+    }
+
+    /// v1.6：设置页主体拆为独立属性（避免 body 表达式 type-check 超时）
+    private var settingsForm: some View {
+        Form {
                 // MARK: 数据管理
                 Section {
                     Button { showBackupSheet = true } label: {
@@ -421,7 +427,6 @@ struct SettingsView: View {
             } message: {
                 Text(houseCacheTip ?? "")
             }
-        }
     }
 
     // MARK: - 逻辑（保持不变）
