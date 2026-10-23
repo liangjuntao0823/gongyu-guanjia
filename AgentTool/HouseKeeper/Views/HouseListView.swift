@@ -698,10 +698,10 @@ struct HouseListView: View {
                 }
                 try? ctx.save()
                 reloadHouses()
+                let msg = uploaded > 0 ? "已同步云端 \(recs.count) 套，并补传本地 \(uploaded) 套" : "已同步云端房源 \(recs.count) 套"
+                infoMessage = msg; showInfoAlert = true
+                BackupLogStore.log(category: "同步", action: "同步云端房源", result: "成功", detail: msg)
             }
-            let msg = uploaded > 0 ? "已同步云端 \(recs.count) 套，并补传本地 \(uploaded) 套" : "已同步云端房源 \(recs.count) 套"
-            infoMessage = msg; showInfoAlert = true
-            BackupLogStore.log(category: "同步", action: "同步云端房源", result: "成功", detail: msg)
         } catch {
             infoMessage = "同步失败：\(error.localizedDescription)"; showInfoAlert = true
             BackupLogStore.log(category: "同步", action: "同步云端房源", result: "失败", detail: error.localizedDescription)
