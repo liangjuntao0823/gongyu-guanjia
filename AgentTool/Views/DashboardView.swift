@@ -614,12 +614,9 @@ struct DashboardView: View {
             NavigationStack { UtilityView(onWriteSuccess: { refreshDashboard() }) }
         }
         .sheet(isPresented: $showAdmin) {
-            // v1.17 需求5：App 内管理后台直接换成云端后台（网页 WebView），免登录带口令哈希
-            // v1.19 补全 #12：多用户口令——URL 再带当前用户名，后台知道谁在登录
-            let u = (CloudUser.username).addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
-            if let url = URL(string: "\(CloudConfig.functionURL)?act=admin&k=\(CloudConfig.passwordHash)&u=\(u)") {
-                AdminWebView(url: url)
-            }
+            // v1.37：App 内管理后台改用原生后台（获客分析/分享记录/桶管理），完全免登录、不走网页、无缓存问题；
+            // 需要手机/电脑自适应网页版时，在原生后台右上角「safari」一键跳浏览器（带免登录口令）
+            AdminDashboardView()
         }
         .sheet(isPresented: $showAddDeal) {
             NavigationStack { AddDealView() }

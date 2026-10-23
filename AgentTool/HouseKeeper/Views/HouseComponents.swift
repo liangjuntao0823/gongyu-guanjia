@@ -139,7 +139,7 @@ struct HouseCardView: View {
             .clipShape(RoundedRectangle(cornerRadius: 10))
 
             VStack(alignment: .leading, spacing: 3) {
-                // 第一行：房号 + 价格，右侧状态徽章（待租/已租）+ 云端标识竖排（云端标识在状态下方）
+                // 第一行：房号 + 价格，最右侧是状态徽章（已租/待租）
                 HStack(alignment: .top, spacing: 8) {
                     Text(house.displayRoomNo)
                         .font(.title3.weight(.bold))
@@ -148,14 +148,10 @@ struct HouseCardView: View {
                         .font(.headline.weight(.bold))
                         .foregroundColor(AppTheme.accent)
                     Spacer(minLength: 0)
-                    // v1.37：状态徽章 + 云端标识横排同一行，避免云端标签单独占一行（保持卡片 4 行布局）
-                    HStack(spacing: 6) {
-                        StatusBadge(status: house.status)
-                        CloudBadge(status: house.cloudStatus)
-                    }
+                    StatusBadge(status: house.status)
                 }
 
-                // 第二行：户型 + 实拍图情况
+                // 第二行：户型 + 有无实拍图，最右侧是双端标识（本地/云端/双端）
                 HStack(spacing: 6) {
                     Text(house.layout.isEmpty ? "户型未填" : house.layout)
                         .font(.footnote)
@@ -172,6 +168,8 @@ struct HouseCardView: View {
                             .font(.footnote)
                             .foregroundColor(.secondary)
                     }
+                    Spacer(minLength: 0)
+                    CloudBadge(status: house.cloudStatus)
                 }
 
                 // v1.19 补全：第三行 = 备注（备注与密码互换位置）

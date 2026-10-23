@@ -1994,10 +1994,18 @@ struct AdminDashboardView: View {
                     Button("关闭") { dismiss() }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        loadAll()
-                    } label: {
-                        Image(systemName: "arrow.clockwise")
+                    HStack(spacing: 14) {
+                        // v1.37：原生后台免登录；想用网页版（可手机电脑自适应）可一键跳浏览器，URL 带版本参数强制取最新后台页
+                        Button {
+                            openWebBackend()
+                        } label: {
+                            Image(systemName: "safari")
+                        }
+                        Button {
+                            loadAll()
+                        } label: {
+                            Image(systemName: "arrow.clockwise")
+                        }
                     }
                 }
             }
@@ -2009,6 +2017,14 @@ struct AdminDashboardView: View {
         loadStats()
         loadShares()
         if tab == 2 { loadBucket() }
+    }
+
+    /// v1.37：在系统浏览器打开云端后台网页（带免登录口令 + 版本参数绕过缓存）
+    private func openWebBackend() {
+        let u = (CloudUser.username).addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+        if let url = URL(string: "\(CloudConfig.functionURL)?act=admin&k=\(CloudConfig.passwordHash)&u=\(u)&v=20261023b") {
+            UIApplication.shared.open(url)
+        }
     }
 
     // MARK: 获客分析

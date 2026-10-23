@@ -246,21 +246,11 @@ struct CosConfigView: View {
                     Label("保存用户名", systemImage: "person.fill.checkmark")
                 }
                 .disabled(username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                Button {
-                    exportUserProfile()
-                } label: {
-                    Label("导出「给别人用」的配置", systemImage: "square.and.arrow.up")
-                }
-                // v1.37：导入别人发来的共享配置文件（自动识别并写入）
-                Button {
-                    showProfileImport = true
-                } label: {
-                    Label("导入共享配置", systemImage: "square.and.arrow.down")
-                }
+                // v1.37：多用户下的「导出/导入配置」已去掉——与下方「腾讯云 COS 配置」备份重复，合并到一处
             } header: {
                 Text("多用户（共享房源）")
             } footer: {
-                Text("多台手机填同一个桶配置、各自填用户名，即可共享房源：一台录入，另一台下拉同步就能看到。操作日志/分享/统计会带上您的用户名，其他私有数据（名片/水印/统计/备份）按用户名分开。导出配置文件发给别人，导入即用；不共用配置的人也能自行部署。")
+                Text("多台手机填同一个桶配置、各自填用户名，即可共享房源：一台录入，另一台下拉同步就能看到。操作日志/分享/统计会带上您的用户名，其他私有数据（名片/水印/统计/备份）按用户名分开。")
             }
 
             Section("腾讯云 COS 配置") {
