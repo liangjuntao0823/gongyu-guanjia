@@ -208,7 +208,7 @@ struct CosConfigView: View {
             }
 
             // v1.18：云函数后台——管理后台网址（可设置）、后台口令、部署包下载
-            Section("云函数后台") {
+            Section {
                 TextField("云函数地址（后台网址）", text: $functionURL)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
@@ -223,6 +223,8 @@ struct CosConfigView: View {
                 } label: {
                     Label("下载云端部署包（zip）", systemImage: "square.and.arrow.down")
                 }
+            } header: {
+                Text("云函数后台")
             } footer: {
                 Text("云函数地址即管理后台网页的网址。给别的房东用：导出下方部署包，让他在自己的腾讯云部署，再把他的云函数地址填到这里，App 首页「管理后台」就会打开他的后台。")
             }
