@@ -48,7 +48,8 @@ struct HouseDetailView: View {
     @State private var cloudDeleteMessage: String?
     @State private var deleteResultMessage: String?   // v1.19 补全：删除成功提示（区分 本地/本地+云端/云端）
 
-    var body: some View {
+    // v1.19：把滚动主体拆为独立子视图，避免 Swift 编译器对整个 body 一次类型检查超时
+    private var detailScroll: some View {
         ScrollView {
             VStack(spacing: 14) {
                 mediaSection
@@ -57,8 +58,12 @@ struct HouseDetailView: View {
             }
             .padding(16)
         }
-        .background(AppTheme.background.ignoresSafeArea())
-        .navigationTitle(house.displayRoomNo)
+    }
+
+    var body: some View {
+        detailScroll
+            .background(AppTheme.background.ignoresSafeArea())
+            .navigationTitle(house.displayRoomNo)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
