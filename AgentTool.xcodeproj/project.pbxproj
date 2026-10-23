@@ -26,7 +26,7 @@
 		A10000010000000000000012 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000012 /* Assets.xcassets */; };
 		A10000010000000000000097 /* initialData.json in Resources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000097 /* initialData.json */; };
 		A10000010000000000000098 /* presetBackup.json in Resources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000098 /* presetBackup.json */; };
-		A10000010000000000000099 /* 云端部署包.zip in Resources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000099 /* 云端部署包.zip */; };
+		A10000010000000000000116 /* 云端部署包.zip in Resources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000116 /* 云端部署包.zip */; };
 		A20000010000000000000001 /* SyncDTO.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000010000000000000001 /* SyncDTO.swift */; };
 		A20000010000000000000002 /* ManualSyncView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000010000000000000002 /* ManualSyncView.swift */; };
 		A20000010000000000000003 /* MigrationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000010000000000000003 /* MigrationView.swift */; };
@@ -74,7 +74,7 @@
 		B10000010000000000000012 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		B10000010000000000000097 /* initialData.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = initialData.json; sourceTree = "<group>"; };
 		B10000010000000000000098 /* presetBackup.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = presetBackup.json; sourceTree = "<group>"; };
-		B10000010000000000000099 /* 云端部署包.zip */ = {isa = PBXFileReference; lastKnownFileType = archive.zip; path = "云端部署包.zip"; sourceTree = "<group>"; };
+		B10000010000000000000116 /* 云端部署包.zip */ = {isa = PBXFileReference; lastKnownFileType = archive.zip; path = "云端部署包.zip"; sourceTree = "<group>"; };
 		B10000010000000000000013 /* Preview Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = "Preview Assets.xcassets"; sourceTree = "<group>"; };
 		B10000010000000000000014 /* AgentTool.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AgentTool.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		B20000010000000000000001 /* SyncDTO.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncDTO.swift; sourceTree = "<group>"; };
@@ -169,7 +169,7 @@
 				B10000010000000000000012 /* Assets.xcassets */,
 				B10000010000000000000097 /* initialData.json */,
 				B10000010000000000000098 /* presetBackup.json */,
-				B10000010000000000000099 /* 云端部署包.zip */,
+				B10000010000000000000116 /* 云端部署包.zip */,
 				B10000010000000000000115 /* Info.plist */,
 				D10000010000000000000007 /* Preview Content */,
 				D10000010000000000000008 /* HouseKeeper */,
@@ -359,7 +359,7 @@
 				A10000010000000000000012 /* Assets.xcassets in Resources */,
 				A10000010000000000000097 /* initialData.json in Resources */,
 				A10000010000000000000098 /* presetBackup.json in Resources */,
-				A10000010000000000000099 /* 云端部署包.zip in Resources */,
+				A10000010000000000000116 /* 云端部署包.zip in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
