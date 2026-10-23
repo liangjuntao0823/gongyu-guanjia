@@ -123,65 +123,73 @@ struct HouseDetailView: View {
         }
     }
 
-    var body: some View {
+    private var sheetLayer: some View {
         detailScroll
             .background(AppTheme.background.ignoresSafeArea())
             .navigationTitle(house.displayRoomNo)
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button("编辑") { showEdit = true }
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("编辑") { showEdit = true }
+                }
             }
-        }
-        .sheet(isPresented: $showEdit) {
-            HouseEditView(house: house)
-        }
-        .sheet(isPresented: $showShare) {
-            // 注意：UIActivityViewController 不能加 presentationDetents，否则弹分享面板会闪退
-            HouseShareSheet(items: shareItems)
-        }
-        .confirmationDialog("切换房源状态", isPresented: $showStatusConfirm, titleVisibility: .visible) {
-            if house.status == .available {
-                Button("标记为已租", role: .destructive) { setStatus(.rented) }
-            } else {
-                Button("标记为待租") { setStatus(.available) }
+            .sheet(isPresented: $showEdit) {
+                HouseEditView(house: house)
             }
-            Button("取消", role: .cancel) {}
-        } message: {
-            Text(house.status == .available ? "确认这套已租出？" : "确认这套恢复可带看？")
-        }
-        .confirmationDialog("删除这套房源？", isPresented: $showDeleteConfirm, titleVisibility: .visible) {
-            Button("彻底删除", role: .destructive) { deleteHouse() }
-            Button("取消", role: .cancel) {}
-        } message: {
-            // v1.19 补全：删除确认提示按当前存储位置动态显示（是否删云端一目了然）
-            Text(deleteConfirmMessage)
-        }
-        .confirmationDialog("选择分享方式", isPresented: $showShareModePicker, titleVisibility: .visible) {
-            // v1.21：脱敏版隐藏房号/价格/房东，发给找房客户；完整版显示全部信息，发给同事
-            Button("发给客户（隐藏版）") { startShare(mode: .masked) }
-            Button("发给同事（完整版）") { startShare(mode: .full) }
-            Button("取消", role: .cancel) {}
-        } message: {
-            Text("隐藏版只显示户型、位置和您的联系方式；完整版额外显示房号、价格、房东和密码。")
-        }
-        // v1.15 需求1：一键保存确认（显示将保存的照片/视频数量）
-        .confirmationDialog("保存到手机相册？", isPresented: $showSaveConfirm, titleVisibility: .visible) {
-            Button("保存", role: .destructive) { saveAllToAlbum() }
-            Button("取消", role: .cancel) {}
-        } message: {
-            Text("将把本房源全部 \(house.photos.count) 张照片、\(house.videos.count) 个视频保存到系统相册。")
-        }
-        .fullScreenCover(item: $previewRoute) { route in
-            PhotoPreviewView(photos: house.photos, startIndex: route.index, roomKey: house.mediaRoomKey)
-        }
-        .overlay {
-            shareOverlayView
-        }
-        // v1.15 需求1：一键保存中 + 保存完成提示（overlay 卡片，不占 alert 链，避开 iOS 17 多弹窗覆盖问题）
-        .overlay {
-            saveOverlayView
-        }
+            .sheet(isPresented: $showShare) {
+                // 注意：UIActivityViewController 不能加 presentationDetents，否则弹分享面板会闪退
+                HouseShareSheet(items: shareItems)
+            }
+    }
+
+    private var dialogLayer: some View {
+        sheetLayer
+            .confirmationDialog("切换房源状态", isPresented: $showStatusConfirm, titleVisibility: .visible) {
+                if house.status == .available {
+                    Button("标记为已租", role: .destructive) { setStatus(.rented) }
+                } else {
+                    Button("标记为待租") { setStatus(.available) }
+                }
+                Button("取消", role: .cancel) {}
+            } message: {
+                Text(house.status == .available ? "确认这套已租出？" : "确认这套恢复可带看？")
+            }
+            .confirmationDialog("删除这套房源？", isPresented: $showDeleteConfirm, titleVisibility: .visible) {
+                Button("彻底删除", role: .destructive) { deleteHouse() }
+                Button("取消", role: .cancel) {}
+            } message: {
+                // v1.19 补全：删除确认提示按当前存储位置动态显示（是否删云端一目了然）
+                Text(deleteConfirmMessage)
+            }
+            .confirmationDialog("选择分享方式", isPresented: $showShareModePicker, titleVisibility: .visible) {
+                // v1.21：脱敏版隐藏房号/价格/房东，发给找房客户；完整版显示全部信息，发给同事
+                Button("发给客户（隐藏版）") { startShare(mode: .masked) }
+                Button("发给同事（完整版）") { startShare(mode: .full) }
+                Button("取消", role: .cancel) {}
+            } message: {
+                Text("隐藏版只显示户型、位置和您的联系方式；完整版额外显示房号、价格、房东和密码。")
+            }
+            // v1.15 需求1：一键保存确认（显示将保存的照片/视频数量）
+            .confirmationDialog("保存到手机相册？", isPresented: $showSaveConfirm, titleVisibility: .visible) {
+                Button("保存", role: .destructive) { saveAllToAlbum() }
+                Button("取消", role: .cancel) {}
+            } message: {
+                Text("将把本房源全部 \(house.photos.count) 张照片、\(house.videos.count) 个视频保存到系统相册。")
+            }
+            .fullScreenCover(item: $previewRoute) { route in
+                PhotoPreviewView(photos: house.photos, startIndex: route.index, roomKey: house.mediaRoomKey)
+            }
+            .overlay {
+                shareOverlayView
+            }
+            // v1.15 需求1：一键保存中 + 保存完成提示（overlay 卡片，不占 alert 链，避开 iOS 17 多弹窗覆盖问题）
+            .overlay {
+                saveOverlayView
+            }
+    }
+
+    var body: some View {
+        dialogLayer
         .alert("无法分享", isPresented: Binding(
             get: { shareError != nil },
             set: { if !$0 { shareError = nil } }
