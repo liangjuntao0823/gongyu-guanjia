@@ -1832,7 +1832,8 @@ struct WatermarkSettingsView: View {
     }
 }
 
-/// 水印预览：模拟分享页图片（利保米兰公馆 · 2-2334），按当前设置实时叠加水印
+/// 水印预览：模拟分享页里的多张实拍图（利保米兰公馆 · 2-2334），
+/// v1.17 需求4：水印叠加在【每张图片】的右下角（与真实 H5 的 mediaBlockHTML 一致），而非页面右下角
 struct WatermarkPreviewView: View {
     let settings: WatermarkSettings
     @Environment(\.dismiss) private var dismiss
@@ -1841,24 +1842,29 @@ struct WatermarkPreviewView: View {
         NavigationStack {
             ZStack {
                 Color(.systemGroupedBackground).ignoresSafeArea()
-                VStack(spacing: 0) {
-                    // 模拟分享页头
-                    HStack {
-                        Text("利保米兰公馆").font(.headline)
-                        Spacer()
-                        Text("2-2334").font(.subheadline).foregroundStyle(.secondary)
+                ScrollView {
+                    VStack(spacing: 0) {
+                        // 模拟分享页头
+                        HStack {
+                            Text("利保米兰公馆").font(.headline)
+                            Spacer()
+                            Text("2-2334").font(.subheadline).foregroundStyle(.secondary)
+                        }
+                        .padding()
+                        .background(Color.white)
+                        // 模拟图片区：三张实拍图，每张各自叠加水印
+                        VStack(spacing: 12) {
+                            sampleImageCard
+                            sampleImageCard
+                            sampleImageCard
+                        }
+                        .padding()
+                        Text("水印叠加在每张图片的\(settings.position.label)（与真实分享页一致）")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .padding(.bottom)
                     }
-                    .padding()
                     .background(Color.white)
-                    // 模拟图片区
-                    ZStack(alignment: .topLeading) {
-                        RoundedRectangle(cornerRadius: 12)
-                            .fill(LinearGradient(colors: [Color(red: 0.45, green: 0.6, blue: 0.8), Color(red: 0.25, green: 0.4, blue: 0.6)], startPoint: .topLeading, endPoint: .bottomTrailing))
-                            .frame(height: 300)
-                        Text("实拍图示意").font(.caption).foregroundStyle(.white.opacity(0.7)).padding(12)
-                        watermarkLayer
-                    }
-                    .padding()
                 }
             }
             .navigationTitle("水印预览")
@@ -1869,6 +1875,18 @@ struct WatermarkPreviewView: View {
                 }
             }
         }
+    }
+
+    /// 单张模拟实拍图（右下/四角按设置叠加水印）
+    private var sampleImageCard: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 12)
+                .fill(LinearGradient(colors: [Color(red: 0.45, green: 0.6, blue: 0.8), Color(red: 0.25, green: 0.4, blue: 0.6)], startPoint: .topLeading, endPoint: .bottomTrailing))
+                .frame(height: 220)
+            Text("实拍图示意").font(.caption).foregroundStyle(.white.opacity(0.7)).padding(12)
+            watermarkLayer
+        }
+        .frame(maxWidth: .infinity)
     }
 
     @ViewBuilder

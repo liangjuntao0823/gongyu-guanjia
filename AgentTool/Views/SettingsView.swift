@@ -62,8 +62,7 @@ struct SettingsView: View {
     @State private var showBackupCenterBrowse = false // 备份文件查看器
     @State private var showBackupCenterRestore = false // 恢复选择器
     @State private var showLogsView = false           // 操作日志
-    @State private var showCrashShare = false         // 崩溃日志导出（系统分享）
-    @State private var crashShareURLs: [URL] = []
+    @State private var showCrashLogsView = false      // v1.17 需求2：崩溃日志查看器（内置，右上角导出 txt）
     @AppStorage("autoBackupRetentionDays") private var backupRetentionDays = 7   // 自动备份保留天数（默认7天，可调）
     @State private var autoBackupEnabled = false
     @State private var backupFrequency = "day"
@@ -139,6 +138,21 @@ struct SettingsView: View {
                     Image(systemName: "lock.shield")
                 }
             }
+            // v1.17 需求10：三端互通详细介绍及使用说明
+            NavigationLink {
+                InterconnectionInfoView()
+            } label: {
+                Label {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("三端互通说明")
+                        Text("App ↔ 云函数 ↔ 网页后台 如何协作")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                } icon: {
+                    Image(systemName: "arrow.triangle.2.circlepath")
+                }
+            }
             Toggle("分享时压缩视频和图片", isOn: Binding(
                 get: { shareCompressionEnabled },
                 set: { UserDefaults.standard.set($0, forKey: "compressOnShare") }
@@ -206,9 +220,9 @@ struct SettingsView: View {
             Button { showLogsView = true } label: {
                 Label("操作日志", systemImage: "list.bullet.rectangle")
             }
-            // v1.12：崩溃日志导出（自建日志文件，不依赖第三方）
-            Button { exportCrashLogs() } label: {
-                Label("导出崩溃日志", systemImage: "ladybug")
+            // v1.12：崩溃日志（自建日志文件，不依赖第三方）v1.17 需求2：内置查看器 + 右上角导出（App 根目录生成 txt）
+            Button { showCrashLogsView = true } label: {
+                Label("查看 / 导出崩溃日志", systemImage: "ladybug")
             }
             // v1.14 需求7：清空数据移到导出崩溃日志下方（板块末位）
             Button { showClearSheet = true } label: {
@@ -580,9 +594,9 @@ struct SettingsView: View {
             .sheet(isPresented: $showLogsView) {
                 BackupLogsView()
             }
-            // v1.12：崩溃日志导出（系统分享面板）
-            .sheet(isPresented: $showCrashShare) {
-                SystemShareSheet(items: crashShareURLs)
+            // v1.12：崩溃日志（v1.17 需求2：内置查看器，右上角导出 txt 到 App 根目录）
+            .sheet(isPresented: $showCrashLogsView) {
+                CrashLogsView()
             }
             // v1.12：备份中心消息通道（查看器/恢复器内的提示复用本页 alert）
             .onReceive(NotificationCenter.default.publisher(for: .backupCenterMessage)) { note in
@@ -654,17 +668,8 @@ struct SettingsView: View {
         }
     }
 
-    // v1.12：导出崩溃日志（无日志时提示）
-    private func exportCrashLogs() {
-        let files = CrashLogCollector.logFiles()
-        if files.isEmpty {
-            showMessage = "暂无崩溃日志"
-            showAlert = true
-            return
-        }
-        crashShareURLs = files
-        showCrashShare = true
-    }
+    // v1.17 需求2：崩溃日志改为内置查看器（CrashLogsView），此函数不再使用，删除以避免系统分享表单空白。
+    // 原逻辑：无日志时提示；有日志则弹系统分享面板（UIActivityViewController 在部分机型空白）。
 
     // 清空数据
     private func clearData(type: DataBackupManager.BackupType) {
@@ -700,9 +705,168 @@ struct SettingsView: View {
     }
 }
 
+// MARK: - v1.17 需求2 崩溃日志内置查看器（替代系统分享面板；右上角导出 txt 到 App 根目录）
+
+struct CrashLogsView: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var files = CrashLogCollector.logFiles()
+    @State private var exportTip: String?
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if files.isEmpty {
+                    Text("暂无崩溃日志")
+                        .foregroundColor(.secondary)
+                } else {
+                    ForEach(files, id: \.self) { file in
+                        NavigationLink {
+                            CrashLogDetailView(fileURL: file)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(file.lastPathComponent)
+                                    .font(.subheadline.weight(.medium))
+                                Text(firstLine(of: file))
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                    .lineLimit(1)
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle("崩溃日志")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("关闭") { dismiss() }
+                }
+                // v1.17 需求2：右上角「导出」→ 直接生成崩溃日志 txt 到 App 根目录（Documents）
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("导出") { exportAll() }
+                        .disabled(files.isEmpty)
+                }
+            }
+            .alert("导出崩溃日志", isPresented: Binding(
+                get: { exportTip != nil },
+                set: { if !$0 { exportTip = nil } }
+            )) {
+                Button("好", role: .cancel) {}
+            } message: {
+                Text(exportTip ?? "")
+            }
+        }
+    }
+
+    /// 取日志首行摘要（时间/异常标题）
+    private func firstLine(of url: URL) -> String {
+        (try? String(contentsOf: url, encoding: .utf8))?.components(separatedBy: "\n").first ?? ""
+    }
+
+    /// v1.17 需求2：把所有崩溃日志合并导出为一个 txt，命名「崩溃日志_导出日期.txt」，落盘 App 根目录
+    private func exportAll() {
+        guard !files.isEmpty else {
+            exportTip = "暂无崩溃日志可导出"
+            return
+        }
+        let df = DateFormatter()
+        df.dateFormat = "yyyyMMdd_HHmmss"
+        df.locale = Locale(identifier: "en_US_POSIX")
+        let fileName = "崩溃日志_\(df.string(from: Date())).txt"
+        var lines = ["公寓管家 · 崩溃日志", "导出时间：\(Date())", "共 \(files.count) 份", "=================="]
+        for url in files {
+            lines.append("")
+            lines.append("【\(url.lastPathComponent)】")
+            let body = (try? String(contentsOf: url, encoding: .utf8)) ?? "(读取失败)"
+            lines.append(body)
+        }
+        let fileURL = DataRoot.url().appendingPathComponent(fileName)
+        do {
+            try lines.joined(separator: "\n").write(to: fileURL, atomically: true, encoding: .utf8)
+            exportTip = "已导出到：\n\(fileURL.lastPathComponent)\n\n（App 根目录 / 数据文件夹）"
+        } catch {
+            exportTip = "导出失败：\(error.localizedDescription)"
+        }
+    }
+}
+
+/// 单份崩溃日志详情（展示完整内容）
+struct CrashLogDetailView: View {
+    let fileURL: URL
+    @State private var content = ""
+
+    var body: some View {
+        ScrollView {
+            Text(content.isEmpty ? "（内容读取失败或为空）" : content)
+                .font(.system(.footnote, design: .monospaced))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding()
+        }
+        .navigationTitle(fileURL.lastPathComponent)
+        .navigationBarTitleDisplayMode(.inline)
+        .task {
+            content = (try? String(contentsOf: fileURL, encoding: .utf8)) ?? ""
+        }
+    }
+}
+
+// MARK: - v1.17 需求10 三端互通详细介绍及使用说明
+
+struct InterconnectionInfoView: View {
+    var body: some View {
+        Form {
+            Section {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("你的公寓管家由三个端协同工作：")
+                        .font(.subheadline)
+                    Text("① 手机 App（本地经营数据 + 房源分享）\n② 腾讯云函数 gongyu-stats（云端统计与后台网关）\n③ 云端后台网页（网页 / App 内打开的后台）")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            } header: {
+                Text("三端是什么")
+            }
+
+            Section {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("• 每次生成新的分享 H5 链接时，页面里的埋点脚本会自动、静默地向云函数发送一次访问记录（房号 + 模式 + 来源，无需访客同意）。").font(.footnote)
+                    Text("• 云函数把记录追加写入云端桶 statistics/ 下的按日文件。").font(.footnote)
+                    Text("• 你在后台看到的获客统计、按房号/模式/日期的数据，都是云端桶里这些记录聚合而来，非演示数据。").font(.footnote)
+                }
+            } header: {
+                Text("数据是怎么流动的")
+            }
+
+            Section {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("• App 内「管理后台」= 云端后台网页，直接用 App 打开，免登录（自动带口令哈希）。").font(.footnote)
+                    Text("• 网页版打开同一地址需输入后台口令。口令可在 App 设置里修改，保存后自动同步到云函数与云端后台。").font(.footnote)
+                    Text("• 分享记录存在云端桶 h/_share_records.json，App 与网页后台共同读取。").font(.footnote)
+                    Text("• 桶文件管理可逐级浏览云端备份/媒体文件，支持下载与删除。").font(.footnote)
+                }
+            } header: {
+                Text("后台怎么打开")
+            }
+
+            Section {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("• 获客统计与分享记录在云端实时聚合，页面顶部有「刷新」按钮手动刷新。").font(.footnote)
+                    Text("• 桶文件浏览按目录逐级加载，进入子目录后同样可刷新。").font(.footnote)
+                    Text("• 版本更新记录在「设置 → 关于」查看；本说明随 v1.17 提供。").font(.footnote)
+                }
+            } header: {
+                Text("刷新与版本")
+            }
+        }
+        .navigationTitle("三端互通说明")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
 // MARK: - 版本更新介绍
 struct VersionHistoryView: View {
     let versions: [(version: String, date: String, changes: [String])] = [
+        ("v1.17", "2026-10-23", ["修复点房源卡片闪退：成交/在租/退租的关联查询改用主容器，不再在房源独立容器查未注册模型", "崩溃日志改为内置查看器：逐份查看完整内容，右上角「导出」直接生成 txt 到 App 根目录（命名「崩溃日志_导出日期」）", "操作日志右上角「完成」改为「导出」：直接生成 txt，命名「操作日志_导出日期」，存 App 根目录", "分享水印改为叠加在每张图片的右下角（不再是页面右下角）；预览同步为多张图片、每张各自带水印", "App 内「管理后台」直接换成云端后台（网页 WebView），免登录打开", "设置里修改「管理后台口令」保存后自动同步云函数（云端后台、网页后台立即用新口令）", "云端后台去掉演示/示例，全部通真实数据：获客统计、分享记录、桶文件管理均读取云函数实时数据", "三端互通非实时处补「刷新」按钮：云端后台每个板块顶部都有刷新，桶文件支持逐级浏览/下载/删除", "App 版本记录更新到 v1.17", "设置页新增「三端互通」详细介绍与使用说明"]),
         ("v1.14", "2026-10-23", ["云端下载备份直接用原名落盘，下载的备份在「查看备份文件」里直接可见可恢复（不再带「下载_」前缀被列表过滤；旧的「下载_」文件自动识别归组显示）", "外部导入备份弹「立即恢复 / 稍后再说」二级确认；立即恢复走完整恢复流程，完成弹窗显示恢复口径（成交/在租/有效房源/照片视频等分行统计 + 全部核对无误）", "恢复云端备份时明确提示来源：本地已有同名则直接用本地恢复、本地没有则自动下载到本地后恢复，完成弹窗与操作日志均写明", "快速备份与全量备份都支持手动上传到云端（快速只传 zip 本体，全量再传照片视频增量）", "房源详情「一键转发朋友圈」改为「转存到微信」：图片（前 9 张）+ 视频全部进分享面板，到微信里选「收藏」后再自行转发朋友圈", "修复房源左滑「删除」确认无反应：合并多个弹窗为单一确认弹窗，消除 iOS 17 弹窗互相覆盖问题", "设置页「清空数据」移到「导出崩溃日志」下方（板块末位）", "本地备份与云端备份一样提供手动刷新按钮", "版本更新介绍补全 v1.12 / v1.13 两条记录"]),
         ("v1.13", "2026-10-23", ["设置页「查看备份文件」全新排版：快速备份 / 全量备份两大板块切换，每个板块内分本地备份、云端备份两组，原有功能全部保留", "备份成功弹提示；修复恢复数据卡死在 38% 的问题", "「打开备份文件夹」直达文件 App；旧版 JSON 备份收纳进折叠入口", "完成按钮移到右上角；云端备份支持实时刷新桶内文件并同步显示", "操作日志只保留一个月；自动备份保留天数数字放在 - + 号中间", "云端只保留最新 10 份自动备份（手动备份、手动上传的全量备份不清理）", "云端下载逐文件 CRC 校验；下载前先检查本地是否已有同名备份，有则直接复用", "分享房源上传到桶时显示百分比进度；房源板块删除到回收站，回收站删房源同步删除桶里的房源文件夹", "系统「用其他 App 打开」zip 可导入公寓管家识别；房号输入自动去空格", "根目录只保留一个「备份」文件夹（快速备份 / 全量备份 / cos 配置备份等子文件夹细分）"]),
         ("v1.11", "2026-10-22", ["设置页两处「查看备份文件」（数据管理 + 远程配置 COS）支持左滑删除，删除前二次确认，删除后列表自动刷新", "「打开『文件』App 查看数据文件夹」点击直接打开房源图片/视频所在 Media 文件夹（不再只打开文件 App 根目录）", "房源卡片左滑：编辑 / 状态按钮改为双色区分（编辑保持 iOS 蓝，状态切换用绿色，不再连排同色）", "房源卡片左滑状态按钮按当前状态动态显示：待租房源左滑显示「已租」（点击改为已租），已租房源左滑显示「待租」（点击改回待租）"]),
@@ -1346,6 +1510,7 @@ struct AdminPasswordView: View {
     @State private var password = CloudConfig.adminPassword
     @State private var confirm = ""
     @State private var savedFlash = false
+    @State private var resultMsg: String?
     @State private var errorMsg: String?
 
     var body: some View {
@@ -1356,7 +1521,7 @@ struct AdminPasswordView: View {
             } header: {
                 Text("口令设置")
             } footer: {
-                Text("网页版管理后台用此口令登录；App 内打开后台免登录。默认口令 12345678，建议修改为不易猜的字符。修改后请同步修改云函数 gongyu-stats 里的 PASSWORD 常量（部署页 → 函数配置）。")
+                Text("网页版管理后台用此口令登录；App 内打开后台免登录。默认口令 12345678，建议修改为不易猜的字符。v1.17 需求6：保存后会自动同步到云函数（云端后台、网页后台同用此口令）。")
             }
             Section {
                 Button("保存") { save() }
@@ -1373,9 +1538,9 @@ struct AdminPasswordView: View {
             get: { savedFlash },
             set: { if !$0 { savedFlash = false } }
         )) {
-            Button("好") { dismiss() }
+            Button("好", role: .cancel) { dismiss() }
         } message: {
-            Text("后台口令已更新：\(password)")
+            Text(resultMsg ?? "后台口令已更新：\(password)")
         }
     }
 
@@ -1389,8 +1554,37 @@ struct AdminPasswordView: View {
             errorMsg = "两次输入不一致"
             return
         }
+        // v1.17 需求6：记录旧口令哈希用于云函数鉴权，再更新本地
+        let oldHash = CloudConfig.passwordHash
         CloudConfig.adminPassword = trimmed
+        resultMsg = "本地口令已更新：\(trimmed)"
         savedFlash = true
+        // 异步同步到云函数（改桶内 h/_admin_pwd.json）
+        Task {
+            let tip = await syncCloud(oldHash: oldHash, new: trimmed)
+            await MainActor.run { resultMsg = tip }
+        }
+    }
+
+    /// v1.17 需求6：调用云函数 setPwd 把新口令同步到云端（成功后云端后台与网页后台立即用新口令）
+    private func syncCloud(oldHash: String, new: String) async -> String {
+        guard let encoded = new.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+              let url = URL(string: "\(CloudConfig.functionURL)?act=setPwd&k=\(oldHash)&new=\(encoded)") else {
+            return "已保存到本地，但同步云函数失败（云函数地址无效）。\n网页版后台仍用旧口令，请稍后在设置页重试。"
+        }
+        do {
+            let (data, resp) = try await URLSession.shared.data(from: url)
+            let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+            if code == 401 {
+                return "已保存到本地；但云端同步被拒绝（口令校验失败）。\n请确认云函数已部署后重试。"
+            }
+            if let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any], obj["ok"] as? Bool == true {
+                return "本地 + 云端后台口令均已更新：\(new)"
+            }
+            return "已保存到本地；云端同步未确认，请稍后重试。"
+        } catch {
+            return "已保存到本地；云端同步失败（网络错误：\(error.localizedDescription)）"
+        }
     }
 }
 

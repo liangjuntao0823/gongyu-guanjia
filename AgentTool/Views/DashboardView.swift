@@ -1,6 +1,7 @@
 import SwiftUI
 import SwiftData
 import PhotosUI
+import WebKit
 
 struct DashboardView: View {
     let isActive: Bool
@@ -613,7 +614,10 @@ struct DashboardView: View {
             NavigationStack { UtilityView(onWriteSuccess: { refreshDashboard() }) }
         }
         .sheet(isPresented: $showAdmin) {
-            AdminDashboardView()
+            // v1.17 需求5：App 内管理后台直接换成云端后台（网页 WebView），免登录带口令哈希
+            if let url = URL(string: "\(CloudConfig.functionURL)?act=admin&k=\(CloudConfig.passwordHash)") {
+                AdminWebView(url: url)
+            }
         }
         .sheet(isPresented: $showAddDeal) {
             NavigationStack { AddDealView() }
@@ -1264,6 +1268,29 @@ struct ImagePickerView: UIViewControllerRepresentable {
                     self?.onImagePicked(object as? UIImage)
                 }
             }
+        }
+    }
+}
+
+// MARK: - v1.17 需求5 云端后台 WebView（App 内管理后台直接加载云端后台网页，免登录）
+
+struct AdminWebView: UIViewRepresentable {
+    let url: URL
+
+    func makeUIView(context: Context) -> WKWebView {
+        let web = WKWebView(frame: .zero)
+        web.navigationDelegate = context.coordinator
+        web.load(URLRequest(url: url))
+        return web
+    }
+
+    func updateUIView(_ uiView: WKWebView, context: Context) {}
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    class Coordinator: NSObject, WKNavigationDelegate {
+        func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+            // 加载失败静默；页面本身会显示网络错误
         }
     }
 }

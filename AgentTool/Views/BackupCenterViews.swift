@@ -878,6 +878,7 @@ struct UploadProgressOverlay: View {
 struct BackupLogsView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var logs = BackupLogStore.all()
+    @State private var exportTip: String?
 
     var body: some View {
         NavigationStack {
@@ -919,13 +920,50 @@ struct BackupLogsView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 // v1.13：左右上角对调——左上角「清空」，右上角「完成」
+                // v1.17 需求3：右上角「完成」→「导出」：点导出直接生成 txt 到 app 根目录，命名「操作日志+导出日期」
                 ToolbarItem(placement: .topBarLeading) {
                     Button("清空") { BackupLogStore.clear(); logs = [] }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("完成") { dismiss() }
+                    Button("导出") { exportLogs() }
+                        .disabled(logs.isEmpty)
                 }
             }
+            .alert("导出操作日志", isPresented: Binding(
+                get: { exportTip != nil },
+                set: { if !$0 { exportTip = nil } }
+            )) {
+                Button("好", role: .cancel) {}
+            } message: {
+                Text(exportTip ?? "")
+            }
+        }
+    }
+
+    /// v1.17 需求3：把操作日志导出为 txt，落盘到 app 根目录（Documents），命名「操作日志_导出日期.txt」
+    private func exportLogs() {
+        guard !logs.isEmpty else {
+            exportTip = "暂无操作日志可导出"
+            return
+        }
+        let df = DateFormatter()
+        df.dateFormat = "yyyyMMdd_HHmmss"
+        df.locale = Locale(identifier: "en_US_POSIX")
+        let fileName = "操作日志_\(df.string(from: Date())).txt"
+        var lines = ["公寓管家 · 操作日志", "导出时间：\(Date())", "共 \(logs.count) 条", "------------------"]
+        for entry in logs {
+            lines.append("[\(entry.date.formatted(date: .numeric, time: .standard))] \(entry.category) / \(entry.action) / \(entry.result)")
+            if !entry.detail.isEmpty { lines.append("   详情：\(entry.detail)") }
+            if !entry.checksum.isEmpty { lines.append("   校验和：\(entry.checksum)") }
+            lines.append("")
+        }
+        let content = lines.joined(separator: "\n")
+        let fileURL = DataRoot.url().appendingPathComponent(fileName)
+        do {
+            try content.write(to: fileURL, atomically: true, encoding: .utf8)
+            exportTip = "已导出到：\n\(fileURL.lastPathComponent)\n\n（App 根目录 / 数据文件夹）"
+        } catch {
+            exportTip = "导出失败：\(error.localizedDescription)"
         }
     }
 }

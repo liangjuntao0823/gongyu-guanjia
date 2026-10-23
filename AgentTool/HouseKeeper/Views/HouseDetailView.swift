@@ -6,6 +6,10 @@ import Photos
 struct HouseDetailView: View {
     /// 房源板块专属 context（独立 HouseStore 容器，由 App 注入）
     @Environment(\.houseModelContext) private var houseModelContext
+    /// v1.17 需求1：主容器 context（DealRecord/Property 等经营数据所在容器）。
+    /// 闪退根因：成交/在租/退租的关联查询此前误用了 houseModelContext（HouseStore 只注册 House/MediaItem），
+    /// 在独立容器查未注册模型触发 SwiftData 崩溃——必须用主容器查。
+    @Environment(\.modelContext) private var mainCtx
     @Environment(\.dismiss) private var dismiss
 
     /// 当前可用的房源数据上下文（App 内必然已注入）
@@ -632,14 +636,16 @@ struct HouseDetailView: View {
     private func fetchDeals(room: String) -> [DealRecord] {
         let normalized = Self.normalizedRoom(room)
         let desc = FetchDescriptor<DealRecord>(predicate: #Predicate<DealRecord> { $0.isDeleted == false })
-        let all = (try? modelContext.fetch(desc)) ?? []
+        // v1.17 需求1：用主容器查询（DealRecord 在主容器；HouseStore 无此模型）
+        let all = (try? mainCtx.fetch(desc)) ?? []
         return all.filter { Self.normalizedRoom($0.roomNumber) == normalized }
     }
 
     private func fetchProperties(room: String, terminated: Bool) -> [Property] {
         let normalized = Self.normalizedRoom(room)
         let desc = FetchDescriptor<Property>(predicate: #Predicate<Property> { $0.isDeleted == false })
-        let all = (try? modelContext.fetch(desc)) ?? []
+        // v1.17 需求1：用主容器查询（Property 在主容器）
+        let all = (try? mainCtx.fetch(desc)) ?? []
         return all.filter { $0.isTerminated == terminated && Self.normalizedRoom($0.roomNumber) == normalized }
     }
 
