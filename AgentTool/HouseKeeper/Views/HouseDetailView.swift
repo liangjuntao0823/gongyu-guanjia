@@ -592,7 +592,7 @@ struct HouseDetailView: View {
             HStack(spacing: 8) {
                 recordButton("成交", kind: .deal, icon: "doc.text")
                 recordButton("在租", kind: .renting, icon: "house")
-                recordButton("退租", kind: .terminated, icon: "door.left.handled")
+                recordButton("退租", kind: .terminated, icon: "arrow.backward.circle")   // v1.37b：door.left.handled 是 iOS16+ 符号，旧系统显示空白 → 换 iOS13+ 就有
             }
         }
         .padding(14)
@@ -746,9 +746,9 @@ struct HouseDetailView: View {
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 9)
-            // v1.37：三个按钮统一为完全一致的胶囊（背景/前景不再随是否有记录变化，仅无记录时整体置灰）
-            .background(Color(.secondarySystemBackground))
-            .foregroundStyle(Color.primary)
+            // v1.37b：恢复「有记录/无记录」颜色区分（有记录深底、无记录浅底置灰），形状统一胶囊
+            .background(count > 0 ? Color(.secondarySystemBackground) : Color(.tertiarySystemFill))
+            .foregroundStyle(count > 0 ? Color.primary : Color.secondary)
             .clipShape(Capsule())
         }
         .buttonStyle(.plain)
