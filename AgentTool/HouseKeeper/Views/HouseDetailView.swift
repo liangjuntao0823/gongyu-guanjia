@@ -620,9 +620,9 @@ struct HouseDetailView: View {
     private func openRecord(_ kind: RecordPickKind) {
         let items: [RecordViewItem]
         switch kind {
-        case .deal: items = fetchDeals(room: house.displayRoomNo).map { .deal($0) }
-        case .renting: items = fetchProperties(room: house.displayRoomNo, terminated: false).map { .property($0) }
-        case .terminated: items = fetchProperties(room: house.displayRoomNo, terminated: true).map { .property($0) }
+        case .deal: items = fetchDeals(room: house.displayRoomNo).map { RecordViewItem(kind: .deal($0)) }
+        case .renting: items = fetchProperties(room: house.displayRoomNo, terminated: false).map { RecordViewItem(kind: .property($0)) }
+        case .terminated: items = fetchProperties(room: house.displayRoomNo, terminated: true).map { RecordViewItem(kind: .property($0)) }
         }
         if items.isEmpty { return }
         if items.count == 1 { recordViewItem = items[0] }

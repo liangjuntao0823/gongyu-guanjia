@@ -308,24 +308,25 @@ final class CloudBackupService {
     }
 
     /// 删除房源在桶里的整个文件夹（h/<roomKey>/ 下全部对象）。
-    /// 无云端配置或桶里无该房源的文件夹时静默跳过（不打断本地删除）；
-    /// 单个对象删除失败只记日志，不阻塞其余对象与本地删除。
-    static func deleteHouseRemoteFolder(roomKey: String, config: CosConfig?) async {
+    /// 无云端配置或桶里无该房源的文件夹时静默返回（不打断本地删除）；
+    /// 单个对象删除失败会继续删其余对象，最终把第一个错误抛给上层（供 App 分开提示本地已删、云端失败）。
+    static func deleteHouseRemoteFolder(roomKey: String, config: CosConfig?) async throws {
         guard let config = config ?? CosConfig.load(), config.isValid else { return }
-        do {
-            let objects = try await listHouseRemoteObjects(roomKey: roomKey, config: config)
-            guard !objects.isEmpty else { return }   // 桶里没有该房源的文件夹
-            for name in objects {
-                do {
-                    try await deleteRemoteObject(name: name, config: config)
-                } catch {
-                    BackupLogStore.log(category: "删除", action: "云端删除对象", result: "失败", detail: "\(name)：\(error.localizedDescription)")
-                }
+        let objects = try await listHouseRemoteObjects(roomKey: roomKey, config: config)
+        guard !objects.isEmpty else { return }   // 桶里没有该房源的文件夹
+        var firstError: Error?
+        for name in objects {
+            do {
+                try await deleteRemoteObject(name: name, config: config)
+            } catch {
+                BackupLogStore.log(category: "删除", action: "云端删除对象", result: "失败", detail: "\(name)：\(error.localizedDescription)")
+                if firstError == nil { firstError = error }
             }
-            BackupLogStore.log(category: "删除", action: "云端删除房源文件夹", result: "成功", detail: "h/\(roomKey)/ 共 \(objects.count) 个对象")
-        } catch {
-            BackupLogStore.log(category: "删除", action: "云端删除房源文件夹", result: "失败", detail: "h/\(roomKey)/：\(error.localizedDescription)")
         }
+        if let firstError {
+            throw firstError
+        }
+        BackupLogStore.log(category: "删除", action: "云端删除房源文件夹", result: "成功", detail: "h/\(roomKey)/ 共 \(objects.count) 个对象")
     }
 
     // MARK: - 云端保留（快速_ 且文件名带 _自动 的自动备份保留最近 10 份）

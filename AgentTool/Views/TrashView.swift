@@ -351,7 +351,7 @@ struct TrashView: View {
         reloadHouses()
         NotificationCenter.default.post(name: HouseListView.houseStoreChanged, object: nil)
         let roomKey = item.mediaRoomKey
-        Task { await CloudBackupService.deleteHouseRemoteFolder(roomKey: roomKey, config: nil) }
+        Task { try? await CloudBackupService.deleteHouseRemoteFolder(roomKey: roomKey, config: nil) }
     }
 
     private func deleteHouse(_ item: House) {
@@ -418,7 +418,7 @@ struct TrashView: View {
         NotificationCenter.default.post(name: HouseListView.houseStoreChanged, object: nil)
         // v1.13 需求19：同步删除桶里各房源文件夹
         for roomKey in roomKeys {
-            Task { await CloudBackupService.deleteHouseRemoteFolder(roomKey: roomKey, config: nil) }
+            Task { try? await CloudBackupService.deleteHouseRemoteFolder(roomKey: roomKey, config: nil) }
         }
     }
 
@@ -456,7 +456,7 @@ struct TrashView: View {
             // v1.13 需求19：同步删除桶里各房源文件夹
             for item in houseTargets {
                 let roomKey = item.mediaRoomKey
-                Task { await CloudBackupService.deleteHouseRemoteFolder(roomKey: roomKey, config: nil) }
+                Task { try? await CloudBackupService.deleteHouseRemoteFolder(roomKey: roomKey, config: nil) }
             }
         }
         selectedIDs.removeAll()

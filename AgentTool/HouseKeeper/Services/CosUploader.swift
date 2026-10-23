@@ -2277,8 +2277,11 @@ struct AdminDashboardView: View {
                     }
                 }
                 let dirEntries = dirs.keys.sorted().map { BucketEntry(name: $0, isDir: true, size: 0, date: nil, objectCount: dirs[$0] ?? 0) }
-                let sortedFiles = files.sorted {
-                    ($0.name.split(separator: "/").last.map(String.init) ?? $0.name).localizedStandardCompare($1.name.split(separator: "/").last.map(String.init) ?? $1.name) == .orderedAscending
+                var sortedFiles = files
+                sortedFiles.sort { a, b in
+                    let na = a.name.split(separator: "/").last.map(String.init) ?? a.name
+                    let nb = b.name.split(separator: "/").last.map(String.init) ?? b.name
+                    return na.localizedStandardCompare(nb) == .orderedAscending
                 }
                 await MainActor.run {
                     bucketEntries = dirEntries + sortedFiles

@@ -1350,9 +1350,11 @@ struct AdminPasswordView: View {
 
     var body: some View {
         Form {
-            Section("口令设置") {
+            Section {
                 SecureField("后台口令", text: $password)
                 SecureField("再次输入确认", text: $confirm)
+            } header: {
+                Text("口令设置")
             } footer: {
                 Text("网页版管理后台用此口令登录；App 内打开后台免登录。默认口令 12345678，建议修改为不易猜的字符。修改后请同步修改云函数 gongyu-stats 里的 PASSWORD 常量（部署页 → 函数配置）。")
             }
