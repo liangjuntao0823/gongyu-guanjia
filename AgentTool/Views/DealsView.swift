@@ -563,14 +563,17 @@ struct DealsView: View {
     private func deleteDeal(at offsets: IndexSet) {
         for index in offsets { filteredDeals[index].isDeleted = true; filteredDeals[index].deletedAt = Date() }
         try? modelContext.save()
+        BackupLogStore.log(category: "成交", action: "删除成交记录", result: "成功", detail: "删除 \(offsets.count) 条（移入回收站）")
     }
     private func deleteIncome(at offsets: IndexSet) {
         for index in offsets { filteredIncomes[index].isDeleted = true; filteredIncomes[index].deletedAt = Date() }
         try? modelContext.save()
+        BackupLogStore.log(category: "成交", action: "删除收入记录", result: "成功", detail: "删除 \(offsets.count) 条（移入回收站）")
     }
     private func deleteExpense(at offsets: IndexSet) {
         for index in offsets { filteredExpenses[index].isDeleted = true; filteredExpenses[index].deletedAt = Date() }
         try? modelContext.save()
+        BackupLogStore.log(category: "成交", action: "删除支出记录", result: "成功", detail: "删除 \(offsets.count) 条（移入回收站）")
     }
 }
 
@@ -857,6 +860,7 @@ struct AddDealView: View {
                             totalFee: totalFee, manager: manager, source: source, notes: notes)
                         modelContext.insert(deal)
                         try? modelContext.save()
+                        BackupLogStore.log(category: "成交", action: "新增成交", result: "成功", detail: "房号 \(roomNumber) 成交，月租¥\(Int(Double(rentText) ?? 0))")
                         if let due=rentDueDay { propertyDraft=PropertyDraft(roomNumber:roomNumber,landlord:landlord,unitType:unitType,rent:Double(rentText) ?? 0,deposit:Double(depositText) ?? 0,prepayment:Double(prepaymentText) ?? 0,leaseStart:leaseStart,leaseEnd:leaseEnd,leaseDuration:leaseDuration,rentDueDay:due,notes:notes) } else { dismiss() }
                     }
                     .disabled(roomNumber.isEmpty)

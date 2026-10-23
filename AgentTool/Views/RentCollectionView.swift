@@ -287,6 +287,7 @@ struct RentCollectionView: View {
     private func deleteProperty(at offsets: IndexSet) {
         for index in offsets { filteredProperties[index].isDeleted = true; filteredProperties[index].deletedAt = Date() }
         refreshRentList()
+        BackupLogStore.log(category: "收租", action: "删除收租记录", result: "成功", detail: "删除 \(offsets.count) 条记录（移入回收站）")
     }
 
     private func refreshRentList() {
@@ -321,6 +322,7 @@ struct RentCollectionView: View {
             if let data = image.pngData() {
                 try? data.write(to: fileURL)
                 exportURL = ExportURL(url: fileURL)
+                BackupLogStore.log(category: "收租", action: "导出图片", result: "成功", detail: "导出收租记录图片（\(rows.count) 套房源）")
             }
         }
     }
@@ -343,6 +345,7 @@ struct RentCollectionView: View {
         let fileURL = FileManager.default.temporaryDirectory.appendingPathComponent("收租记录-\(Int(Date().timeIntervalSince1970)).xls")
         try? html.write(to: fileURL, atomically: true, encoding: .utf8)
         exportURL = ExportURL(url: fileURL)
+        BackupLogStore.log(category: "收租", action: "导出Excel", result: "成功", detail: "导出收租记录（\(rows.count) 套房源）")
     }
 
     private func exportTemplate() {
@@ -682,6 +685,7 @@ struct TerminationFormView: View {
                         property.terminationPhone = phone.trimmingCharacters(in: .whitespacesAndNewlines)
                         property.isTerminated = true
                         try? modelContext.save()
+                        BackupLogStore.log(category: "收租", action: "退租登记", result: "成功", detail: "房号 \(property.roomNumber) 登记退租")
                         dismiss()
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { onSaved?() }
                     }
