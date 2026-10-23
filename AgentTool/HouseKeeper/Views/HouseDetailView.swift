@@ -46,6 +46,7 @@ struct HouseDetailView: View {
     // v1.19：纯云端房源下载到本地
     @State private var isDownloading = false
     @State private var cloudDeleteMessage: String?
+    @State private var deleteResultMessage: String?   // v1.19 补全：删除成功提示（区分 本地/本地+云端/云端）
 
     var body: some View {
         ScrollView {
@@ -85,7 +86,8 @@ struct HouseDetailView: View {
             Button("彻底删除", role: .destructive) { deleteHouse() }
             Button("取消", role: .cancel) {}
         } message: {
-            Text("将彻底删除这套房源（本地照片视频、数据库记录、云端 h/\(house.mediaRoomKey)/ 一并清除），不可恢复。备份镜像 backups/media 保留。")
+            // v1.19 补全：删除确认提示按当前存储位置动态显示（是否删云端一目了然）
+            Text(deleteConfirmMessage)
         }
         .confirmationDialog("选择分享方式", isPresented: $showShareModePicker, titleVisibility: .visible) {
             // v1.21：脱敏版隐藏房号/价格/房东，发给找房客户；完整版显示全部信息，发给同事
@@ -193,14 +195,23 @@ struct HouseDetailView: View {
             }
             .presentationDetents([.medium, .large])
         }
-        // v1.36 需求1：本地已删、云端删除失败的分开提示
-        .alert("云端删除失败", isPresented: Binding(
+        // v1.36 需求1：本地已删、云端删除失败的分开提示（下载/自动下载提示也走这里，不关闭页面）
+        .alert("提示", isPresented: Binding(
             get: { cloudDeleteMessage != nil },
             set: { if !$0 { cloudDeleteMessage = nil } }
         )) {
-            Button("好") { dismiss() }
+            Button("好") {}
         } message: {
             Text(cloudDeleteMessage ?? "")
+        }
+        // v1.19 补全：删除成功提示（区分 本地 / 本地+云端 / 云端），点「好」返回列表
+        .alert("删除房源", isPresented: Binding(
+            get: { deleteResultMessage != nil },
+            set: { if !$0 { deleteResultMessage = nil } }
+        )) {
+            Button("好") { dismiss() }
+        } message: {
+            Text(deleteResultMessage ?? "")
         }
         .overlay {
             if isDeletingCloud {
@@ -650,12 +661,25 @@ struct HouseDetailView: View {
         }
     }
 
+    /// v1.19 补全：删除确认文案按当前存储位置动态生成（本地/云端/双端一目了然）
+    private var deleteConfirmMessage: String {
+        switch house.cloudStatus {
+        case .both:
+            return "将删除「本地 + 云端」：本地照片视频、数据库记录，以及云端 h/\(house.mediaRoomKey)/ 目录一并清除，不可恢复。备份镜像 backups/media 保留。"
+        case .local:
+            return "将删除本地房源（未上传云端）：本地照片视频、数据库记录一并清除，不可恢复。备份镜像 backups/media 保留。"
+        case .cloud:
+            return "将删除云端同步副本：该房本机无媒体，将从云端 h/\(house.mediaRoomKey)/ 清除，不可恢复。"
+        }
+    }
+
     private func deleteHouse() {
         // v1.36 需求1：删除 = 彻底删除（本地文件+数据库记录+云端桶 h/<房号>/ 一并删除，不可恢复）
         // 保留二次确认弹窗；backups/media 镜像保留（自动备份 zip 引用，删了旧备份恢复缺图）
         guard let ctx = houseModelContext else { return }
         let roomKey = house.mediaRoomKey
         let config = CosConfig.load()
+        let wasCloud = house.cloudStatus   // v1.19 补全：记录删除前存储位置，用于成功提示
         // 1) 本地彻底删除：整个房号目录 + 分享缓存 + 数据库记录
         MediaStore.deleteHouseDirectory(roomKey: roomKey)
         ctx.delete(house)
@@ -664,15 +688,20 @@ struct HouseDetailView: View {
         // 2) 云端删除（异步；本地成功云端失败 → 分开提示 + 写操作日志）
         guard let config = config, config.isValid else {
             BackupLogStore.log(category: "删除房源", action: "云端删除", result: "跳过", detail: "未配置云存储 \(roomKey)")
-            dismiss()
+            // v1.19 补全：删除成功提示区分存储位置
+            deleteResultMessage = wasCloud == .both ? "已删除本地 + 云端房源" : "已删除本地房源"
             return
         }
         isDeletingCloud = true
         Task {
             do {
                 try await CloudBackupService.deleteHouseRemoteFolder(roomKey: roomKey, config: config)
+                try? await CloudHouseSync.delete(roomKey: roomKey, config: config)   // v1.19 补全：同步从云端账本移除
                 BackupLogStore.log(category: "删除房源", action: "云端删除", result: "成功", detail: roomKey)
-                await MainActor.run { isDeletingCloud = false; dismiss() }
+                await MainActor.run {
+                    isDeletingCloud = false
+                    deleteResultMessage = wasCloud == .cloud ? "已删除云端房源" : "已删除本地 + 云端房源"
+                }
             } catch {
                 BackupLogStore.log(category: "删除房源", action: "云端删除", result: "失败", detail: "\(roomKey) \(error.localizedDescription)")
                 await MainActor.run {
@@ -698,7 +727,7 @@ struct HouseDetailView: View {
             .padding(.vertical, 9)
             .background(count > 0 ? Color(.secondarySystemBackground) : Color(.tertiarySystemFill))
             .foregroundStyle(count > 0 ? Color.primary : Color.secondary)
-            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .clipShape(Capsule())   // v1.19 补全：三个按钮统一胶囊形状（退租与其他一致）
         }
         .buttonStyle(.plain)
         .disabled(count == 0)

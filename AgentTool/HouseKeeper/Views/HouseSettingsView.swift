@@ -237,6 +237,12 @@ struct CosConfigView: View {
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                 Button {
+                    saveUsername()
+                } label: {
+                    Label("保存用户名", systemImage: "person.fill.checkmark")
+                }
+                .disabled(username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                Button {
                     exportUserProfile()
                 } label: {
                     Label("导出「给别人用」的配置", systemImage: "square.and.arrow.up")
@@ -487,7 +493,17 @@ struct CosConfigView: View {
         }
     }
 
-    // MARK: - v1.19 多用户：导出「给别人用」的配置
+    // MARK: - v1.19 多用户：保存用户名 / 导出「给别人用」的配置
+
+    /// v1.19 补全：单独保存用户名（此前只在「保存并验证连接」里顺带写，改后退出重进会被清空）
+    private func saveUsername() {
+        let trimmed = username.trimmingCharacters(in: .whitespacesAndNewlines)
+        username = trimmed
+        CloudUser.username = trimmed
+        savedTip = trimmed.isEmpty
+            ? "用户名不能为空，请输入后保存"
+            : "用户名已保存：\(trimmed)\n共享房源的操作日志 / 分享 / 统计都会带上它"
+    }
 
     /// 把本机已填的云配置 + 用户名打包成一个 JSON 文件，走系统分享发给别人；对方「添加用户/导入配置」即可共用房源。
     /// 文件不含敏感解释，仅含可用的连接参数。
@@ -515,19 +531,31 @@ struct CosConfigView: View {
             savedTip = "写入配置失败：\(error.localizedDescription)"
             return
         }
+        // v1.19 补全：用可用的 presenter 弹系统分享面板（此前 sourceView=nil + presenter 取不到 → 面板弹不出）
+        guard let presenter = topMostViewController() else {
+            savedTip = "当前界面无法弹出分享面板，请返回主界面再点一次"
+            return
+        }
         let av = UIActivityViewController(activityItems: [url], applicationActivities: nil)
-        av.popoverPresentationController?.sourceView = nil
-        topMostViewController()?.present(av, animated: true)
-        savedTip = "已生成共享配置文件，选择发送方式发给对方即可"
+        if let pop = av.popoverPresentationController {
+            pop.sourceView = presenter.view
+            pop.sourceRect = presenter.view.bounds
+        }
+        presenter.present(av, animated: true)
+        savedTip = "已生成共享配置文件（含存储桶 / 地域 / 云函数地址 / 您的用户名），选择发送方式发给对方即可；对方收到后放进「云端配置 → 多用户」导入即可共用房源。"
     }
 
-    /// 取当前最上层 VC（分享面板 / 弹窗用）
+    /// 取当前最上层 VC（分享面板 / 弹窗用）——优先找前台活跃场景的 keyWindow
     private func topMostViewController() -> UIViewController? {
-        guard let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-              let root = scene.windows.first?.rootViewController else { return nil }
-        var top = root
-        while let presented = top.presentedViewController { top = presented }
-        return top
+        for scene in UIApplication.shared.connectedScenes {
+            guard let ws = scene as? UIWindowScene, ws.activationState == .foregroundActive else { continue }
+            let root = ws.keyWindow?.rootViewController ?? ws.windows.first?.rootViewController
+            guard let root else { continue }
+            var top = root
+            while let presented = top.presentedViewController { top = presented }
+            return top
+        }
+        return nil
     }
 
     /// v1.35：访问储存桶——用当前填写的桶名/地域打开腾讯云 COS 控制台对应桶页面（默认浏览器）

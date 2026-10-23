@@ -168,13 +168,6 @@ struct SettingsView: View {
                 Text(houseDocumentsSizeText())
                     .foregroundColor(.secondary)
             }
-            // v1.19：操作日志占用空间（保留 45 天）
-            HStack {
-                Label("操作日志占用", systemImage: "list.bullet.rectangle")
-                Spacer()
-                Text(ByteCountFormatter.string(fromByteCount: Int64(BackupLogStore.sizeBytes()), countStyle: .file))
-                    .foregroundColor(.secondary)
-            }
             HStack {
                 Label {
                     Text(verbatim: "已收录房源")
@@ -225,7 +218,14 @@ struct SettingsView: View {
             }
             // v1.12：操作日志（备份/恢复/上传/删除/同步）
             Button { showLogsView = true } label: {
-                Label("操作日志", systemImage: "list.bullet.rectangle")
+                HStack {
+                    Label("操作日志", systemImage: "list.bullet.rectangle")
+                    Spacer()
+                    // v1.19 补全 #7：日志占用显示在入口右侧
+                    Text(ByteCountFormatter.string(fromByteCount: Int64(BackupLogStore.sizeBytes()), countStyle: .file))
+                        .font(.footnote)
+                        .foregroundColor(.secondary)
+                }
             }
             // v1.12：崩溃日志（自建日志文件，不依赖第三方）v1.17 需求2：内置查看器 + 右上角导出（App 根目录生成 txt）
             Button { showCrashLogsView = true } label: {

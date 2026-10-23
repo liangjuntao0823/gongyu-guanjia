@@ -236,9 +236,19 @@ struct HouseListView: View {
                 }
                 Button("取消", role: .cancel) { deleteTarget = nil }
             } message: {
-                Text(isBatchDelete
-                     ? "将彻底删除选中的 \(selectedHouseIDs.count) 套房源（本地照片视频、数据库记录、云端 h/<房号>/ 一并清除），不可恢复。备份镜像 backups/media 保留。"
-                     : "将彻底删除这套房源（本地照片视频、数据库记录、云端 h/<房号>/ 一并清除），不可恢复。备份镜像 backups/media 保留。")
+                if isBatchDelete {
+                    Text("将彻底删除选中的 \(selectedHouseIDs.count) 套房源：本地照片视频、数据库记录、已在云端的 h/<房号>/ 目录一并清除，不可恢复。备份镜像 backups/media 保留。")
+                } else if let target = deleteTarget {
+                    // v1.19 补全：删除确认提示按该房当前存储位置动态显示（是否删云端一目了然）
+                    switch target.cloudStatus {
+                    case .both:
+                        Text("将删除「本地 + 云端」这套房源：本地照片视频、数据库记录，以及云端 h/\(target.mediaRoomKey)/ 一并清除，不可恢复。备份镜像 backups/media 保留。")
+                    case .local:
+                        Text("将删除本地房源（未上传云端）：本地照片视频、数据库记录一并清除，不可恢复。备份镜像 backups/media 保留。")
+                    case .cloud:
+                        Text("将删除云端同步副本：该房本机无媒体，将从云端 h/\(target.mediaRoomKey)/ 清除，不可恢复。")
+                    }
+                }
             }
         }
         .onAppear {
@@ -592,6 +602,7 @@ struct HouseListView: View {
         }
         let roomKey = house.mediaRoomKey
         let config = CosConfig.load()
+        let wasCloud = house.cloudStatus   // v1.19 补全：记录删除前存储位置，用于成功提示
         MediaStore.deleteHouseDirectory(roomKey: roomKey)
         ctx.delete(house)
         do {
@@ -600,7 +611,16 @@ struct HouseListView: View {
         } catch {
             infoMessage = "删除失败：\(error.localizedDescription)"; showInfoAlert = true
         }
-        // 云端同步删除（失败写日志）
+        // v1.19 补全：删除成功提示——区分删了本地 / 云端 / 双端
+        switch wasCloud {
+        case .local:
+            infoMessage = "已删除本地房源"; showInfoAlert = true
+        case .both:
+            infoMessage = "已删除本地房源，正在同步删除云端…"; showInfoAlert = true
+        case .cloud:
+            infoMessage = "已删除云端同步副本"; showInfoAlert = true
+        }
+        // 云端同步删除（失败写日志 + 二次提示）
         if let config = config, config.isValid {
             Task {
                 do {
@@ -610,6 +630,9 @@ struct HouseListView: View {
                     BackupLogStore.log(category: "删除房源", action: "云端删除", result: "成功", detail: roomKey)
                 } catch {
                     BackupLogStore.log(category: "删除房源", action: "云端删除", result: "失败", detail: "\(roomKey) \(error.localizedDescription)")
+                    await MainActor.run {
+                        infoMessage = "云端删除失败：\(error.localizedDescription)。可在「管理后台 → 桶管理」手动清理 h/\(roomKey)/"; showInfoAlert = true
+                    }
                 }
             }
         } else {
@@ -650,8 +673,11 @@ struct HouseListView: View {
     }
 
     /// 从云端拉取房源账本并同步到本地（下拉刷新 / 左上角手动同步同效果）。
-    /// 规则：云端有本地没有 → 建纯云端占位（只读，本机无媒体）；云端比本地新 → 覆盖文字字段保留媒体、标双端；
-    /// 本地有云端没有 → 补推到云端（标双端）。
+    /// v1.19 补全「增减逻辑」：
+    ///  - 增：云端新增 → 完整下载到本地（文字 + 媒体），标双端、可编辑
+    ///  - 改：云端比本地新 → 覆盖文字字段；本地媒体缺失但云端有 → 自动下载媒体
+    ///  - 减：本地房源在云端账本已不存在 → 若它来自云端（双端/云端）则跟随删除；纯本地未上传的保留并补传云端
+    ///  - 无任何变化 → 提示「已刷新，无变化」，不写入操作日志
     private func syncCloudHouses() async {
         let config = CosConfig.load()
         guard let config else {
@@ -661,25 +687,30 @@ struct HouseListView: View {
         guard let ctx = houseModelContext else { return }
         do {
             let recs = try await CloudHouseSync.fetchAll(config: config)
+            var addedCount = 0, updatedCount = 0, deletedCount = 0, pushedCount = 0
+            var mediaRoomKeys: [String] = []
             await MainActor.run {
                 let local = (try? ctx.fetch(FetchDescriptor<House>())) ?? []
                 var localByKey: [String: House] = [:]
                 for h in local where !h.isTrashed { localByKey[h.mediaRoomKey] = h }
-                var localKeys = Set(localByKey.keys)
-                var uploaded = 0
+                let cloudKeys = Set(recs.map { $0.roomKey })
+                // 增 / 改：云端账本里的每套
                 for rec in recs {
                     if let h = localByKey[rec.roomKey] {
-                        localKeys.remove(rec.roomKey)
-                        let cloudTime = rec.updatedAt
-                        if cloudTime > (h.lastUpdatedAt ?? h.updatedAt) {
+                        if rec.updatedAt > (h.lastUpdatedAt ?? h.updatedAt) {
                             h.roomNo = rec.roomNo; h.tower = rec.tower; h.landlord = rec.landlord
                             h.layout = rec.layout; h.price = rec.price; h.password = rec.password
                             h.remark = rec.remark; h.statusRaw = rec.status
-                            h.lastUpdatedAt = cloudTime
+                            h.lastUpdatedAt = rec.updatedAt
+                            updatedCount += 1
+                        }
+                        // 本地媒体缺失但云端有媒体 → 下载（v1.19 补全 #4）
+                        if h.mediaItems.isEmpty && !rec.mediaNames.isEmpty {
+                            mediaRoomKeys.append(h.mediaRoomKey)
                         }
                         h.cloudStatus = .both
                     } else {
-                        // 纯云端占位（本机无媒体，只读）
+                        // 云端新增 → 建本地房源（先无媒体，稍后下载）
                         let h = House(
                             roomNo: rec.roomNo, tower: rec.tower, landlord: rec.landlord,
                             layout: rec.layout, price: rec.price, password: rec.password,
@@ -688,19 +719,62 @@ struct HouseListView: View {
                         h.lastUpdatedAt = rec.updatedAt
                         h.cloudStatus = .cloud
                         ctx.insert(h)
+                        addedCount += 1
+                        if !rec.mediaNames.isEmpty { mediaRoomKeys.append(h.mediaRoomKey) }
                     }
                 }
-                // 本地有云端没有 → 补推云端（后台）
-                for key in localKeys {
-                    if let h = localByKey[key] {
-                        pushHouseToCloud(h); uploaded += 1
+                // 减：本地有、云端账本没有
+                for (key, h) in localByKey where !cloudKeys.contains(key) {
+                    if h.cloudStatus == .both || h.cloudStatus == .cloud {
+                        // 来自云端的副本，云端已删 → 本地跟随删除
+                        MediaStore.deleteHouseDirectory(roomKey: key)
+                        ctx.delete(h)
+                        deletedCount += 1
+                    } else {
+                        // 纯本地未上传 → 补传云端
+                        pushHouseToCloud(h)
+                        pushedCount += 1
                     }
                 }
                 try? ctx.save()
                 reloadHouses()
-                let msg = uploaded > 0 ? "已同步云端 \(recs.count) 套，并补传本地 \(uploaded) 套" : "已同步云端房源 \(recs.count) 套"
+            }
+            // 媒体下载（非主线程，只传值 roomKey；下载完在主线程挂模型）
+            var mediaSaved = 0
+            if !mediaRoomKeys.isEmpty {
+                for roomKey in mediaRoomKeys {
+                    if let files = try? await CosUploader.downloadHouseMedia(roomKey: roomKey, config: config),
+                       !files.isEmpty {
+                        mediaSaved += files.count
+                        await MainActor.run {
+                            let all = (try? ctx.fetch(FetchDescriptor<House>())) ?? []
+                            if let h = all.first(where: { $0.mediaRoomKey == roomKey && !$0.isTrashed }) {
+                                for f in files {
+                                    let item = MediaItem(fileName: f.fileName, kind: f.kind)
+                                    item.house = h
+                                    ctx.insert(item)
+                                }
+                                h.cloudStatus = .both
+                                try? ctx.save()
+                            }
+                        }
+                    }
+                }
+            }
+            let changed = addedCount + updatedCount + deletedCount + pushedCount + mediaSaved > 0
+            if changed {
+                var parts: [String] = []
+                if addedCount > 0 { parts.append("新增\(addedCount)套") }
+                if updatedCount > 0 { parts.append("更新\(updatedCount)套") }
+                if deletedCount > 0 { parts.append("删除\(deletedCount)套") }
+                if pushedCount > 0 { parts.append("补传\(pushedCount)套") }
+                if mediaSaved > 0 { parts.append("下载媒体\(mediaSaved)个") }
+                let msg = "已同步：\(parts.joined(separator: "，"))"
                 infoMessage = msg; showInfoAlert = true
                 BackupLogStore.log(category: "同步", action: "同步云端房源", result: "成功", detail: msg)
+            } else {
+                // v1.19 补全 #6：无变化 → 提示「已刷新，无变化」，不记日志
+                infoMessage = "已刷新，无变化"; showInfoAlert = true
             }
         } catch {
             infoMessage = "同步失败：\(error.localizedDescription)"; showInfoAlert = true
@@ -766,7 +840,8 @@ struct HouseListView: View {
         }
         let total = selectedHouseIDs.count
         exitMultiSelect()
-        infoMessage = "已彻底删除 \(changed) 套（共选中 \(total) 套）"; showInfoAlert = true
+        // v1.19 补全：批量删除成功提示（含云端同步）
+        infoMessage = "已彻底删除 \(changed) 套本地房源（共选中 \(total) 套）；云端同步删除中…"; showInfoAlert = true
     }
 
     /// v1.7：卡片左滑「分享」→ 单套分享卡片（脱敏 / 完整），生成链接后弹系统分享面板

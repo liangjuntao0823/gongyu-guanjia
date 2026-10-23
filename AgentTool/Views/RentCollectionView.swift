@@ -355,6 +355,8 @@ struct RentCollectionView: View {
         let fileURL = FileManager.default.temporaryDirectory.appendingPathComponent("收租记录-模板.xls")
         try? html.write(to: fileURL, atomically: true, encoding: .utf8)
         exportURL = ExportURL(url: fileURL)
+        // v1.19 补全 #9：导出模板写操作日志
+        BackupLogStore.log(category: "收租", action: "导出Excel模板", result: "成功", detail: "导出收租记录模板")
     }
 
     private func importFromFile(url: URL) {
@@ -417,6 +419,8 @@ struct RentCollectionView: View {
             )
             modelContext.insert(prop)
         }
+        // v1.19 补全 #9：从模板导入收租房源写操作日志
+        BackupLogStore.log(category: "收租", action: "导入收租房源", result: "成功", detail: "从模板导入 \(rows.count) 套房源")
     }
 }
 
@@ -761,6 +765,8 @@ struct PropertyDetailView: View {
             window.isHidden = true
             shareImage = image
             showShareSheet = true
+            // v1.19 补全 #9：分享完整表单写操作日志
+            BackupLogStore.log(category: "收租", action: "分享完整表单", result: "成功", detail: "房号 \(property.roomNumber)")
         }
     }
 
@@ -973,6 +979,8 @@ struct QuarterUtilityRow: View {
                     } else {
                         isSettled = true
                         updateRecord()
+                        // v1.19 补全 #9：水电结算（设为已结算）写操作日志
+                        BackupLogStore.log(category: "水电", action: "结算", result: "成功", detail: "房号 \(property.roomNumber) \(label)")
                     }
                 } label: {
                     HStack(spacing: 4) {
@@ -1226,6 +1234,8 @@ struct AddPropertyView: View {
                             updateRentPlanAmounts(prop)
                         }
                         try? modelContext.save()
+                        // v1.19 补全 #9：新增/编辑收租房源（含水电结算计划）写操作日志
+                        BackupLogStore.log(category: "收租", action: editingProperty == nil ? "新增收租房源" : "编辑收租房源", result: "成功", detail: "房号 \(roomNumber)（租期 \(leaseDuration)）")
                         dismiss()
                     }
                     .disabled(roomNumber.isEmpty)

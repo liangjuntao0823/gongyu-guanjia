@@ -261,6 +261,8 @@ struct PayoutView: View {
     private func deletePayout(at offsets: IndexSet) {
         for index in offsets { payouts[index].isDeleted = true; payouts[index].deletedAt = Date() }
         try? modelContext.save()
+        // v1.19 补全 #9：删除包租记录写操作日志
+        BackupLogStore.log(category: "包租", action: "删除包租记录", result: "成功", detail: "删除 \(offsets.count) 条（移入回收站）")
     }
 
     @MainActor
@@ -286,6 +288,8 @@ struct PayoutView: View {
             if let data = image.pngData() {
                 try? data.write(to: fileURL)
                 exportURL = ExportURL(url: fileURL)
+                // v1.19 补全 #9：导出包租图片写操作日志
+                BackupLogStore.log(category: "包租", action: "导出图片", result: "成功", detail: "导出包租记录图片（\(payouts.count) 套房源）")
             }
         }
     }
@@ -303,6 +307,8 @@ struct PayoutView: View {
         let fileURL = FileManager.default.temporaryDirectory.appendingPathComponent("包租记录-\(Int(Date().timeIntervalSince1970)).xls")
         try? html.write(to: fileURL, atomically: true, encoding: .utf8)
         exportURL = ExportURL(url: fileURL)
+        // v1.19 补全 #9：导出包租Excel写操作日志
+        BackupLogStore.log(category: "包租", action: "导出Excel", result: "成功", detail: "导出包租记录（\(payouts.count) 套房源）")
     }
 
     private func exportTemplate() {
@@ -312,6 +318,8 @@ struct PayoutView: View {
         let fileURL = FileManager.default.temporaryDirectory.appendingPathComponent("包租记录-模板.xls")
         try? html.write(to: fileURL, atomically: true, encoding: .utf8)
         exportURL = ExportURL(url: fileURL)
+        // v1.19 补全 #9：导出包租模板写操作日志
+        BackupLogStore.log(category: "包租", action: "导出Excel模板", result: "成功", detail: "导出包租记录模板")
     }
 
     private func importFromFile(url: URL) {
@@ -959,6 +967,8 @@ struct MonthPayoutRow: View {
             Button {
                 isPaid.toggle()
                 updateRecord()
+                // v1.19 补全 #9：包租打租登记写操作日志
+                BackupLogStore.log(category: "包租", action: isPaid ? "登记打租" : "取消打租", result: "成功", detail: "房号 \(payout.roomNumber) \(month)月 \(amountText)元")
             } label: {
                 Image(systemName: isPaid ? "checkmark.circle.fill" : "circle")
                     .foregroundColor(isPaid ? .themeAccent : .themeText3)
@@ -1103,6 +1113,8 @@ struct AddPayoutView: View {
                                 paymentMethod: paymentMethod, notes: notes)
                             modelContext.insert(payout)
                         }
+                        // v1.19 补全 #9：新增/编辑包租写操作日志
+                        BackupLogStore.log(category: "包租", action: editingPayout == nil ? "新增包租" : "编辑包租", result: "成功", detail: "房号 \(roomNumber)（年租金 \(annualRentText)）")
                         dismiss()
                     }
                     .disabled(roomNumber.isEmpty)

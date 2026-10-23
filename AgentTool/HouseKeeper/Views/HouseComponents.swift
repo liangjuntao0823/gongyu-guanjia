@@ -139,8 +139,8 @@ struct HouseCardView: View {
             .clipShape(RoundedRectangle(cornerRadius: 10))
 
             VStack(alignment: .leading, spacing: 3) {
-                // 第一行：房号 + 价格（都加大加粗），状态徽章在右上角
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                // 第一行：房号 + 价格，右侧状态徽章（待租/已租）+ 云端标识竖排（云端标识在状态下方）
+                HStack(alignment: .top, spacing: 8) {
                     Text(house.displayRoomNo)
                         .font(.title3.weight(.bold))
                         .foregroundColor(.primary)
@@ -148,9 +148,11 @@ struct HouseCardView: View {
                         .font(.headline.weight(.bold))
                         .foregroundColor(AppTheme.accent)
                     Spacer(minLength: 0)
-                    // v1.19：云端三态标识（本地 / 云端 / 双端）
-                    CloudBadge(status: house.cloudStatus)
-                    StatusBadge(status: house.status)
+                    VStack(alignment: .trailing, spacing: 3) {
+                        StatusBadge(status: house.status)
+                        // v1.19 补全：云端三态标识移到「待租/已租」下面
+                        CloudBadge(status: house.cloudStatus)
+                    }
                 }
 
                 // 第二行：户型 + 实拍图情况
@@ -172,21 +174,22 @@ struct HouseCardView: View {
                     }
                 }
 
-                // 第三行：密码
-                Text("密码：\(house.password.isEmpty ? "—" : house.password)")
-                    .font(.footnote)
-                    .foregroundColor(.secondary)
-
-                // 第四行：备注
+                // v1.19 补全：第三行 = 备注（备注与密码互换位置）
                 Text("备注：\(house.remark.isEmpty ? "—" : house.remark)")
                     .font(.footnote)
                     .foregroundColor(.secondary)
                     .lineLimit(1)
 
-                // v1.19：最后更新时间（首次录入取录入时间；改状态/编辑时刷新）
-                Text("更新于 \(HouseCardView.timeText(house.lastUpdatedAt ?? house.updatedAt))")
-                    .font(.caption2)
-                    .foregroundColor(.secondary.opacity(0.8))
+                // v1.19 补全：第四行 = 密码（左）+ 更新于（右下角）
+                HStack(alignment: .center, spacing: 8) {
+                    Text("密码：\(house.password.isEmpty ? "—" : house.password)")
+                        .font(.footnote)
+                        .foregroundColor(.secondary)
+                    Spacer(minLength: 0)
+                    Text("更新于 \(HouseCardView.timeText(house.lastUpdatedAt ?? house.updatedAt))")
+                        .font(.caption2)
+                        .foregroundColor(.secondary.opacity(0.8))
+                }
             }
             .padding(.vertical, 2)
         }

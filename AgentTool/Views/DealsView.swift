@@ -1026,8 +1026,12 @@ struct AddMiscView: View {
                         let amount = Double(amountText) ?? 0
                         if type == .income {
                             modelContext.insert(MiscIncome(date: date, item: item, amount: amount, notes: notes))
+                            // v1.19 补全 #9：新增杂项收入写操作日志
+                            BackupLogStore.log(category: "杂项", action: "新增收入", result: "成功", detail: "\(item) ¥\(Int(amount))")
                         } else {
                             modelContext.insert(MiscExpense(date: date, item: item, amount: amount, notes: notes))
+                            // v1.19 补全 #9：新增杂项支出写操作日志
+                            BackupLogStore.log(category: "杂项", action: "新增支出", result: "成功", detail: "\(item) ¥\(Int(amount))")
                         }
                         dismiss()
                     }

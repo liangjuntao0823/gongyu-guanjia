@@ -615,7 +615,9 @@ struct DashboardView: View {
         }
         .sheet(isPresented: $showAdmin) {
             // v1.17 需求5：App 内管理后台直接换成云端后台（网页 WebView），免登录带口令哈希
-            if let url = URL(string: "\(CloudConfig.functionURL)?act=admin&k=\(CloudConfig.passwordHash)") {
+            // v1.19 补全 #12：多用户口令——URL 再带当前用户名，后台知道谁在登录
+            let u = (CloudUser.username).addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+            if let url = URL(string: "\(CloudConfig.functionURL)?act=admin&k=\(CloudConfig.passwordHash)&u=\(u)") {
                 AdminWebView(url: url)
             }
         }
@@ -1280,6 +1282,8 @@ struct AdminWebView: UIViewRepresentable {
     func makeUIView(context: Context) -> WKWebView {
         let web = WKWebView(frame: .zero)
         web.navigationDelegate = context.coordinator
+        // v1.19 补全 #11：必须设 uiDelegate，否则后台页面的 JS alert/confirm 弹窗在 WKWebView 里会阻塞主线程 → 页面卡死无法操作
+        web.uiDelegate = context.coordinator
         web.load(URLRequest(url: url))
         return web
     }
@@ -1288,9 +1292,19 @@ struct AdminWebView: UIViewRepresentable {
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
-    class Coordinator: NSObject, WKNavigationDelegate {
+    class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
         func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
             // 加载失败静默；页面本身会显示网络错误
+        }
+        // v1.19 补全 #11：自动放行 JS 弹窗（alert/confirm/prompt），避免 WebView 卡死
+        func webView(_ webView: WKWebView, runJavaScriptAlertPanelWithMessage message: String, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping () -> Void) {
+            completionHandler()
+        }
+        func webView(_ webView: WKWebView, runJavaScriptConfirmPanelWithMessage message: String, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping (Bool) -> Void) {
+            completionHandler(true)
+        }
+        func webView(_ webView: WKWebView, runJavaScriptTextInputPanelWithPrompt prompt: String, defaultText: String?, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping (String?) -> Void) {
+            completionHandler(defaultText)
         }
     }
 }
