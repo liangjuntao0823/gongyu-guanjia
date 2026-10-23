@@ -1679,7 +1679,7 @@ extension CosUploader {
         let url = CloudConfig.functionURL
         let roomEsc = escapeHTML(room)
         let modeEsc = escapeHTML(mode)
-        return "<script>(function(){try{var u='\(url)';if(!u||u.indexOf('http')!==0)return;var r=(document.referrer||'').slice(0,120);var img=new Image();img.src=u+'?act=track&room='+encodeURIComponent('\(roomEsc)')+'&mode='+encodeURIComponent('\(modeEsc)')+'&ref='+encodeURIComponent(r)+'&t='+Date.now();}catch(e){}})();</script>"
+        return "<script>(function(){try{var u='\(url)';if(!u||u.indexOf('http')!==0)return;var k='gy_tk_'+encodeURIComponent('\(roomEsc)')+'_'+encodeURIComponent('\(modeEsc)');var now=Date.now(),last=0;try{last=parseInt(localStorage.getItem(k)||'0',10)||0;}catch(e){}if(now-last<30000)return;try{localStorage.setItem(k,String(now));}catch(e){}var r=(document.referrer||'').slice(0,120);var img=new Image();img.src=u+'?act=track&room='+encodeURIComponent('\(roomEsc)')+'&mode='+encodeURIComponent('\(modeEsc)')+'&ref='+encodeURIComponent(r)+'&t='+now;}catch(e){}})();</script>"
     }
 
     /// 文件名安全化：保留中文/字母/数字/-/_，其余替换为 -（房号 → 分享页文件名）
