@@ -60,6 +60,69 @@ struct HouseDetailView: View {
         }
     }
 
+    // v1.19 补全：把两个大块 overlay 提出为独立 @ViewBuilder，避免 body 一次类型检查超时
+    @ViewBuilder private var shareOverlayView: some View {
+        if isSharing {
+            ZStack {
+                Color.black.opacity(0.35).ignoresSafeArea()
+                VStack(spacing: 12) {
+                    ProgressView(value: shareProgress)
+                        .progressViewStyle(.linear)
+                        .tint(.white)
+                    Text("正在上传照片和视频…")
+                        .font(.footnote)
+                        .foregroundColor(.white)
+                    Text("\(Int(shareProgress * 100))%")
+                        .font(.caption)
+                        .foregroundColor(.white.opacity(0.85))
+                }
+                .padding(20)
+                .background(Color.black.opacity(0.6))
+                .clipShape(RoundedRectangle(cornerRadius: 14))
+            }
+        }
+    }
+    @ViewBuilder private var saveOverlayView: some View {
+        if isSavingMedia {
+            ZStack {
+                Color.black.opacity(0.35).ignoresSafeArea()
+                VStack(spacing: 12) {
+                    ProgressView()
+                        .tint(.white)
+                    Text("正在保存到相册…")
+                        .font(.footnote)
+                        .foregroundColor(.white)
+                }
+                .padding(20)
+                .background(Color.black.opacity(0.6))
+                .clipShape(RoundedRectangle(cornerRadius: 14))
+            }
+        } else if let tip = saveAllTip {
+            ZStack {
+                Color.black.opacity(0.35).ignoresSafeArea()
+                VStack(spacing: 12) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 40))
+                        .foregroundColor(.green)
+                    Text(tip)
+                        .font(.footnote)
+                        .foregroundColor(.white)
+                        .multilineTextAlignment(.center)
+                    Button("好") { saveAllTip = nil }
+                        .font(.footnote)
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 6)
+                        .background(Color.white)
+                        .foregroundColor(.black)
+                        .clipShape(Capsule())
+                }
+                .padding(20)
+                .background(Color.black.opacity(0.6))
+                .clipShape(RoundedRectangle(cornerRadius: 14))
+            }
+        }
+    }
+
     var body: some View {
         detailScroll
             .background(AppTheme.background.ignoresSafeArea())
@@ -113,66 +176,11 @@ struct HouseDetailView: View {
             PhotoPreviewView(photos: house.photos, startIndex: route.index, roomKey: house.mediaRoomKey)
         }
         .overlay {
-            if isSharing {
-                ZStack {
-                    Color.black.opacity(0.35).ignoresSafeArea()
-                    VStack(spacing: 12) {
-                        ProgressView(value: shareProgress)
-                            .progressViewStyle(.linear)
-                            .tint(.white)
-                        Text("正在上传照片和视频…")
-                            .font(.footnote)
-                            .foregroundColor(.white)
-                        Text("\(Int(shareProgress * 100))%")
-                            .font(.caption)
-                            .foregroundColor(.white.opacity(0.85))
-                    }
-                    .padding(20)
-                    .background(Color.black.opacity(0.6))
-                    .clipShape(RoundedRectangle(cornerRadius: 14))
-                }
-            }
+            shareOverlayView
         }
         // v1.15 需求1：一键保存中 + 保存完成提示（overlay 卡片，不占 alert 链，避开 iOS 17 多弹窗覆盖问题）
         .overlay {
-            if isSavingMedia {
-                ZStack {
-                    Color.black.opacity(0.35).ignoresSafeArea()
-                    VStack(spacing: 12) {
-                        ProgressView()
-                            .tint(.white)
-                        Text("正在保存到相册…")
-                            .font(.footnote)
-                            .foregroundColor(.white)
-                    }
-                    .padding(20)
-                    .background(Color.black.opacity(0.6))
-                    .clipShape(RoundedRectangle(cornerRadius: 14))
-                }
-            } else if let tip = saveAllTip {
-                ZStack {
-                    Color.black.opacity(0.35).ignoresSafeArea()
-                    VStack(spacing: 12) {
-                        Image(systemName: "checkmark.circle.fill")
-                            .font(.system(size: 40))
-                            .foregroundColor(.green)
-                        Text(tip)
-                            .font(.footnote)
-                            .foregroundColor(.white)
-                            .multilineTextAlignment(.center)
-                        Button("好") { saveAllTip = nil }
-                            .font(.footnote)
-                            .padding(.horizontal, 20)
-                            .padding(.vertical, 6)
-                            .background(Color.white)
-                            .foregroundColor(.black)
-                            .clipShape(Capsule())
-                    }
-                    .padding(20)
-                    .background(Color.black.opacity(0.6))
-                    .clipShape(RoundedRectangle(cornerRadius: 14))
-                }
-            }
+            saveOverlayView
         }
         .alert("无法分享", isPresented: Binding(
             get: { shareError != nil },
