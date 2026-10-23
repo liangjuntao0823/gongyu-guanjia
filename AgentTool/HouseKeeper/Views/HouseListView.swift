@@ -605,6 +605,8 @@ struct HouseListView: View {
             Task {
                 do {
                     try await CloudBackupService.deleteHouseRemoteFolder(roomKey: roomKey, config: config)
+                    // v1.19：同时从云端房源账本移除该房
+                    try? await CloudHouseSync.delete(roomKey: roomKey, config: config)
                     BackupLogStore.log(category: "删除房源", action: "云端删除", result: "成功", detail: roomKey)
                 } catch {
                     BackupLogStore.log(category: "删除房源", action: "云端删除", result: "失败", detail: "\(roomKey) \(error.localizedDescription)")
@@ -751,6 +753,8 @@ struct HouseListView: View {
                 Task {
                     do {
                         try await CloudBackupService.deleteHouseRemoteFolder(roomKey: roomKey, config: config)
+                        // v1.19：同时从云端房源账本移除该房
+                        try? await CloudHouseSync.delete(roomKey: roomKey, config: config)
                         BackupLogStore.log(category: "删除房源", action: "云端删除", result: "成功", detail: roomKey)
                     } catch {
                         BackupLogStore.log(category: "删除房源", action: "云端删除", result: "失败", detail: "\(roomKey) \(error.localizedDescription)")

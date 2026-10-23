@@ -43,6 +43,8 @@ struct HouseDetailView: View {
     @State private var recordPickList: [RecordViewItem] = []
     // v1.36 需求1：彻底删除（本地+云端）
     @State private var isDeletingCloud = false
+    // v1.19：纯云端房源下载到本地
+    @State private var isDownloading = false
     @State private var cloudDeleteMessage: String?
 
     var body: some View {
@@ -508,7 +510,9 @@ struct HouseDetailView: View {
             .tint(house.status == .available ? Color(red: 0.24, green: 0.58, blue: 0.34) : Color(red: 0.47, green: 0.49, blue: 0.55))
 
             Button {
-                shareHouseCard()
+                ensureLocalMedia {
+                    shareHouseCard()
+                }
             } label: {
                 Label("分享", systemImage: "square.and.arrow.up")
                     .frame(maxWidth: .infinity)
@@ -516,9 +520,24 @@ struct HouseDetailView: View {
             }
             .buttonStyle(.bordered)
 
+            // v1.19：纯云端房源 → 下载到本地（下载后可编辑/分享/保存）
+            if house.cloudStatus == .cloud {
+                Button {
+                    downloadHouseToLocal()
+                } label: {
+                    Label(isDownloading ? "下载中…" : "下载到本地", systemImage: "arrow.down.circle")
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 4)
+                }
+                .buttonStyle(.bordered)
+                .disabled(isDownloading)
+            }
+
             // v1.15 需求1：一键保存（全部图片+视频保存到手机相册，先弹确认）
             Button {
-                confirmSaveToAlbum()
+                ensureLocalMedia {
+                    confirmSaveToAlbum()
+                }
             } label: {
                 // v1.15 需求1：转存到微信 → 一键保存（全部图片+视频保存到手机相册）
                 Label("一键保存", systemImage: "square.and.arrow.down")
@@ -554,8 +573,81 @@ struct HouseDetailView: View {
     private func setStatus(_ newStatus: HouseStatus) {
         house.status = newStatus
         house.updatedAt = Date()
+        // v1.19：切换状态也刷新最后更新时间并同步云端
+        house.lastUpdatedAt = Date()
         try? modelContext.save()
         NotificationCenter.default.post(name: HouseListView.houseStoreChanged, object: nil)
+        if let config = CosConfig.load() {
+            let record = CloudHouseSync.record(from: house, username: CloudUser.username)
+            Task {
+                try? await CloudHouseSync.upload(record: record, config: config)
+            }
+        }
+    }
+
+    // MARK: - v1.19 纯云端房源：下载到本地 / 操作前自动下载
+
+    /// 手动下载：把云端 h/<房号>/ 的媒体拉到本地（纯云端房源专用）
+    private func downloadHouseToLocal() {
+        guard let config = CosConfig.load() else {
+            cloudDeleteMessage = "未配置云存储，无法下载云端房源"; showCloudDeleteAlert = true
+            return
+        }
+        isDownloading = true
+        let roomKey = house.mediaRoomKey
+        Task {
+            do {
+                let files = try await CosUploader.downloadHouseMedia(roomKey: roomKey, config: config)
+                await MainActor.run {
+                    for f in files {
+                        let item = MediaItem(fileName: f.fileName, kind: f.kind)
+                        item.house = house
+                        modelContext.insert(item)
+                    }
+                    house.cloudStatus = .both
+                    try? modelContext.save()
+                    isDownloading = false
+                    cloudDeleteMessage = "已下载 \(files.count) 个媒体到本地，现在可以编辑、分享或一键保存了。"; showCloudDeleteAlert = true
+                }
+            } catch {
+                await MainActor.run {
+                    isDownloading = false
+                    cloudDeleteMessage = "下载失败：\(error.localizedDescription)"; showCloudDeleteAlert = true
+                }
+            }
+        }
+    }
+
+    /// 操作前自动下载：分享 / 一键保存 / 编辑前若为纯云端房源，先自动拉到本地（v1.19 需求11）
+    private func ensureLocalMedia(_ action: @escaping () -> Void) {
+        if !house.mediaItems.isEmpty || house.cloudStatus != .cloud {
+            action()
+            return
+        }
+        guard let config = CosConfig.load() else { action(); return }
+        isDownloading = true
+        let roomKey = house.mediaRoomKey
+        Task {
+            do {
+                let files = try await CosUploader.downloadHouseMedia(roomKey: roomKey, config: config)
+                await MainActor.run {
+                    for f in files {
+                        let item = MediaItem(fileName: f.fileName, kind: f.kind)
+                        item.house = house
+                        modelContext.insert(item)
+                    }
+                    house.cloudStatus = .both
+                    try? modelContext.save()
+                    isDownloading = false
+                    cloudDeleteMessage = "云端房源已自动下载到本地，请再点一次刚才的操作。"; showCloudDeleteAlert = true
+                }
+            } catch {
+                await MainActor.run {
+                    isDownloading = false
+                    cloudDeleteMessage = "下载失败：\(error.localizedDescription)"; showCloudDeleteAlert = true
+                }
+            }
+        }
     }
 
     private func deleteHouse() {

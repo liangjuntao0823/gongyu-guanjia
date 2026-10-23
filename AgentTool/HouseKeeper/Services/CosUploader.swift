@@ -2460,3 +2460,26 @@ enum CloudHouseSync {
         try await uploadRecords(recs, config: config)
     }
 }
+
+// MARK: - v1.19 纯云端房源下载到本地
+
+extension CosUploader {
+    /// 把云端 h/<roomKey>/ 的媒体下载到本地 MediaStore 目录，返回 (本地文件名, kind)。
+    /// 跳过非媒体对象（cover、缩略图、分享页、账本等）。视频云端为 mp4、图片保留原扩展。
+    static func downloadHouseMedia(roomKey: String, config: CosConfig) async throws -> [(fileName: String, kind: String)] {
+        let objs = try await listObjects(prefix: "h/\(roomKey)/", config: config)
+        var result: [(fileName: String, kind: String)] = []
+        for obj in objs {
+            let name = (obj.name as NSString).lastPathComponent
+            let lower = name.lowercased()
+            let isVideo = lower.hasSuffix(".mp4") || lower.hasSuffix(".mov")
+            let isImage = [".jpg", ".jpeg", ".png", ".heic", ".webp", ".gif"].contains { lower.hasSuffix($0) }
+            guard isVideo || isImage else { continue }
+            let data = try await fetchObjectData(path: obj.name, config: config)
+            let ext = isVideo ? "mp4" : (name as NSString).pathExtension
+            let fileName = MediaStore.save(data: data, ext: ext, roomKey: roomKey)
+            result.append((fileName, isVideo ? "video" : "image"))
+        }
+        return result
+    }
+}

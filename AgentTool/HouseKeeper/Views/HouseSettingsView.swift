@@ -175,6 +175,7 @@ struct CosConfigView: View {
     @State private var secretKey = ""
     @State private var customDomain = ""
     @State private var functionURL = ""   // v1.18：云函数地址（后台网址），管理后台入口走此地址
+    @State private var username = ""      // v1.19：多用户——本机用户名（共享房源时区分是谁的操作）
     @State private var savedTip: String?
     @State private var isVerifying = false
     // v1.34：文件备份 / 恢复 + 清空配置（v1.35：备份直写「备份」文件夹；v1.36：恢复改为列表选择）
@@ -196,6 +197,7 @@ struct CosConfigView: View {
         _secretKey = State(initialValue: k)
         _customDomain = State(initialValue: d)
         _functionURL = State(initialValue: CloudConfig.functionURL)
+        _username = State(initialValue: CloudUser.username)
     }
 
     var body: some View {
@@ -227,6 +229,22 @@ struct CosConfigView: View {
                 Text("云函数后台")
             } footer: {
                 Text("云函数地址即管理后台网页的网址。给别的房东用：导出下方部署包，让他在自己的腾讯云部署，再把他的云函数地址填到这里，App 首页「管理后台」就会打开他的后台。")
+            }
+
+            // v1.19：多用户——每台设备一个用户名，共享房源、其他数据按用户名隔离
+            Section {
+                TextField("我的用户名（如：涛）", text: $username)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                Button {
+                    exportUserProfile()
+                } label: {
+                    Label("导出「给别人用」的配置", systemImage: "square.and.arrow.up")
+                }
+            } header: {
+                Text("多用户（共享房源）")
+            } footer: {
+                Text("多台手机填同一个桶配置、各自填用户名，即可共享房源：一台录入，另一台下拉同步就能看到。操作日志/分享/统计会带上您的用户名，其他私有数据（名片/水印/统计/备份）按用户名分开。导出配置文件发给别人，导入即用；不共用配置的人也能自行部署。")
             }
 
             Section("腾讯云 COS 配置") {
@@ -376,6 +394,9 @@ struct CosConfigView: View {
         if !functionURL.isEmpty {
             CloudConfig.functionURL = functionURL
         }
+        // v1.19：保存用户名（操作日志 / 分享 / 统计带它）
+        username = username.trimmingCharacters(in: trimSet)
+        CloudUser.username = username
 
         // 1. 写入钥匙串：任一项写失败都要明确提示（v1.20 之前写入失败被静默吞掉）
         var allSaved = true
@@ -464,6 +485,49 @@ struct CosConfigView: View {
         } catch {
             savedTip = "导出失败：\(error.localizedDescription)"
         }
+    }
+
+    // MARK: - v1.19 多用户：导出「给别人用」的配置
+
+    /// 把本机已填的云配置 + 用户名打包成一个 JSON 文件，走系统分享发给别人；对方「添加用户/导入配置」即可共用房源。
+    /// 文件不含敏感解释，仅含可用的连接参数。
+    private func exportUserProfile() {
+        let trimmedName = username.trimmingCharacters(in: .whitespacesAndNewlines)
+        let profile: [String: String] = [
+            "app": "公寓管家共享配置",
+            "bucket": bucket,
+            "region": region,
+            "secretId": secretId,
+            "secretKey": secretKey,
+            "customDomain": customDomain,
+            "functionURL": functionURL,
+            "username": trimmedName
+        ]
+        guard let data = try? JSONSerialization.data(withJSONObject: profile, options: [.prettyPrinted]),
+              let json = String(data: data, encoding: .utf8) else {
+            savedTip = "生成配置文件失败，请重试"
+            return
+        }
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("公寓管家共享配置.json")
+        do {
+            try json.write(to: url, atomically: true, encoding: .utf8)
+        } catch {
+            savedTip = "写入配置失败：\(error.localizedDescription)"
+            return
+        }
+        let av = UIActivityViewController(activityItems: [url], applicationActivities: nil)
+        av.popoverPresentationController?.sourceView = nil
+        topMostViewController()?.present(av, animated: true)
+        savedTip = "已生成共享配置文件，选择发送方式发给对方即可"
+    }
+
+    /// 取当前最上层 VC（分享面板 / 弹窗用）
+    private func topMostViewController() -> UIViewController? {
+        guard let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+              let root = scene.windows.first?.rootViewController else { return nil }
+        var top = root
+        while let presented = top.presentedViewController { top = presented }
+        return top
     }
 
     /// v1.35：访问储存桶——用当前填写的桶名/地域打开腾讯云 COS 控制台对应桶页面（默认浏览器）

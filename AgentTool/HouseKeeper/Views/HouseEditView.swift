@@ -374,6 +374,8 @@ struct HouseEditView: View {
         target.remark = remark.trimmingCharacters(in: .whitespacesAndNewlines)
         target.status = status
         target.updatedAt = Date()
+        // v1.19：最后更新时间（首次录入 / 编辑保存时刷新）
+        target.lastUpdatedAt = Date()
 
         for item in mediaItems where item.house == nil {
             item.house = target
@@ -381,8 +383,30 @@ struct HouseEditView: View {
         }
 
         try? modelContext.save()
+        // v1.19：新增 / 编辑保存后同步到云端账本（共享房源）
+        pushHouseToCloud(target)
         NotificationCenter.default.post(name: HouseListView.houseStoreChanged, object: nil)
         dismiss()
+    }
+
+    // MARK: - v1.19 云端双写
+
+    /// 保存后把房源推到云端账本（读改写，同房号覆盖）。无云存储配置则跳过（仅本地）。
+    private func pushHouseToCloud(_ house: House) {
+        guard let config = CosConfig.load() else { return }
+        let record = CloudHouseSync.record(from: house, username: CloudUser.username)
+        Task {
+            do {
+                try await CloudHouseSync.upload(record: record, config: config)
+                await MainActor.run {
+                    house.cloudStatus = .both
+                    try? modelContext.save()
+                }
+                BackupLogStore.log(category: "房源", action: "新增/编辑同步云端", result: "成功", detail: house.displayRoomNo)
+            } catch {
+                BackupLogStore.log(category: "房源", action: "新增/编辑同步云端", result: "失败", detail: "\(house.displayRoomNo)：\(error.localizedDescription)")
+            }
+        }
     }
 
     // MARK: - 媒体处理
