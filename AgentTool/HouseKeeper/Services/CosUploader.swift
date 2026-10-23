@@ -3,6 +3,7 @@ import CryptoKit
 import Security
 import UIKit
 import AVFoundation
+import SwiftUI
 
 // MARK: - 钥匙串存取（COS 密钥等敏感配置）
 
@@ -95,6 +96,14 @@ enum ShareMode: String {
         switch self {
         case .masked: return "share"
         case .full: return "share-full"
+        }
+    }
+
+    /// v1.36：文件名/记录用的中文模式标签
+    var modeLabel: String {
+        switch self {
+        case .masked: return "脱敏版"
+        case .full: return "完整版"
         }
     }
 }
@@ -210,6 +219,7 @@ enum CosUploader {
            (cached.compressOnShare ?? false) == compressOnShare,
            (cached.templateVersion ?? 0) == htmlTemplateVersion,
            (cached.qrcodeSet ?? false) == hasQR,
+           (cached.watermarkHash ?? "") == Self.watermarkHash(WatermarkSettingsStore.current),
            Set(cached.mediaFiles) == Set(mediaFiles),
            cached.info == info,
            let cachedURL = URL(string: cached.shareURL) {
@@ -316,8 +326,10 @@ enum CosUploader {
             completedTasks += 1
         }
 
-        // 5. 生成并上传分享页（路径无扩展名；两模式独立页面）。链接追加版本参数 v（内容更新 → v 变 → 微信重新抓卡片）
-        let pagePath = "h/\(roomKey)/\(mode.pageSuffix)"
+        // 5. 生成并上传分享页。v1.36：文件名=房号+模式+日期时间（空 app 无存量链接，直接换新命名）。
+        //    链接追加版本参数 v（内容更新 → v 变 → 微信重新抓卡片）
+        let wm = Self.watermarkOverlayHTML(WatermarkSettingsStore.current)
+        let pagePath = "h/\(roomKey)/\(Self.safeFileName(info.displayRoomNo))_\(mode.modeLabel)_\(Self.shareTimeTag()).html"
         let shareURL = try presignedGetURL(for: pagePath, expires: shareLinkExpires, config: config)
         let versionedURL = appendVersionParameter(shareURL, version: "\(Int(Date().timeIntervalSince1970))")
 
@@ -335,7 +347,8 @@ enum CosUploader {
                 title: title, desc: desc,
                 name: name, phone: phone,
                 videoTags: videoTags, imageURLs: imageAbsURLs,
-                coverSrc: coverSrc, qrSrc: qrSrc, shareLink: versionedURL.absoluteString
+                coverSrc: coverSrc, qrSrc: qrSrc, shareLink: versionedURL.absoluteString,
+                wm: wm, trackScript: Self.cloudTrackScript(room: info.displayRoomNo, mode: mode.modeLabel)
             )
         case .full:
             let title = "\(info.displayRoomNo) · \(info.layout.isEmpty ? "房源" : info.layout)"
@@ -344,7 +357,8 @@ enum CosUploader {
                 title: title, desc: desc,
                 info: info, name: name, phone: phone,
                 videoTags: videoTags, imageURLs: imageAbsURLs,
-                coverSrc: coverSrc, qrSrc: qrSrc, shareLink: versionedURL.absoluteString
+                coverSrc: coverSrc, qrSrc: qrSrc, shareLink: versionedURL.absoluteString,
+                wm: wm, trackScript: Self.cloudTrackScript(room: info.displayRoomNo, mode: mode.modeLabel)
             )
         }
         try await uploadWithProgress(data: Data(html.utf8), to: pagePath, contentType: "text/html; charset=utf-8", config: config) { p in
@@ -354,7 +368,7 @@ enum CosUploader {
         completedTasks += 1
         progress?(1.0)
 
-        // 6. 更新缓存（按模式分文件；含自定义域名、压缩开关与模板版本，任一变化后旧缓存自动失效）
+        // 6. 更新缓存（按模式分文件；含自定义域名、压缩开关、模板版本与水印哈希，任一变化后旧缓存自动失效）
         ShareCacheStore.save(roomKey: roomKey, mode: mode.rawValue, record: ShareCacheRecord(
             mediaFiles: mediaFiles,
             info: info,
@@ -364,8 +378,14 @@ enum CosUploader {
             customDomain: config.customDomain,
             compressOnShare: compressOnShare,
             templateVersion: htmlTemplateVersion,
-            qrcodeSet: hasQR
+            qrcodeSet: hasQR,
+            watermarkHash: Self.watermarkHash(WatermarkSettingsStore.current)
         ))
+
+        // v1.36：分享记录云端化——异步写桶内分享记录索引（失败不阻塞分享主流程）
+        Task {
+            try? await Self.appendShareRecord(roomKey: roomKey, displayRoomNo: info.displayRoomNo, mode: mode, url: versionedURL.absoluteString, config: config)
+        }
 
         return versionedURL
     }
@@ -399,6 +419,7 @@ enum CosUploader {
            (cached.compressOnShare ?? false) == compressOnShare,
            (cached.templateVersion ?? 0) == htmlTemplateVersion,
            (cached.qrcodeSet ?? false) == hasQR,
+           (cached.watermarkHash ?? "") == Self.watermarkHash(WatermarkSettingsStore.current),
            cached.info.name == name,
            cached.info.phone == phone,
            Set(cached.collectionRooms ?? []) == Set(validRooms),
@@ -478,7 +499,7 @@ enum CosUploader {
         }
         guard !prepared.isEmpty else { throw CosError.missingMedia }
 
-        // 2. 生成并上传合集页
+        // 2. 生成并上传合集页。v1.36：文件名=首套房号+模式+日期时间（空 app 无存量链接，直接换新命名）
         let collectionCover = prepared.first?.coverSrc ?? ""
         // v1.27：名片微信二维码——固定路径覆盖写，旧合集链接自动显示新二维码
         var qrSrc = ""
@@ -489,8 +510,11 @@ enum CosUploader {
             qrSrc = (try? presignedGetURL(for: "h/_qrcode/qr.jpg", expires: shareLinkExpires, config: config).absoluteString) ?? ""
             completedTasks += 1
         }
-        let pagePath = "h/_collection/\(sortedKeys).\(mode.pageSuffix)"
-        let html = buildCollectionHTML(rooms: prepared, mode: mode, name: name, phone: phone, coverSrc: collectionCover, qrSrc: qrSrc)
+        let wm = Self.watermarkOverlayHTML(WatermarkSettingsStore.current)
+        let firstRoomLabel = prepared.first?.item.displayRoomNo ?? "合集"
+        let pagePath = "h/_collection/\(Self.safeFileName(firstRoomLabel))_\(mode.modeLabel)_\(Self.shareTimeTag()).html"
+        let html = buildCollectionHTML(rooms: prepared, mode: mode, name: name, phone: phone, coverSrc: collectionCover, qrSrc: qrSrc,
+                                       wm: wm, trackScript: Self.cloudTrackScript(room: firstRoomLabel, mode: mode.modeLabel))
         try await uploadWithProgress(data: Data(html.utf8), to: pagePath, contentType: "text/html; charset=utf-8", config: config) { p in
             reportProgress(Double(p))
         }
@@ -515,8 +539,14 @@ enum CosUploader {
             compressOnShare: compressOnShare,
             collectionRooms: validRooms,
             templateVersion: htmlTemplateVersion,
-            qrcodeSet: hasQR
+            qrcodeSet: hasQR,
+            watermarkHash: Self.watermarkHash(WatermarkSettingsStore.current)
         ))
+
+        // v1.36：分享记录云端化——异步写桶内分享记录索引（失败不阻塞分享主流程）
+        Task {
+            try? await Self.appendShareRecord(roomKey: firstRoomLabel, displayRoomNo: firstRoomLabel, mode: mode, url: versionedURL.absoluteString, config: config)
+        }
 
         return versionedURL
     }
@@ -567,8 +597,8 @@ enum CosUploader {
     /// 脱敏版（隐藏版）：户型大字 → 位置+导航 → 实拍（视频置顶、图片单列）→ 名片 → 底栏
     /// 无房号/价格/房东/密码/备注；图片用 CSS 背景图渲染（微信长按背景图无「保存图片」），全局禁右键/禁长按选择
     /// v1.27：名片板块换浅蓝底色；微信二维码（真实 <img>，可长按被微信识别）放左侧，原居中信息右移
-    private static func buildMaskedHTML(title: String, desc: String, name: String, phone: String, videoTags: [String], imageURLs: [String], coverSrc: String, qrSrc: String, shareLink: String) -> String {
-        let mediaBlock = mediaBlockHTML(videoTags: videoTags, imageURLs: imageURLs)
+    private static func buildMaskedHTML(title: String, desc: String, name: String, phone: String, videoTags: [String], imageURLs: [String], coverSrc: String, qrSrc: String, shareLink: String, wm: String = "", trackScript: String = "") -> String {
+        let mediaBlock = mediaBlockHTML(videoTags: videoTags, imageURLs: imageURLs, wm: wm)
         let coverMeta = coverSrc.isEmpty ? "" : "<meta property=\"og:image\" content=\"\(coverSrc)\">"
         let urlMeta = shareLink.isEmpty ? "" : "<meta property=\"og:url\" content=\"\(shareLink)\">"
         let galleryJS = imageURLs.map { "'\($0)'" }.joined(separator: ",")
@@ -601,7 +631,7 @@ enum CosUploader {
         .vwrap video{width:100%;height:100%;display:none;background:#000;}
         .vwrap.playing .vthumb,.vwrap.playing .vplay{display:none;}
         .vwrap.playing video{display:block;}
-        .cellwrap{width:100%;aspect-ratio:4/3;border-radius:10px;overflow:hidden;background-color:#e8e8ec;margin-bottom:10px;cursor:pointer;}
+        .cellwrap{width:100%;aspect-ratio:4/3;border-radius:10px;overflow:hidden;background-color:#e8e8ec;margin-bottom:10px;cursor:pointer;position:relative;}
         .cell{width:100%;height:100%;object-fit:cover;display:block;pointer-events:none;-webkit-user-drag:none;-webkit-touch-callout:none;}
         .card{background:linear-gradient(180deg,#f7fafd,#e9f1f9);border:1px solid #dfe9f3;border-radius:16px;padding:14px;margin-top:12px;}
         .qr-wrap{display:flex;align-items:center;gap:14px;}
@@ -670,6 +700,7 @@ enum CosUploader {
         function toast(msg){var t=document.getElementById('toast');t.textContent=msg;t.style.display='block';clearTimeout(t._h);t._h=setTimeout(function(){t.style.display='none'},1600);}
         function copyPhone(){var p='\(phone)';function done(){toast('已复制 '+p)}function fb(){var i=document.createElement('input');i.value=p;document.body.appendChild(i);i.select();i.setSelectionRange(0,999);document.execCommand('copy');i.remove();done()}if(navigator.clipboard&&window.isSecureContext){navigator.clipboard.writeText(p).then(done,fb)}else{fb()}}
         </script>
+        \(trackScript)
         </body>
         </html>
         """
@@ -679,8 +710,8 @@ enum CosUploader {
 
     /// 完整版（不隐藏版）：v1.22 信息板块重排为三行——第一行：房号(左) + 户型(右)；第二行：租金 + 密码（密码：xxx）+ 房东（最右）；
     /// 第三行：备注（有才显示，空则整行隐藏）。实拍 → 名片 → 底栏
-    private static func buildFullHTML(title: String, desc: String, info: ShareHouseInfo, name: String, phone: String, videoTags: [String], imageURLs: [String], coverSrc: String, qrSrc: String, shareLink: String) -> String {
-        let mediaBlock = mediaBlockHTML(videoTags: videoTags, imageURLs: imageURLs)
+    private static func buildFullHTML(title: String, desc: String, info: ShareHouseInfo, name: String, phone: String, videoTags: [String], imageURLs: [String], coverSrc: String, qrSrc: String, shareLink: String, wm: String = "", trackScript: String = "") -> String {
+        let mediaBlock = mediaBlockHTML(videoTags: videoTags, imageURLs: imageURLs, wm: wm)
         let coverMeta = coverSrc.isEmpty ? "" : "<meta property=\"og:image\" content=\"\(coverSrc)\">"
         let urlMeta = shareLink.isEmpty ? "" : "<meta property=\"og:url\" content=\"\(shareLink)\">"
         let galleryJS = imageURLs.map { "'\($0)'" }.joined(separator: ",")
@@ -722,7 +753,7 @@ enum CosUploader {
         .vwrap video{width:100%;height:100%;display:none;background:#000;}
         .vwrap.playing .vthumb,.vwrap.playing .vplay{display:none;}
         .vwrap.playing video{display:block;}
-        .cellwrap{width:100%;aspect-ratio:4/3;border-radius:10px;overflow:hidden;background-color:#e8e8ec;margin-bottom:10px;cursor:pointer;}
+        .cellwrap{width:100%;aspect-ratio:4/3;border-radius:10px;overflow:hidden;background-color:#e8e8ec;margin-bottom:10px;cursor:pointer;position:relative;}
         .cell{width:100%;height:100%;object-fit:cover;display:block;pointer-events:none;-webkit-user-drag:none;-webkit-touch-callout:none;}
         .card{background:linear-gradient(180deg,#f7fafd,#e9f1f9);border:1px solid #dfe9f3;border-radius:16px;padding:14px;margin-top:12px;}
         .qr-wrap{display:flex;align-items:center;gap:14px;}
@@ -789,6 +820,7 @@ enum CosUploader {
         function toast(msg){var t=document.getElementById('toast');t.textContent=msg;t.style.display='block';clearTimeout(t._h);t._h=setTimeout(function(){t.style.display='none'},1600);}
         function copyPhone(){var p='\(phone)';function done(){toast('已复制 '+p)}function fb(){var i=document.createElement('input');i.value=p;document.body.appendChild(i);i.select();i.setSelectionRange(0,999);document.execCommand('copy');i.remove();done()}if(navigator.clipboard&&window.isSecureContext){navigator.clipboard.writeText(p).then(done,fb)}else{fb()}}
         </script>
+        \(trackScript)
         </body>
         </html>
         """
@@ -805,7 +837,7 @@ enum CosUploader {
         let coverSrc: String
     }
 
-    private static func buildCollectionHTML(rooms: [PreparedRoom], mode: ShareMode, name: String, phone: String, coverSrc: String, qrSrc: String) -> String {
+    private static func buildCollectionHTML(rooms: [PreparedRoom], mode: ShareMode, name: String, phone: String, coverSrc: String, qrSrc: String, wm: String = "", trackScript: String = "") -> String {
         let count = rooms.count
         let qrCol = qrColumnHTML(qrSrc: qrSrc)
         let qrWrapClass = qrSrc.isEmpty ? " qr-wrap center" : " qr-wrap"
@@ -855,7 +887,7 @@ enum CosUploader {
             </div>
             """)
 
-            let detail = collectionDetailHTML(item: room.item, mode: mode, videoTags: room.videoTags, imageURLs: room.imageURLs, startIndex: cursor, name: name, phone: phone, qrSrc: qrSrc)
+            let detail = collectionDetailHTML(item: room.item, mode: mode, videoTags: room.videoTags, imageURLs: room.imageURLs, startIndex: cursor, name: name, phone: phone, qrSrc: qrSrc, wm: wm)
             cursor += room.imageURLs.count
             gallery.append(contentsOf: room.imageURLs)
             // JS 单引号字符串转义：反斜杠 → \\ 、单引号 → \' 、换行 → \n（JS 字符串字面量不允许未转义换行）
@@ -913,7 +945,7 @@ enum CosUploader {
         .vwrap video{width:100%;height:100%;display:none;background:#000;}
         .vwrap.playing .vthumb,.vwrap.playing .vplay{display:none;}
         .vwrap.playing video{display:block;}
-        .cellwrap{width:100%;aspect-ratio:4/3;border-radius:10px;overflow:hidden;background-color:#e8e8ec;margin-bottom:10px;cursor:pointer;}
+        .cellwrap{width:100%;aspect-ratio:4/3;border-radius:10px;overflow:hidden;background-color:#e8e8ec;margin-bottom:10px;cursor:pointer;position:relative;}
         .cell{width:100%;height:100%;object-fit:cover;display:block;pointer-events:none;-webkit-user-drag:none;-webkit-touch-callout:none;}
         .card{background:linear-gradient(180deg,#f7fafd,#e9f1f9);border:1px solid #dfe9f3;border-radius:16px;padding:14px;margin-top:12px;}
         .qr-wrap{display:flex;align-items:center;gap:14px;}
@@ -992,6 +1024,7 @@ enum CosUploader {
         function toast(msg){var t=document.getElementById('toast');t.textContent=msg;t.style.display='block';clearTimeout(t._h);t._h=setTimeout(function(){t.style.display='none'},1600);}
         function copyPhone(){var p='\(phone)';function done(){toast('已复制 '+p)}function fb(){var i=document.createElement('input');i.value=p;document.body.appendChild(i);i.select();i.setSelectionRange(0,999);document.execCommand('copy');i.remove();done()}if(navigator.clipboard&&window.isSecureContext){navigator.clipboard.writeText(p).then(done,fb)}else{fb()}}
         </script>
+        \(trackScript)
         </body>
         </html>
         """
@@ -1000,7 +1033,7 @@ enum CosUploader {
     /// 合集单套详情 HTML：脱敏=户型+导航；完整=房号+户型 / 价格+密码+房东 / 备注。媒体：视频置顶、图片单列。
     /// v1.26：详情底部也加名片（拨打电话/复制电话），与单套分享页一致
     /// v1.27：详情名片同样带微信二维码（真实 <img>，可长按识别）+ 浅蓝底色
-    private static func collectionDetailHTML(item: ShareCollectionItem, mode: ShareMode, videoTags: [String], imageURLs: [String], startIndex: Int, name: String, phone: String, qrSrc: String) -> String {
+    private static func collectionDetailHTML(item: ShareCollectionItem, mode: ShareMode, videoTags: [String], imageURLs: [String], startIndex: Int, name: String, phone: String, qrSrc: String, wm: String = "") -> String {
         var parts: [String] = []
         let qrCol = qrColumnHTML(qrSrc: qrSrc)
         let qrWrapClass = qrSrc.isEmpty ? " qr-wrap center" : " qr-wrap"
@@ -1028,7 +1061,7 @@ enum CosUploader {
         for tag in videoTags { media += tag }
         // v1.25：图片用 <img> 渲染（修复空白），img 自身 pointer-events:none + 外层 div 点击放大——防长按保存
         for (offset, url) in imageURLs.enumerated() {
-            media += "<div class=\"cellwrap\" onclick=\"openImg(\(startIndex + offset))\"><img class=\"cell\" src=\"\(url)\" draggable=\"false\" alt=\"\"></div>"
+            media += "<div class=\"cellwrap\" onclick=\"openImg(\(startIndex + offset))\"><img class=\"cell\" src=\"\(url)\" draggable=\"false\" alt=\"\">\(wm)</div>"
         }
         media += "</div>"
         parts.append(media)
@@ -1055,11 +1088,11 @@ enum CosUploader {
     /// 媒体块：视频封面播放器原样输出（置顶），图片用 <img> 渲染（单列、防长按保存、点击放大进 GALLERY）
     /// v1.25：图片从 background-image div 改为 <img>（修复微信 WebView 缩略图空白）；
     ///   img 包在 .cellwrap 里且自身 pointer-events:none——长按落在外层 div 上，微信不会弹「保存图片」
-    private static func mediaBlockHTML(videoTags: [String], imageURLs: [String]) -> String {
+    private static func mediaBlockHTML(videoTags: [String], imageURLs: [String], wm: String = "") -> String {
         var parts: [String] = []
         for tag in videoTags { parts.append(tag) }
         for (index, url) in imageURLs.enumerated() {
-            parts.append("<div class=\"cellwrap\" onclick=\"openImg(\(index))\"><img class=\"cell\" src=\"\(url)\" draggable=\"false\" alt=\"\"></div>")
+            parts.append("<div class=\"cellwrap\" onclick=\"openImg(\(index))\"><img class=\"cell\" src=\"\(url)\" draggable=\"false\" alt=\"\">\(wm)</div>")
         }
         guard !parts.isEmpty else { return "" }
         return "<div class=\"media\">" + parts.joined(separator: "") + "</div>"
@@ -1547,4 +1580,774 @@ struct ShareCollectionItem: Hashable, Codable {
     let password: String
     let remark: String
     let mediaFiles: [ShareMediaFile]
+}
+
+// MARK: - v1.36 分享页水印（CSS 叠加，不动原图、不加桶存储）
+
+enum WatermarkPosition: String, CaseIterable, Codable {
+    case bottomRight, topLeft, topRight, bottomLeft
+    var label: String {
+        switch self {
+        case .bottomRight: return "右下"
+        case .topLeft: return "左上"
+        case .topRight: return "右上"
+        case .bottomLeft: return "左下"
+        }
+    }
+}
+
+struct WatermarkSettings: Codable, Equatable {
+    var enabled: Bool
+    var text: String
+    var fontSize: Double
+    var opacity: Double
+    var position: WatermarkPosition
+    var offsetX: Double
+    var offsetY: Double
+
+    static let defaultText = "梁涛-13288251132"
+    static let `default` = WatermarkSettings(enabled: true, text: defaultText, fontSize: 14, opacity: 0.5, position: .bottomRight, offsetX: 12, offsetY: 12)
+}
+
+enum WatermarkSettingsStore {
+    private static let key = "watermark.settings.v1"
+    static var current: WatermarkSettings {
+        get {
+            guard let data = UserDefaults.standard.data(forKey: key),
+                  let s = try? JSONDecoder().decode(WatermarkSettings.self, from: data) else { return .default }
+            return s
+        }
+        set {
+            if let data = try? JSONEncoder().encode(newValue) {
+                UserDefaults.standard.set(data, forKey: key)
+            }
+        }
+    }
+    /// 清除自定义水印并恢复默认（默认文本 + 默认样式 + 开关恢复开启）
+    static func resetToDefault() {
+        current = .default
+    }
+}
+
+// MARK: - v1.36 云函数配置（H5 埋点统计 + 管理后台鉴权）
+
+enum CloudConfig {
+    static let defaultFunctionURL = "https://1511251056-csopw5c0jd.ap-hongkong.tencentscf.com"
+    static var functionURL: String {
+        get { UserDefaults.standard.string(forKey: "cloud.functionURL") ?? defaultFunctionURL }
+        set { UserDefaults.standard.set(newValue, forKey: "cloud.functionURL") }
+    }
+    /// 管理后台口令（网页版登录；App 内免登录直接带哈希）。默认 12345678，可在设置页修改。
+    static var adminPassword: String {
+        get { UserDefaults.standard.string(forKey: "cloud.adminPassword") ?? "12345678" }
+        set { UserDefaults.standard.set(newValue, forKey: "cloud.adminPassword") }
+    }
+    static var passwordHash: String {
+        let data = Data(adminPassword.utf8)
+        return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
+}
+
+// MARK: - v1.36 水印 / 埋点 / 分享记录辅助（扩展）
+
+extension CosUploader {
+    /// 水印设置哈希（缓存校验用；djb2 稳定字符串哈希，不依赖进程内 hashValue）
+    static func watermarkHash(_ wm: WatermarkSettings) -> String {
+        let s = "\(wm.enabled)|\(wm.text)|\(wm.fontSize)|\(wm.opacity)|\(wm.position.rawValue)|\(wm.offsetX)|\(wm.offsetY)"
+        var h: UInt64 = 5381
+        for b in s.utf8 { h = (h &* 33) ^ UInt64(b) }
+        return String(h)
+    }
+
+    /// 生成单张图片上的水印覆盖层（空文本或关闭 → 返回空串不渲染）
+    static func watermarkOverlayHTML(_ wm: WatermarkSettings) -> String {
+        guard wm.enabled, !wm.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return "" }
+        let x = max(0, wm.offsetX)
+        let y = max(0, wm.offsetY)
+        let placement: String
+        switch wm.position {
+        case .bottomRight: placement = "right:\(x)px;bottom:\(y)px;"
+        case .bottomLeft: placement = "left:\(x)px;bottom:\(y)px;"
+        case .topRight: placement = "right:\(x)px;top:\(y)px;"
+        case .topLeft: placement = "left:\(x)px;top:\(y)px;"
+        }
+        return "<div class=\"wm\" style=\"position:absolute;\(placement)color:rgba(255,255,255,\(wm.opacity));font-size:\(wm.fontSize)px;font-weight:500;line-height:1;text-shadow:0 1px 2px rgba(0,0,0,.35);pointer-events:none;user-select:none;z-index:2;max-width:70%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;\">\(escapeHTML(wm.text))</div>"
+    }
+
+    /// H5 埋点脚本（静默收集，不需用户同意）：GET 云函数 ?act=track&room=&mode=&ref=&t=
+    static func cloudTrackScript(room: String, mode: String) -> String {
+        let url = CloudConfig.functionURL
+        let roomEsc = escapeHTML(room)
+        let modeEsc = escapeHTML(mode)
+        return "<script>(function(){try{var u='\(url)';if(!u||u.indexOf('http')!==0)return;var r=(document.referrer||'').slice(0,120);var img=new Image();img.src=u+'?act=track&room='+encodeURIComponent('\(roomEsc)')+'&mode='+encodeURIComponent('\(modeEsc)')+'&ref='+encodeURIComponent(r)+'&t='+Date.now();}catch(e){}})();</script>"
+    }
+
+    /// 文件名安全化：保留中文/字母/数字/-/_，其余替换为 -（房号 → 分享页文件名）
+    static func safeFileName(_ s: String) -> String {
+        var out = ""
+        for ch in s {
+            if ch.isLetter || ch.isNumber || ch == "-" || ch == "_" { out.append(ch) }
+            else if ch == " " || ch == "." || ch == "/" || ch == ":" || ch == "," || ch == "，" { out.append("-") }
+        }
+        return out.isEmpty ? "house" : out
+    }
+
+    /// 分享页文件名日期时间戳（yyyyMMddHHmmss）
+    static func shareTimeTag() -> String {
+        let f = DateFormatter()
+        f.dateFormat = "yyyyMMddHHmmss"
+        f.locale = Locale(identifier: "en_US_POSIX")
+        return f.string(from: Date())
+    }
+
+    /// 读取桶内对象（GET 签名，短时效）
+    private static func fetchObjectData(path: String, config: CosConfig) async throws -> Data {
+        let url = try presignedGetURL(for: path, expires: 300, config: config)
+        let (data, resp) = try await URLSession.shared.data(from: url)
+        guard let http = resp as? HTTPURLResponse, http.statusCode == 200 else {
+            throw NSError(domain: "CosUploader", code: -1, userInfo: [NSLocalizedDescriptionKey: "读取云端对象失败: \(path)"])
+        }
+        return data
+    }
+
+    /// v1.36：分享记录云端化——读改写桶内 h/_share_records.json（追加当前分享；最多保留 500 条；失败不抛错，由调用方 try? 静默）
+    static func appendShareRecord(roomKey: String, displayRoomNo: String, mode: ShareMode, url: String, config: CosConfig) async throws {
+        let path = "h/_share_records.json"
+        var records: [[String: String]] = []
+        if let data = try? await fetchObjectData(path: path, config: config),
+           let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: String]] {
+            records = arr
+        }
+        let df = DateFormatter()
+        df.dateFormat = "yyyy-MM-dd HH:mm"
+        df.locale = Locale(identifier: "zh_CN")
+        records.append([
+            "roomKey": roomKey,
+            "room": displayRoomNo,
+            "mode": mode.modeLabel,
+            "time": df.string(from: Date()),
+            "url": url
+        ])
+        if records.count > 500 { records = Array(records.suffix(500)) }
+        guard let json = try? JSONSerialization.data(withJSONObject: records) else { return }
+        try await upload(data: json, to: path, contentType: "application/json", config: config)
+    }
+}
+
+// MARK: - v1.36 水印设置页（设置 → 房源分享 → 分享水印）
+
+struct WatermarkSettingsView: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var enabled: Bool
+    @State private var text: String
+    @State private var fontSize: Double
+    @State private var opacity: Double
+    @State private var position: WatermarkPosition
+    @State private var offsetX: Double
+    @State private var offsetY: Double
+    @State private var showPreview = false
+    @State private var savedFlash = false
+
+    init() {
+        let wm = WatermarkSettingsStore.current
+        _enabled = State(initialValue: wm.enabled)
+        _text = State(initialValue: wm.text)
+        _fontSize = State(initialValue: wm.fontSize)
+        _opacity = State(initialValue: wm.opacity)
+        _position = State(initialValue: wm.position)
+        _offsetX = State(initialValue: wm.offsetX)
+        _offsetY = State(initialValue: wm.offsetY)
+    }
+
+    private var draft: WatermarkSettings {
+        WatermarkSettings(enabled: enabled, text: text, fontSize: fontSize, opacity: opacity, position: position, offsetX: offsetX, offsetY: offsetY)
+    }
+
+    var body: some View {
+        Form {
+            Section {
+                Toggle("分享页加水印", isOn: $enabled)
+            } footer: {
+                Text("开启后，新生成的分享 H5 会在每张图片右下角叠加水印；已分享出去的旧链接不受影响。")
+            }
+
+            Section("水印内容") {
+                TextField("水印文本", text: $text)
+                    .textInputAutocapitalization(.never)
+                Text("默认：\(WatermarkSettings.defaultText)").font(.footnote).foregroundStyle(.secondary)
+            }
+
+            Section("样式") {
+                VStack(alignment: .leading) {
+                    Text("字号：\(Int(fontSize)) px")
+                    Slider(value: $fontSize, in: 10...28, step: 1)
+                }
+                VStack(alignment: .leading) {
+                    Text("透明度：\(Int(opacity * 100))%")
+                    Slider(value: $opacity, in: 0.1...0.9, step: 0.05)
+                }
+                Picker("位置", selection: $position) {
+                    ForEach(WatermarkPosition.allCases, id: \.self) { p in
+                        Text(p.label).tag(p)
+                    }
+                }
+                VStack(alignment: .leading) {
+                    Text("水平偏移：\(Int(offsetX)) pt")
+                    Slider(value: $offsetX, in: 0...40, step: 1)
+                }
+                VStack(alignment: .leading) {
+                    Text("垂直偏移：\(Int(offsetY)) pt")
+                    Slider(value: $offsetY, in: 0...40, step: 1)
+                }
+            }
+
+            Section {
+                Button("预览效果") { showPreview = true }
+                Button("保存") {
+                    WatermarkSettingsStore.current = draft
+                    savedFlash = true
+                    dismiss()
+                }
+                Button("清除水印并恢复默认", role: .destructive) {
+                    enabled = true
+                    text = WatermarkSettings.defaultText
+                    fontSize = 14
+                    opacity = 0.5
+                    position = .bottomRight
+                    offsetX = 12
+                    offsetY = 12
+                    WatermarkSettingsStore.current = draft
+                    savedFlash = true
+                    dismiss()
+                }
+            } footer: {
+                Text("清除 = 恢复默认文本与样式；关闭开关后默认水印也失效。")
+            }
+        }
+        .navigationTitle("分享水印")
+        .navigationBarTitleDisplayMode(.inline)
+        .sheet(isPresented: $showPreview) {
+            WatermarkPreviewView(settings: draft)
+        }
+    }
+}
+
+/// 水印预览：模拟分享页图片（利保米兰公馆 · 2-2334），按当前设置实时叠加水印
+struct WatermarkPreviewView: View {
+    let settings: WatermarkSettings
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                Color(.systemGroupedBackground).ignoresSafeArea()
+                VStack(spacing: 0) {
+                    // 模拟分享页头
+                    HStack {
+                        Text("利保米兰公馆").font(.headline)
+                        Spacer()
+                        Text("2-2334").font(.subheadline).foregroundStyle(.secondary)
+                    }
+                    .padding()
+                    .background(Color.white)
+                    // 模拟图片区
+                    ZStack(alignment: .topLeading) {
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(LinearGradient(colors: [Color(red: 0.45, green: 0.6, blue: 0.8), Color(red: 0.25, green: 0.4, blue: 0.6)], startPoint: .topLeading, endPoint: .bottomTrailing))
+                            .frame(height: 300)
+                        Text("实拍图示意").font(.caption).foregroundStyle(.white.opacity(0.7)).padding(12)
+                        watermarkLayer
+                    }
+                    .padding()
+                }
+            }
+            .navigationTitle("水印预览")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("完成") { dismiss() }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var watermarkLayer: some View {
+        if settings.enabled && !settings.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            let x = max(0, settings.offsetX)
+            let y = max(0, settings.offsetY)
+            let align: Alignment = switch settings.position {
+            case .bottomRight: .bottomTrailing
+            case .bottomLeft: .bottomLeading
+            case .topRight: .topTrailing
+            case .topLeft: .topLeading
+            }
+            Text(settings.text)
+                .font(.system(size: CGFloat(settings.fontSize), weight: .medium))
+                .foregroundStyle(.white.opacity(settings.opacity))
+                .shadow(color: .black.opacity(0.35), radius: 1, y: 1)
+                .padding(.trailing, settings.position == .bottomRight || settings.position == .topRight ? CGFloat(x) : 0)
+                .padding(.leading, settings.position == .bottomLeft || settings.position == .topLeft ? CGFloat(x) : 0)
+                .padding(.bottom, settings.position == .bottomRight || settings.position == .bottomLeft ? CGFloat(y) : 0)
+                .padding(.top, settings.position == .topRight || settings.position == .topLeft ? CGFloat(y) : 0)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: align)
+                .allowsHitTesting(false)
+        }
+    }
+}
+
+// MARK: - v1.36 App 内管理后台（首页快捷操作 → 管理后台）
+
+/// 云函数返回的获客统计
+struct AdminStats: Codable {
+    struct ByItem: Codable { let date: String?; let room: String?; let mode: String?; let count: Int }
+    struct RecentItem: Codable { let t: String; let room: String; let mode: String; let ref: String }
+    let ok: Bool
+    let total: Int
+    let today: Int
+    let byDate: [ByItem]
+    let byRoom: [ByItem]
+    let byMode: [ByItem]
+    let recent: [RecentItem]
+}
+
+/// 云函数返回的分享记录
+struct AdminShares: Codable {
+    let ok: Bool
+    let records: [AdminShareRecord]
+}
+struct AdminShareRecord: Codable, Identifiable {
+    var id: String { url }
+    let room: String
+    let mode: String
+    let time: String
+    let url: String
+}
+
+/// 桶浏览条目（当前层聚合：目录 / 文件）
+struct BucketEntry: Identifiable {
+    var id: String { name }
+    let name: String
+    let isDir: Bool
+    let size: Int64
+    let date: Date?
+    let objectCount: Int
+}
+
+struct AdminDashboardView: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var tab = 0
+    @State private var stats: AdminStats?
+    @State private var shares: [AdminShareRecord] = []
+    @State private var statsError: String?
+    @State private var loading = false
+
+    // 桶管理
+    @State private var bucketPrefix = ""
+    @State private var bucketEntries: [BucketEntry] = []
+    @State private var bucketLoading = false
+    @State private var bucketError: String?
+    @State private var copiedKey: String?
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 0) {
+                Picker("板块", selection: $tab) {
+                    Text("获客分析").tag(0)
+                    Text("分享记录").tag(1)
+                    Text("桶管理").tag(2)
+                }
+                .pickerStyle(.segmented)
+                .padding(.horizontal)
+                .padding(.vertical, 8)
+
+                if tab == 0 {
+                    statsView
+                } else if tab == 1 {
+                    sharesView
+                } else {
+                    bucketView
+                }
+            }
+            .navigationTitle("管理后台")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("关闭") { dismiss() }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        loadAll()
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                }
+            }
+            .onAppear(perform: loadAll)
+        }
+    }
+
+    private func loadAll() {
+        loadStats()
+        loadShares()
+        if tab == 2 { loadBucket() }
+    }
+
+    // MARK: 获客分析
+
+    private var statsView: some View {
+        Group {
+            if let stats = stats {
+                List {
+                    Section {
+                        HStack {
+                            StatCard(title: "累计访问", value: "\(stats.total)")
+                            StatCard(title: "今日访问", value: "\(stats.today)")
+                        }
+                        .listRowInsets(EdgeInsets())
+                        .padding(.horizontal)
+                    }
+                    Section("按日期") {
+                        ForEach(stats.byDate, id: \.date) { item in
+                            HStack {
+                                Text(item.date ?? "—").font(.subheadline)
+                                Spacer()
+                                Text("\(item.count)").bold().foregroundStyle(.tint)
+                            }
+                        }
+                    }
+                    Section("按房号") {
+                        ForEach(stats.byRoom, id: \.room) { item in
+                            HStack {
+                                Text(item.room ?? "—").font(.subheadline)
+                                Spacer()
+                                Text("\(item.count)").bold().foregroundStyle(.tint)
+                            }
+                        }
+                    }
+                    Section("按模式") {
+                        ForEach(stats.byMode, id: \.mode) { item in
+                            HStack {
+                                Text(item.mode ?? "—").font(.subheadline)
+                                Spacer()
+                                Text("\(item.count)").bold().foregroundStyle(.tint)
+                            }
+                        }
+                    }
+                    Section("最近访问") {
+                        ForEach(Array(stats.recent.enumerated()), id: \.offset) { _, item in
+                            VStack(alignment: .leading, spacing: 3) {
+                                HStack {
+                                    Text(item.room).font(.subheadline).bold()
+                                    Text(item.mode).font(.caption).foregroundStyle(.secondary)
+                                    Spacer()
+                                    Text(item.t).font(.caption).foregroundStyle(.secondary)
+                                }
+                                if !item.ref.isEmpty {
+                                    Text("来源：\(item.ref)").font(.caption2).foregroundStyle(.tertiary)
+                                }
+                            }
+                        }
+                    }
+                }
+                .listStyle(.insetGrouped)
+            } else if let statsError = statsError {
+                ContentUnavailableView {
+                    Label("统计加载失败", systemImage: "exclamationmark.triangle")
+                } description: {
+                    Text(statsError)
+                } actions: {
+                    Button("重试") { loadStats() }
+                }
+            } else {
+                ProgressView("加载统计…")
+            }
+        }
+    }
+
+    private func loadStats() {
+        stats = nil
+        statsError = nil
+        guard let url = URL(string: "\(CloudConfig.functionURL)?act=stats&k=\(CloudConfig.passwordHash)") else {
+            statsError = "云函数地址无效"
+            return
+        }
+        URLSession.shared.dataTask(with: url) { data, resp, _ in
+            guard let data = data,
+                  let obj = try? JSONDecoder().decode(AdminStats.self, from: data), obj.ok else {
+                DispatchQueue.main.async { statsError = "云函数未返回有效数据（请确认函数已部署）" }
+                return
+            }
+            DispatchQueue.main.async { stats = obj }
+        }.resume()
+    }
+
+    // MARK: 分享记录
+
+    private var sharesView: some View {
+        Group {
+            if !shares.isEmpty {
+                List {
+                    Section {
+                        ForEach(shares) { r in
+                            VStack(alignment: .leading, spacing: 3) {
+                                HStack {
+                                    Text(r.room).font(.subheadline).bold()
+                                    Text(r.mode).font(.caption).padding(.horizontal, 6).padding(.vertical, 1)
+                                        .background(.tint.opacity(0.12)).clipShape(Capsule())
+                                    Spacer()
+                                    Text(r.time).font(.caption).foregroundStyle(.secondary)
+                                }
+                                Button {
+                                    UIPasteboard.general.string = r.url
+                                    copiedKey = r.url
+                                } label: {
+                                    Label(copiedKey == r.url ? "已复制" : "复制链接", systemImage: copiedKey == r.url ? "checkmark" : "doc.on.doc")
+                                        .font(.caption)
+                                }
+                                .foregroundStyle(.tint)
+                            }
+                        }
+                    } footer: {
+                        Text("分享记录存于云端桶 h/_share_records.json，App 与网页后台共同读取。")
+                    }
+                }
+                .listStyle(.insetGrouped)
+            } else if let statsError = statsError {
+                ContentUnavailableView {
+                    Label("记录加载失败", systemImage: "exclamationmark.triangle")
+                } description: {
+                    Text(statsError)
+                } actions: {
+                    Button("重试") { loadShares() }
+                }
+            } else {
+                ProgressView("加载分享记录…")
+            }
+        }
+    }
+
+    private func loadShares() {
+        shares = []
+        statsError = nil
+        guard let url = URL(string: "\(CloudConfig.functionURL)?act=shares&k=\(CloudConfig.passwordHash)") else {
+            statsError = "云函数地址无效"
+            return
+        }
+        URLSession.shared.dataTask(with: url) { data, resp, _ in
+            guard let data = data,
+                  let obj = try? JSONDecoder().decode(AdminShares.self, from: data), obj.ok else {
+                DispatchQueue.main.async { statsError = "云函数未返回分享记录（请确认函数已部署）" }
+                return
+            }
+            DispatchQueue.main.async { shares = obj.records }
+        }.resume()
+    }
+
+    // MARK: 桶管理
+
+    private var bucketView: some View {
+        Group {
+            if let config = CosConfig.load(), config.isValid {
+                VStack(alignment: .leading, spacing: 0) {
+                    if !bucketPrefix.isEmpty {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 4) {
+                                Button {
+                                    bucketPrefix = ""
+                                    loadBucket()
+                                } label: {
+                                    Text("桶根").font(.caption)
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                                ForEach(breadcrumbs, id: \.self) { crumb in
+                                    Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary)
+                                    Button {
+                                        bucketPrefix = crumb
+                                        loadBucket()
+                                    } label: {
+                                        Text(crumb.split(separator: "/").last.map(String.init) ?? crumb).font(.caption)
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .controlSize(.small)
+                                }
+                            }
+                            .padding(.horizontal)
+                            .padding(.vertical, 6)
+                        }
+                    }
+                    List {
+                        Section {
+                            ForEach(bucketEntries) { entry in
+                                if entry.isDir {
+                                    Button {
+                                        bucketPrefix = entry.name
+                                        loadBucket()
+                                    } label: {
+                                        HStack {
+                                            Image(systemName: "folder").foregroundStyle(.tint)
+                                            Text(entry.name.split(separator: "/").last.map(String.init) ?? entry.name)
+                                            Spacer()
+                                            Text("\(entry.objectCount) 个对象").font(.caption).foregroundStyle(.secondary)
+                                        }
+                                    }
+                                } else {
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        HStack {
+                                            Image(systemName: "doc").foregroundStyle(.secondary)
+                                            Text(entry.name.split(separator: "/").last.map(String.init) ?? entry.name)
+                                                .font(.subheadline).lineLimit(1)
+                                            Spacer()
+                                            Text(ByteCountFormatter.string(fromByteCount: entry.size, countStyle: .file))
+                                                .font(.caption).foregroundStyle(.secondary)
+                                        }
+                                        if let date = entry.date {
+                                            Text(date.formatted(date: .numeric, time: .shortened))
+                                                .font(.caption2).foregroundStyle(.tertiary)
+                                        }
+                                        HStack(spacing: 12) {
+                                            Button {
+                                                UIPasteboard.general.string = "\(sharePrefix)\(entry.name)"
+                                                copiedKey = entry.name
+                                            } label: {
+                                                Label(copiedKey == entry.name ? "已复制" : "复制下载链接", systemImage: copiedKey == entry.name ? "checkmark" : "doc.on.doc")
+                                                    .font(.caption)
+                                            }
+                                            .foregroundStyle(.tint)
+                                            Button(role: .destructive) {
+                                                confirmDelete(entry: entry)
+                                            } label: {
+                                                Label("删除", systemImage: "trash").font(.caption)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        } footer: {
+                            Text(bucketPrefix.isEmpty ? "桶内对象（含子目录逐级展开）" : "当前目录：\(bucketPrefix.isEmpty ? "桶根" : bucketPrefix)")
+                        }
+                    }
+                    .listStyle(.insetGrouped)
+                }
+            } else {
+                ContentUnavailableView {
+                    Label("未配置云存储", systemImage: "server.rack")
+                } description: {
+                    Text("请先在 设置 → 房源分享 → 远程配置 填写 COS 密钥并验证")
+                }
+            }
+        }
+    }
+
+    private var sharePrefix: String {
+        if let config = CosConfig.load(), !config.customDomain.isEmpty {
+            return "https://\(config.customDomain)/"
+        }
+        return ""
+    }
+
+    private var breadcrumbs: [String] {
+        let segs = bucketPrefix.split(separator: "/").map(String.init)
+        var crumbs: [String] = []
+        var path = ""
+        for s in segs {
+            path = path.isEmpty ? s : path + "/" + s
+            crumbs.append(path + "/")
+        }
+        return crumbs
+    }
+
+    private func loadBucket() {
+        guard let config = CosConfig.load(), config.isValid else { return }
+        bucketLoading = true
+        bucketError = nil
+        Task {
+            do {
+                let objects = try await CosUploader.listObjects(prefix: bucketPrefix, config: config)
+                var dirs: [String: Int] = [:]
+                var files: [BucketEntry] = []
+                for o in objects {
+                    let rest = o.name.dropFirst(bucketPrefix.count)
+                    if let slash = rest.firstIndex(of: "/") {
+                        let dirName = String(rest[...slash])
+                        dirs[dirName, default: 0] += 1
+                    } else {
+                        files.append(BucketEntry(name: o.name, isDir: false, size: o.size, date: o.date, objectCount: 1))
+                    }
+                }
+                let dirEntries = dirs.keys.sorted().map { BucketEntry(name: $0, isDir: true, size: 0, date: nil, objectCount: dirs[$0] ?? 0) }
+                let sortedFiles = files.sorted {
+                    ($0.name.split(separator: "/").last.map(String.init) ?? $0.name).localizedStandardCompare($1.name.split(separator: "/").last.map(String.init) ?? $1.name) == .orderedAscending
+                }
+                await MainActor.run {
+                    bucketEntries = dirEntries + sortedFiles
+                    bucketLoading = false
+                }
+            } catch {
+                await MainActor.run {
+                    bucketError = error.localizedDescription
+                    bucketLoading = false
+                }
+            }
+        }
+    }
+
+    private func confirmDelete(entry: BucketEntry) {
+        guard let config = CosConfig.load(), config.isValid else { return }
+        let title: String
+        let message: String
+        if entry.isDir {
+            title = "删除目录 \(entry.name.split(separator: "/").last.map(String.init) ?? entry.name)"
+            message = "将删除该目录下 \(entry.objectCount) 个对象，本地与云端同步生效，不可恢复。"
+        } else {
+            title = "删除文件 \(entry.name.split(separator: "/").last.map(String.init) ?? entry.name)"
+            message = "本地与云端同步生效，不可恢复。"
+        }
+        let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "取消", style: .cancel))
+        alert.addAction(UIAlertAction(title: "彻底删除", style: .destructive) { _ in
+            Task {
+                do {
+                    if entry.isDir {
+                        let objects = try await CosUploader.listObjects(prefix: entry.name, config: config)
+                        for o in objects {
+                            try? await CloudBackupService.deleteRemoteObject(name: o.name, config: config)
+                        }
+                        try? await CloudBackupService.deleteRemoteObject(name: entry.name, config: config)
+                    } else {
+                        try await CloudBackupService.deleteRemoteObject(name: entry.name, config: config)
+                    }
+                    await MainActor.run { loadBucket() }
+                } catch {
+                    await MainActor.run { bucketError = "删除失败：\(error.localizedDescription)" }
+                }
+            }
+        })
+        topViewController()?.present(alert, animated: true)
+    }
+
+    private func topViewController() -> UIViewController? {
+        guard let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+              let root = scene.windows.first?.rootViewController else { return nil }
+        var top = root
+        while let presented = top.presentedViewController { top = presented }
+        return top
+    }
+}
+
+/// 获客分析顶部指标卡
+struct StatCard: View {
+    let title: String
+    let value: String
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title).font(.caption).foregroundStyle(.secondary)
+            Text(value).font(.system(size: 26, weight: .bold, design: .rounded))
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .background(Color(.secondarySystemGroupedBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
 }

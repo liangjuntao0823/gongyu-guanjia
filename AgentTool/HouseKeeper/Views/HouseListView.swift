@@ -218,17 +218,18 @@ struct HouseListView: View {
             }
             // v1.16 需求2：删除确认——复刻 DealsView 已验证可用的模式：独立 alert + 真 @State Bool 绑定，
             // 挂在本链最末（最后挂载优先响应），避免 iOS 17 swipeActions 手势拦截 confirmationDialog / 自定义 Binding 失效的问题
+            // v1.36 需求1：删除改为彻底删除（不再进回收站）
             .alert("删除这套房源？", isPresented: $showDeleteConfirm) {
                 if isBatchDelete {
-                    Button("移入回收站", role: .destructive) { batchSoftDelete() }
+                    Button("彻底删除", role: .destructive) { batchSoftDelete() }
                 } else if let target = deleteTarget {
-                    Button("移入回收站", role: .destructive) { softDeleteHouse(target) }
+                    Button("彻底删除", role: .destructive) { softDeleteHouse(target) }
                 }
                 Button("取消", role: .cancel) { deleteTarget = nil }
             } message: {
                 Text(isBatchDelete
-                     ? "删除选中的 \(selectedHouseIDs.count) 套房源？删除后进入「设置 → 回收站」可恢复；照片和视频保留在本地，彻底删除时才会移除。"
-                     : "删除后进入「设置 → 回收站」可恢复；照片和视频保留在本地，彻底删除时才会移除。")
+                     ? "将彻底删除选中的 \(selectedHouseIDs.count) 套房源（本地照片视频、数据库记录、云端 h/<房号>/ 一并清除），不可恢复。备份镜像 backups/media 保留。"
+                     : "将彻底删除这套房源（本地照片视频、数据库记录、云端 h/<房号>/ 一并清除），不可恢复。备份镜像 backups/media 保留。")
             }
         }
         .onAppear {
@@ -569,20 +570,35 @@ struct HouseListView: View {
         currentShareStep = nil
     }
 
-    /// v1.7：卡片左滑「删除」→ 软删除进回收站（标记 isDeleted，不删除照片/视频文件）
-    /// v1.16 需求2：save 失败不再静默吞掉（之前 try? 失败会导致「点了确认没反应」），失败弹提示
+    /// v1.36 需求1：卡片左滑「删除」→ 彻底删除（本地文件+数据库记录+云端桶 h/<房号>/ 一并删除，不再进回收站）
+    /// 保留二次确认弹窗；backups/media 镜像保留；云端失败写操作日志（不阻塞本地删除）
     private func softDeleteHouse(_ house: House) {
         guard let ctx = houseModelContext else {
             infoMessage = "数据容器不可用，无法删除"; showInfoAlert = true
             return
         }
-        house.isDeleted = true
-        house.deletedAt = Date()
+        let roomKey = house.mediaRoomKey
+        let config = CosConfig.load()
+        MediaStore.deleteHouseDirectory(roomKey: roomKey)
+        ctx.delete(house)
         do {
             try ctx.save()
             NotificationCenter.default.post(name: Self.houseStoreChanged, object: nil)
         } catch {
             infoMessage = "删除失败：\(error.localizedDescription)"; showInfoAlert = true
+        }
+        // 云端同步删除（失败写日志）
+        if let config = config, config.isValid {
+            Task {
+                do {
+                    try await CloudBackupService.deleteHouseRemoteFolder(roomKey: roomKey, config: config)
+                    BackupLogStore.log(category: "删除房源", action: "云端删除", result: "成功", detail: roomKey)
+                } catch {
+                    BackupLogStore.log(category: "删除房源", action: "云端删除", result: "失败", detail: "\(roomKey) \(error.localizedDescription)")
+                }
+            }
+        } else {
+            BackupLogStore.log(category: "删除房源", action: "云端删除", result: "跳过", detail: "未配置云存储 \(roomKey)")
         }
     }
 
@@ -612,17 +628,20 @@ struct HouseListView: View {
         infoMessage = "已将 \(changed) 套标记为已租（共选中 \(total) 套）"; showInfoAlert = true
     }
 
-    /// 批量删除：选中的房源全部软删除进回收站（不删照片/视频文件）
-    /// v1.16 需求2：save 失败不再静默吞掉，失败弹提示
+    /// v1.36 需求1：批量删除 → 彻底删除（本地文件+数据库记录+云端桶一并删除，不再进回收站）
     private func batchSoftDelete() {
         guard !selectedHouseIDs.isEmpty, let ctx = houseModelContext else {
             infoMessage = "数据容器不可用，无法删除"; showInfoAlert = true
             return
         }
         var changed = 0
+        var deletedKeys: [String] = []
+        let config = CosConfig.load()
         for house in houses where selectedHouseIDs.contains(house.id) {
-            house.isDeleted = true
-            house.deletedAt = Date()
+            let roomKey = house.mediaRoomKey
+            MediaStore.deleteHouseDirectory(roomKey: roomKey)
+            ctx.delete(house)
+            deletedKeys.append(roomKey)
             changed += 1
         }
         do {
@@ -631,9 +650,24 @@ struct HouseListView: View {
         } catch {
             infoMessage = "删除失败：\(error.localizedDescription)"; showInfoAlert = true
         }
+        // 云端同步删除（失败写日志）
+        if let config = config, config.isValid {
+            for roomKey in deletedKeys {
+                Task {
+                    do {
+                        try await CloudBackupService.deleteHouseRemoteFolder(roomKey: roomKey, config: config)
+                        BackupLogStore.log(category: "删除房源", action: "云端删除", result: "成功", detail: roomKey)
+                    } catch {
+                        BackupLogStore.log(category: "删除房源", action: "云端删除", result: "失败", detail: "\(roomKey) \(error.localizedDescription)")
+                    }
+                }
+            }
+        } else {
+            BackupLogStore.log(category: "删除房源", action: "云端删除", result: "跳过", detail: "未配置云存储 共\(deletedKeys.count)套")
+        }
         let total = selectedHouseIDs.count
         exitMultiSelect()
-        infoMessage = "已将 \(changed) 套移入回收站（共选中 \(total) 套）"; showInfoAlert = true
+        infoMessage = "已彻底删除 \(changed) 套（共选中 \(total) 套）"; showInfoAlert = true
     }
 
     /// v1.7：卡片左滑「分享」→ 单套分享卡片（脱敏 / 完整），生成链接后弹系统分享面板

@@ -14,6 +14,7 @@ struct DashboardView: View {
     @State private var payoutReminders: [PayoutReminder] = []
     @State private var currentTime = Date()
     @State private var showUtility = false
+    @State private var showAdmin = false   // v1.36 需求4：管理后台（App 内原生后台）
     @State private var showAddDeal = false
     @State private var showAddRent = false
     @State private var showAddPayout = false
@@ -399,7 +400,8 @@ struct DashboardView: View {
                                 QuickActionItem(icon: "arrow.up.circle.fill", label: "新增包租", color: Color(hex: "6B3FA0")) { showAddPayout = true }
                                 QuickActionItem(icon: "checklist", label: "新增待办", color: .themeAccentDark) { showAddTodo = true }
                                 QuickActionItem(icon: "creditcard.fill", label: "新增收租", color: .themeBlue) { showAddRent = true }
-                                QuickActionItem(icon: "bolt.fill", label: "水电结算", color: .themeAmber) { showUtility = true }
+                                // v1.36 需求4：移除「水电结算」快捷入口（功能保留在收租详情）；新增「管理后台」，排在「新增房源」之前
+                                QuickActionItem(icon: "gauge", label: "管理后台", color: .themeBlue) { showAdmin = true }
                                 // v1.3：回收站已移至设置页右上角；空位改为「新增房源」——直接弹出登记表单
                                 QuickActionItem(icon: "building.2.fill", label: "新增房源", color: AppTheme.primary) {
                                     showAddHouse = true
@@ -609,6 +611,9 @@ struct DashboardView: View {
         }
         .sheet(isPresented: $showUtility) {
             NavigationStack { UtilityView(onWriteSuccess: { refreshDashboard() }) }
+        }
+        .sheet(isPresented: $showAdmin) {
+            AdminDashboardView()
         }
         .sheet(isPresented: $showAddDeal) {
             NavigationStack { AddDealView() }

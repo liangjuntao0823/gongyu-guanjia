@@ -109,6 +109,36 @@ struct SettingsView: View {
             } label: {
                 Label("名片信息", systemImage: "person.crop.circle")
             }
+            // v1.36 需求3：分享水印设置（开关/文本/字号/透明度/位置/预览/保存/清除）
+            NavigationLink {
+                WatermarkSettingsView()
+            } label: {
+                Label {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("分享水印")
+                        Text(WatermarkSettingsStore.current.enabled ? "已开启 · \(WatermarkSettingsStore.current.text)" : "已关闭")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                } icon: {
+                    Image(systemName: "camera.aperture")
+                }
+            }
+            // v1.36 需求7：管理后台口令（网页版登录；App 内免登录）
+            NavigationLink {
+                AdminPasswordView()
+            } label: {
+                Label {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("管理后台口令")
+                        Text("网页版登录用 · App 内自动免登录")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                } icon: {
+                    Image(systemName: "lock.shield")
+                }
+            }
             Toggle("分享时压缩视频和图片", isOn: Binding(
                 get: { shareCompressionEnabled },
                 set: { UserDefaults.standard.set($0, forKey: "compressOnShare") }
@@ -1306,6 +1336,59 @@ struct BillTemplateSettingsView: View {
             showMsg = "账单预览生成失败，请重试。"
             showAlert = true
         }
+    }
+}
+
+// MARK: - v1.36 管理后台口令（网页版登录用；App 内免登录直接带哈希）
+
+struct AdminPasswordView: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var password = CloudConfig.adminPassword
+    @State private var confirm = ""
+    @State private var savedFlash = false
+    @State private var errorMsg: String?
+
+    var body: some View {
+        Form {
+            Section("口令设置") {
+                SecureField("后台口令", text: $password)
+                SecureField("再次输入确认", text: $confirm)
+            } footer: {
+                Text("网页版管理后台用此口令登录；App 内打开后台免登录。默认口令 12345678，建议修改为不易猜的字符。修改后请同步修改云函数 gongyu-stats 里的 PASSWORD 常量（部署页 → 函数配置）。")
+            }
+            Section {
+                Button("保存") { save() }
+            }
+            if let errorMsg {
+                Section {
+                    Text(errorMsg).foregroundStyle(.red)
+                }
+            }
+        }
+        .navigationTitle("管理后台口令")
+        .navigationBarTitleDisplayMode(.inline)
+        .alert("已保存", isPresented: Binding(
+            get: { savedFlash },
+            set: { if !$0 { savedFlash = false } }
+        )) {
+            Button("好") { dismiss() }
+        } message: {
+            Text("后台口令已更新：\(password)")
+        }
+    }
+
+    private func save() {
+        let trimmed = password.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count >= 6 else {
+            errorMsg = "口令至少 6 位"
+            return
+        }
+        guard trimmed == confirm else {
+            errorMsg = "两次输入不一致"
+            return
+        }
+        CloudConfig.adminPassword = trimmed
+        savedFlash = true
     }
 }
 

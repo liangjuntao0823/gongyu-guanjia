@@ -33,6 +33,13 @@ struct HouseDetailView: View {
     @State private var showSaveConfirm = false
     @State private var isSavingMedia = false
     @State private var saveAllTip: String?
+    // v1.36 需求2：详情页「成交/在租/退租」关联查看（只读）
+    @State private var recordViewItem: RecordViewItem? = nil
+    @State private var recordPickKind: RecordPickKind? = nil
+    @State private var recordPickList: [RecordViewItem] = []
+    // v1.36 需求1：彻底删除（本地+云端）
+    @State private var isDeletingCloud = false
+    @State private var cloudDeleteMessage: String?
 
     var body: some View {
         ScrollView {
@@ -69,10 +76,10 @@ struct HouseDetailView: View {
             Text(house.status == .available ? "确认这套已租出？" : "确认这套恢复可带看？")
         }
         .confirmationDialog("删除这套房源？", isPresented: $showDeleteConfirm, titleVisibility: .visible) {
-            Button("删除房源", role: .destructive) { deleteHouse() }
+            Button("彻底删除", role: .destructive) { deleteHouse() }
             Button("取消", role: .cancel) {}
         } message: {
-            Text("删除后进入「设置 → 回收站」可恢复；照片和视频保留在本地，彻底删除时才会移除。")
+            Text("将彻底删除这套房源（本地照片视频、数据库记录、云端 h/\(house.mediaRoomKey)/ 一并清除），不可恢复。备份镜像 backups/media 保留。")
         }
         .confirmationDialog("选择分享方式", isPresented: $showShareModePicker, titleVisibility: .visible) {
             // v1.21：脱敏版隐藏房号/价格/房东，发给找房客户；完整版显示全部信息，发给同事
@@ -161,6 +168,49 @@ struct HouseDetailView: View {
             Button("好", role: .cancel) {}
         } message: {
             Text(shareError ?? "")
+        }
+        // v1.36 需求2：多条关联记录时弹窗选择打开哪条
+        .confirmationDialog("选择记录", isPresented: Binding(
+            get: { recordPickKind != nil },
+            set: { if !$0 { recordPickKind = nil } }
+        ), titleVisibility: .visible) {
+            ForEach(recordPickList) { item in
+                Button(item.title) { recordViewItem = item }
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("该房号关联到多条记录，选择要查看的一条")
+        }
+        .sheet(item: $recordViewItem) { item in
+            NavigationStack {
+                RecordViewerContainer(item: item)
+            }
+            .presentationDetents([.medium, .large])
+        }
+        // v1.36 需求1：本地已删、云端删除失败的分开提示
+        .alert("云端删除失败", isPresented: Binding(
+            get: { cloudDeleteMessage != nil },
+            set: { if !$0 { cloudDeleteMessage = nil } }
+        )) {
+            Button("好") { dismiss() }
+        } message: {
+            Text(cloudDeleteMessage ?? "")
+        }
+        .overlay {
+            if isDeletingCloud {
+                ZStack {
+                    Color.black.opacity(0.35).ignoresSafeArea()
+                    VStack(spacing: 12) {
+                        ProgressView().tint(.white)
+                        Text("本地已删除，正在同步删除云端…")
+                            .font(.footnote)
+                            .foregroundColor(.white)
+                    }
+                    .padding(20)
+                    .background(Color.black.opacity(0.6))
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                }
+            }
         }
     }
 
@@ -482,6 +532,13 @@ struct HouseDetailView: View {
                     .padding(.vertical, 4)
             }
             .buttonStyle(.bordered)
+
+            // v1.36 需求2：成交/在租/退租（按房号关联；无记录置灰；多条弹窗选择；打开只读表单）
+            HStack(spacing: 8) {
+                recordButton("成交", kind: .deal, icon: "doc.text")
+                recordButton("在租", kind: .renting, icon: "house")
+                recordButton("退租", kind: .terminated, icon: "door.left.handled")
+            }
         }
         .padding(14)
         .background(Color.white)
@@ -498,14 +555,96 @@ struct HouseDetailView: View {
     }
 
     private func deleteHouse() {
-        // v1.7：删除改为软删除进回收站——不再同步删除照片/视频文件；
-        // 文件（整个房号目录 + 分享缓存）在「设置 → 回收站」彻底删除该房源时才移除
+        // v1.36 需求1：删除 = 彻底删除（本地文件+数据库记录+云端桶 h/<房号>/ 一并删除，不可恢复）
+        // 保留二次确认弹窗；backups/media 镜像保留（自动备份 zip 引用，删了旧备份恢复缺图）
         guard let ctx = houseModelContext else { return }
-        house.isDeleted = true
-        house.deletedAt = Date()
+        let roomKey = house.mediaRoomKey
+        let config = CosConfig.load()
+        // 1) 本地彻底删除：整个房号目录 + 分享缓存 + 数据库记录
+        MediaStore.deleteHouseDirectory(roomKey: roomKey)
+        ctx.delete(house)
         try? ctx.save()
         NotificationCenter.default.post(name: HouseListView.houseStoreChanged, object: nil)
-        dismiss()
+        // 2) 云端删除（异步；本地成功云端失败 → 分开提示 + 写操作日志）
+        guard let config = config, config.isValid else {
+            BackupLogStore.log(category: "删除房源", action: "云端删除", result: "跳过", detail: "未配置云存储 \(roomKey)")
+            dismiss()
+            return
+        }
+        isDeletingCloud = true
+        Task {
+            do {
+                try await CloudBackupService.deleteHouseRemoteFolder(roomKey: roomKey, config: config)
+                BackupLogStore.log(category: "删除房源", action: "云端删除", result: "成功", detail: roomKey)
+                await MainActor.run { isDeletingCloud = false; dismiss() }
+            } catch {
+                BackupLogStore.log(category: "删除房源", action: "云端删除", result: "失败", detail: "\(roomKey) \(error.localizedDescription)")
+                await MainActor.run {
+                    isDeletingCloud = false
+                    cloudDeleteMessage = "本地已删除；云端删除失败：\(error.localizedDescription)。可在「管理后台 → 桶管理」手动清理 h/\(roomKey)/"
+                }
+            }
+        }
+    }
+
+    // MARK: - v1.36 需求2：成交/在租/退租 关联查看（只读）
+
+    private func recordButton(_ title: String, kind: RecordPickKind, icon: String) -> some View {
+        let count = recordCount(kind)
+        return Button {
+            openRecord(kind)
+        } label: {
+            VStack(spacing: 4) {
+                Image(systemName: icon).font(.system(size: 15))
+                Text(title).font(.subheadline.weight(.medium))
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 9)
+            .background(count > 0 ? Color(.secondarySystemBackground) : Color(.tertiarySystemFill))
+            .foregroundStyle(count > 0 ? Color.primary : Color.secondary)
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+        }
+        .buttonStyle(.plain)
+        .disabled(count == 0)
+    }
+
+    /// 按房号统计关联记录数（成交 / 在租 / 退租；单小区按房号精确匹配，去空格容错）
+    private func recordCount(_ kind: RecordPickKind) -> Int {
+        switch kind {
+        case .deal: return fetchDeals(room: house.displayRoomNo).count
+        case .renting: return fetchProperties(room: house.displayRoomNo, terminated: false).count
+        case .terminated: return fetchProperties(room: house.displayRoomNo, terminated: true).count
+        }
+    }
+
+    private func openRecord(_ kind: RecordPickKind) {
+        let items: [RecordViewItem]
+        switch kind {
+        case .deal: items = fetchDeals(room: house.displayRoomNo).map { .deal($0) }
+        case .renting: items = fetchProperties(room: house.displayRoomNo, terminated: false).map { .property($0) }
+        case .terminated: items = fetchProperties(room: house.displayRoomNo, terminated: true).map { .property($0) }
+        }
+        if items.isEmpty { return }
+        if items.count == 1 { recordViewItem = items[0] }
+        else { recordPickList = items; recordPickKind = kind }
+    }
+
+    private func fetchDeals(room: String) -> [DealRecord] {
+        let normalized = Self.normalizedRoom(room)
+        let desc = FetchDescriptor<DealRecord>(predicate: #Predicate<DealRecord> { $0.isDeleted == false })
+        let all = (try? modelContext.fetch(desc)) ?? []
+        return all.filter { Self.normalizedRoom($0.roomNumber) == normalized }
+    }
+
+    private func fetchProperties(room: String, terminated: Bool) -> [Property] {
+        let normalized = Self.normalizedRoom(room)
+        let desc = FetchDescriptor<Property>(predicate: #Predicate<Property> { $0.isDeleted == false })
+        let all = (try? modelContext.fetch(desc)) ?? []
+        return all.filter { $0.isTerminated == terminated && Self.normalizedRoom($0.roomNumber) == normalized }
+    }
+
+    private static func normalizedRoom(_ s: String) -> String {
+        s.filter { !$0.isWhitespace }
     }
 
     /// 分享入口（v1.21）：先做前置校验（配置 / 素材），再弹「脱敏 / 完整」选择器
@@ -734,5 +873,136 @@ struct PhotoPreviewView: View {
                 }
             }
         }
+    }
+}
+
+// MARK: - v1.36 需求2：成交/在租/退租 只读记录查看
+
+/// 记录查看目标（成交记录 / 收租记录），sheet(item:) 需要 Identifiable
+struct RecordViewItem: Identifiable {
+    let id = UUID()
+    let kind: Kind
+    enum Kind { case deal(DealRecord), property(Property) }
+
+    var title: String {
+        switch kind {
+        case .deal(let d): return "成交记录 · \(d.roomNumber)"
+        case .property(let p): return "收租记录 · \(p.roomNumber)（\(p.isTerminated ? "退租" : "在租")）"
+        }
+    }
+}
+
+enum RecordPickKind { case deal, renting, terminated }
+
+/// 只读记录表单容器（按类型渲染；不可编辑）
+struct RecordViewerContainer: View {
+    let item: RecordViewItem
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        Group {
+            switch item.kind {
+            case .deal(let d): DealRecordViewer(deal: d)
+            case .property(let p): PropertyViewer(property: p)
+            }
+        }
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("关闭") { dismiss() }
+            }
+        }
+    }
+}
+
+/// 成交记录只读表单
+struct DealRecordViewer: View {
+    let deal: DealRecord
+
+    private func yuan(_ v: Double) -> String {
+        v == 0 ? "—" : "¥\(String(format: "%.0f", v))"
+    }
+
+    var body: some View {
+        Form {
+            Section("成交记录") {
+                LabeledContent("房号", value: deal.roomNumber)
+                LabeledContent("成交日期", value: deal.date.formatted(date: .numeric, time: .omitted))
+                LabeledContent("房东", value: deal.landlord.isEmpty ? "—" : deal.landlord)
+                LabeledContent("户型", value: deal.unitType.isEmpty ? "—" : deal.unitType)
+            }
+            Section("租约") {
+                LabeledContent("起租日期", value: deal.leaseStart.formatted(date: .numeric, time: .omitted))
+                LabeledContent("到期日期", value: deal.leaseEnd.formatted(date: .numeric, time: .omitted))
+                LabeledContent("租期", value: deal.leaseDuration.isEmpty ? "—" : deal.leaseDuration)
+                if let due = deal.rentDueDay {
+                    LabeledContent("交租日", value: "每月 \(due) 号")
+                }
+            }
+            Section("费用") {
+                LabeledContent("月租金", value: yuan(deal.rent))
+                LabeledContent("押金", value: yuan(deal.deposit))
+                LabeledContent("业主中介费", value: yuan(deal.agentFeeLandlord))
+                LabeledContent("租客中介费", value: yuan(deal.agentFeeTenant))
+                LabeledContent("总费用", value: yuan(deal.totalFee))
+            }
+            Section("其他") {
+                LabeledContent("经纪人", value: deal.manager.isEmpty ? "—" : deal.manager)
+                LabeledContent("来源", value: deal.source.isEmpty ? "—" : deal.source)
+                if !deal.notes.isEmpty {
+                    LabeledContent("备注", value: deal.notes)
+                }
+            }
+        }
+        .navigationTitle("成交记录")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+/// 收租房源（在租/退租）只读表单
+struct PropertyViewer: View {
+    let property: Property
+
+    private func yuan(_ v: Double) -> String {
+        v == 0 ? "—" : "¥\(String(format: "%.0f", v))"
+    }
+
+    var body: some View {
+        Form {
+            Section("状态") {
+                LabeledContent("状态", value: property.isTerminated ? "已退租" : "在租中")
+                if property.isTerminated {
+                    if let date = property.terminationDate {
+                        LabeledContent("退租日期", value: date.formatted(date: .numeric, time: .omitted))
+                    }
+                    LabeledContent("退租原因", value: property.terminationReason.isEmpty ? "—" : property.terminationReason)
+                }
+            }
+            Section("基本信息") {
+                LabeledContent("房号", value: property.roomNumber)
+                LabeledContent("房东", value: property.landlord.isEmpty ? "—" : property.landlord)
+                LabeledContent("户型", value: property.unitType.isEmpty ? "—" : property.unitType)
+                LabeledContent("管理类型", value: property.typeDisplayName)
+            }
+            Section("租约与费用") {
+                LabeledContent("月租金", value: yuan(property.rent))
+                LabeledContent("押金", value: yuan(property.deposit))
+                LabeledContent("预付", value: yuan(property.prepayment))
+                LabeledContent("起租日期", value: property.leaseStart.isEmpty ? "—" : property.leaseStart)
+                LabeledContent("到期日期", value: property.leaseEnd.isEmpty ? "—" : property.leaseEnd)
+                LabeledContent("租期", value: property.leaseDuration.isEmpty ? "—" : property.leaseDuration)
+                LabeledContent("交租日", value: "每月 \(property.rentDueDay) 号")
+            }
+            Section("计量底数") {
+                LabeledContent("水表底数", value: "\(property.waterMeterBase)")
+                LabeledContent("电表底数", value: "\(property.electricMeterBase)")
+            }
+            if !property.notes.isEmpty {
+                Section("备注") {
+                    Text(property.notes)
+                }
+            }
+        }
+        .navigationTitle("收租记录")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }

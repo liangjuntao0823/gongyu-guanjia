@@ -185,6 +185,7 @@ struct ShareCacheRecord: Codable {
     var collectionRooms: [ShareCollectionItem]? = nil   // v1.22：合集分享缓存——记录合集包含的每套房源快照；任一套变动 → 缓存失效重新生成（Optional 兼容旧版）
     var templateVersion: Int? = nil           // v1.25：生成链接时的 HTML 模板版本；模板改动（改页面设计）→ 旧缓存自动失效重新生成（Optional 兼容旧版）
     var qrcodeSet: Bool? = nil                // v1.27：生成链接时是否已设置微信二维码；设置/清除二维码 → 旧缓存失效重新生成（Optional 兼容旧版）
+    var watermarkHash: String? = nil           // v1.36：生成链接时的水印设置哈希；水印开关/文本/样式变化 → 旧缓存失效重新生成（Optional 兼容旧版）
 }
 
 enum ShareCacheStore {
