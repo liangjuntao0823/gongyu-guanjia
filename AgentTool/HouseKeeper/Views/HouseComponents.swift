@@ -148,9 +148,9 @@ struct HouseCardView: View {
                         .font(.headline.weight(.bold))
                         .foregroundColor(AppTheme.accent)
                     Spacer(minLength: 0)
-                    VStack(alignment: .trailing, spacing: 3) {
+                    // v1.37：状态徽章 + 云端标识横排同一行，避免云端标签单独占一行（保持卡片 4 行布局）
+                    HStack(spacing: 6) {
                         StatusBadge(status: house.status)
-                        // v1.19 补全：云端三态标识移到「待租/已租」下面
                         CloudBadge(status: house.cloudStatus)
                     }
                 }

@@ -688,6 +688,7 @@ struct HouseListView: View {
         do {
             let recs = try await CloudHouseSync.fetchAll(config: config)
             var addedCount = 0, updatedCount = 0, deletedCount = 0, pushedCount = 0
+            var addedRoomNo: [String] = []   // v1.37：新增房号列表（弹窗/日志展示）
             var mediaRoomKeys: [String] = []
             await MainActor.run {
                 let local = (try? ctx.fetch(FetchDescriptor<House>())) ?? []
@@ -704,9 +705,12 @@ struct HouseListView: View {
                             h.lastUpdatedAt = rec.updatedAt
                             updatedCount += 1
                         }
-                        // 本地媒体缺失但云端有媒体 → 下载（v1.19 补全 #4）
-                        if h.mediaItems.isEmpty && !rec.mediaNames.isEmpty {
-                            mediaRoomKeys.append(h.mediaRoomKey)
+                        // 本地媒体缺失（目录实际文件对不上云端清单）但云端有媒体 → 下载（v1.37：按实际文件判断，手动删文件夹也能回补）
+                        if !rec.mediaNames.isEmpty {
+                            let local = MediaStore.existingFileNames(roomKey: h.mediaRoomKey)
+                            if !rec.mediaNames.allSatisfy({ local.contains($0) }) {
+                                mediaRoomKeys.append(h.mediaRoomKey)
+                            }
                         }
                         h.cloudStatus = .both
                     } else {
@@ -720,6 +724,7 @@ struct HouseListView: View {
                         h.cloudStatus = .cloud
                         ctx.insert(h)
                         addedCount += 1
+                        addedRoomNo.append(rec.roomNo)   // v1.37：记录新增房号
                         if !rec.mediaNames.isEmpty { mediaRoomKeys.append(h.mediaRoomKey) }
                     }
                 }
@@ -769,7 +774,11 @@ struct HouseListView: View {
                 if deletedCount > 0 { parts.append("删除\(deletedCount)套") }
                 if pushedCount > 0 { parts.append("补传\(pushedCount)套") }
                 if mediaSaved > 0 { parts.append("下载媒体\(mediaSaved)个") }
-                let msg = "已同步：\(parts.joined(separator: "，"))"
+                var msg = "已同步：\(parts.joined(separator: "，"))"
+                // v1.37：有新增时单独一行列出新增房号（弹窗 + 操作日志都带）
+                if addedCount > 0 {
+                    msg += "\n新增房号：\(addedRoomNo.joined(separator: "，"))"
+                }
                 infoMessage = msg; showInfoAlert = true
                 BackupLogStore.log(category: "同步", action: "同步云端房源", result: "成功", detail: msg)
             } else {

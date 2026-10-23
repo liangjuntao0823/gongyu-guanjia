@@ -109,6 +109,24 @@ enum MediaStore {
         }
     }
 
+    /// v1.37：列出某房号目录下实际存在的媒体文件名（用于检测本地媒体是否缺失、是否需要从云端回补）
+    static func existingFileNames(roomKey: String) -> Set<String> {
+        let dir = houseDirectory(roomKey: roomKey)
+        return Set((try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? [])
+    }
+
+    /// v1.37：按指定文件名写入媒体数据（云端同步回补用；已存在则覆盖），返回是否写入成功
+    static func write(data: Data, fileName: String, roomKey: String) -> Bool {
+        guard !fileName.isEmpty else { return false }
+        let url = houseDirectory(roomKey: roomKey).appendingPathComponent(fileName)
+        do {
+            try data.write(to: url)
+            return true
+        } catch {
+            return false
+        }
+    }
+
     /// v1.35：已收录房源套数——以 Media/ 下房号文件夹数量为准（旧版平铺文件不计入）
     static func houseCount() -> Int {
         let dir = mediaDirectory()

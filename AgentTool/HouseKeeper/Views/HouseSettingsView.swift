@@ -183,6 +183,10 @@ struct CosConfigView: View {
     @State private var showImporter = false
     @State private var confirmClear = false
     @State private var showBrowseConfig = false   // v1.7：查看 COS 配置备份文件（内部浏览组件，只读）
+    // v1.37：多用户「导出给别人用」改 SwiftUI sheet 弹系统分享面板（此前手动 present 被 alert 覆盖弹不出）
+    @State private var profileShareURL: URL? = nil
+    @State private var showProfileShare = false
+    @State private var showProfileImport = false   // 导入别人发来的共享配置文件
 
     init() {
         // v1.34：新装 App 默认配置全部为空，由用户自行填写（不再预填 ap-hongkong）
@@ -246,6 +250,12 @@ struct CosConfigView: View {
                     exportUserProfile()
                 } label: {
                     Label("导出「给别人用」的配置", systemImage: "square.and.arrow.up")
+                }
+                // v1.37：导入别人发来的共享配置文件（自动识别并写入）
+                Button {
+                    showProfileImport = true
+                } label: {
+                    Label("导入共享配置", systemImage: "square.and.arrow.down")
                 }
             } header: {
                 Text("多用户（共享房源）")
@@ -373,6 +383,23 @@ struct CosConfigView: View {
             case .success(let urls):
                 if let url = urls.first {
                     handleRestoreFile(url)
+                }
+            case .failure(let error):
+                savedTip = "无法读取所选文件：\(error.localizedDescription)"
+            }
+        }
+        // v1.37：导出「给别人用」配置 → 系统分享面板（SwiftUI sheet，保证能弹出）
+        .sheet(isPresented: $showProfileShare) {
+            if let url = profileShareURL {
+                HouseShareSheet(items: [url])
+            }
+        }
+        // v1.37：导入别人发来的共享配置文件
+        .fileImporter(isPresented: $showProfileImport, allowedContentTypes: [.json], allowsMultipleSelection: false) { result in
+            switch result {
+            case .success(let urls):
+                if let url = urls.first {
+                    importUserProfile(url)
                 }
             case .failure(let error):
                 savedTip = "无法读取所选文件：\(error.localizedDescription)"
@@ -531,18 +558,58 @@ struct CosConfigView: View {
             savedTip = "写入配置失败：\(error.localizedDescription)"
             return
         }
-        // v1.19 补全：用可用的 presenter 弹系统分享面板（此前 sourceView=nil + presenter 取不到 → 面板弹不出）
-        guard let presenter = topMostViewController() else {
-            savedTip = "当前界面无法弹出分享面板，请返回主界面再点一次"
+        // v1.37：改用 SwiftUI sheet 弹系统分享面板（手动 present 在 SwiftUI 里会被 alert 覆盖，面板弹不出）
+        profileShareURL = url
+        showProfileShare = true
+    }
+
+    /// v1.37：导入别人发来的共享配置文件（「导出给别人用」生成的 .json）——自动识别各字段并写入本机钥匙串 + 云函数地址 + 用户名
+    private func importUserProfile(_ url: URL) {
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        guard let data = try? Data(contentsOf: url),
+              let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            savedTip = "无法识别该文件，请选择「导出给别人用」生成的共享配置文件（.json）"
             return
         }
-        let av = UIActivityViewController(activityItems: [url], applicationActivities: nil)
-        if let pop = av.popoverPresentationController {
-            pop.sourceView = presenter.view
-            pop.sourceRect = presenter.view.bounds
+        let trim = CharacterSet.whitespacesAndNewlines
+        let bucket = (dict["bucket"] as? String ?? "").trimmingCharacters(in: trim)
+        let region = (dict["region"] as? String ?? "").trimmingCharacters(in: trim)
+        let secretId = (dict["secretId"] as? String ?? "").trimmingCharacters(in: trim)
+        let secretKey = (dict["secretKey"] as? String ?? "").trimmingCharacters(in: trim)
+        let customDomain = (dict["customDomain"] as? String ?? "").trimmingCharacters(in: trim)
+        let functionURL = (dict["functionURL"] as? String ?? "").trimmingCharacters(in: trim)
+        let uname = (dict["username"] as? String ?? "").trimmingCharacters(in: trim)
+        if bucket.isEmpty || region.isEmpty || secretId.isEmpty || secretKey.isEmpty {
+            savedTip = "该文件不是共享配置文件（缺少存储桶 / 地域 / SecretId / SecretKey）"
+            return
         }
-        presenter.present(av, animated: true)
-        savedTip = "已生成共享配置文件（含存储桶 / 地域 / 云函数地址 / 您的用户名），选择发送方式发给对方即可；对方收到后放进「云端配置 → 多用户」导入即可共用房源。"
+        var allSaved = true
+        let items: [(String, String)] = [
+            (KeychainKey.bucket, bucket),
+            (KeychainKey.region, region),
+            (KeychainKey.secretId, secretId),
+            (KeychainKey.secretKey, secretKey),
+            (KeychainKey.customDomain, customDomain)
+        ]
+        for (key, value) in items {
+            if !KeychainFix.saveVerified(value, for: key) { allSaved = false }
+        }
+        if !allSaved {
+            savedTip = "写入本机钥匙串失败，请重试；若仍失败请重启 App 后再试"
+            return
+        }
+        if !functionURL.isEmpty { CloudConfig.functionURL = functionURL }
+        if !uname.isEmpty { CloudUser.username = uname }
+        // 刷新表单，用户直接看到刚导入的值
+        self.bucket = bucket
+        self.region = region
+        self.secretId = secretId
+        self.secretKey = secretKey
+        self.customDomain = customDomain
+        self.functionURL = CloudConfig.functionURL
+        self.username = CloudUser.username
+        savedTip = "共享配置已导入 ✅\n存储桶：\(bucket) / 地域：\(region)\n云函数地址：\(functionURL.isEmpty ? "（未填）" : functionURL)\n用户名：\(uname.isEmpty ? "（未填）" : uname)\n可点「保存并验证连接」确认可用"
     }
 
     /// 取当前最上层 VC（分享面板 / 弹窗用）——优先找前台活跃场景的 keyWindow

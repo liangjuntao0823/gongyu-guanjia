@@ -746,9 +746,10 @@ struct HouseDetailView: View {
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 9)
-            .background(count > 0 ? Color(.secondarySystemBackground) : Color(.tertiarySystemFill))
-            .foregroundStyle(count > 0 ? Color.primary : Color.secondary)
-            .clipShape(Capsule())   // v1.19 补全：三个按钮统一胶囊形状（退租与其他一致）
+            // v1.37：三个按钮统一为完全一致的胶囊（背景/前景不再随是否有记录变化，仅无记录时整体置灰）
+            .background(Color(.secondarySystemBackground))
+            .foregroundStyle(Color.primary)
+            .clipShape(Capsule())
         }
         .buttonStyle(.plain)
         .disabled(count == 0)

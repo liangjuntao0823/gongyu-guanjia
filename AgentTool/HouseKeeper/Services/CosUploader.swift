@@ -2466,19 +2466,22 @@ enum CloudHouseSync {
 extension CosUploader {
     /// 把云端 h/<roomKey>/ 的媒体下载到本地 MediaStore 目录，返回 (本地文件名, kind)。
     /// 跳过非媒体对象（cover、缩略图、分享页、账本等）。视频云端为 mp4、图片保留原扩展。
+    /// v1.37：改为幂等回补——本地已存在同名文件直接跳过，缺失的用云端原名写回（不产生重复文件）。
     static func downloadHouseMedia(roomKey: String, config: CosConfig) async throws -> [(fileName: String, kind: String)] {
         let objs = try await listObjects(prefix: "h/\(roomKey)/", config: config)
         var result: [(fileName: String, kind: String)] = []
+        let existing = MediaStore.existingFileNames(roomKey: roomKey)
         for obj in objs {
             let name = (obj.name as NSString).lastPathComponent
             let lower = name.lowercased()
             let isVideo = lower.hasSuffix(".mp4") || lower.hasSuffix(".mov")
             let isImage = [".jpg", ".jpeg", ".png", ".heic", ".webp", ".gif"].contains { lower.hasSuffix($0) }
             guard isVideo || isImage else { continue }
+            // 本地已有同名文件 → 跳过（幂等回补，避免重复生成新序号文件）
+            if existing.contains(name) { continue }
             let data = try await fetchObjectData(path: obj.name, config: config)
-            let ext = isVideo ? "mp4" : (name as NSString).pathExtension
-            let fileName = MediaStore.save(data: data, ext: ext, roomKey: roomKey)
-            result.append((fileName, isVideo ? "video" : "image"))
+            _ = MediaStore.write(data: data, fileName: name, roomKey: roomKey)
+            result.append((name, isVideo ? "video" : "image"))
         }
         return result
     }
