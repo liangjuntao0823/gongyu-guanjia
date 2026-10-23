@@ -29,7 +29,10 @@ struct HouseDetailView: View {
     @State private var isSharing = false           // 生成分享卡片中
     @State private var shareProgress = 0.0         // v1.13 需求13：上传百分比进度
     @State private var shareError: String?
-    @State private var isForwarding = false
+    // v1.15 需求1：一键保存到相册（独立状态，避免与多选「保存选中」的 saveTip/alert 冲突）
+    @State private var showSaveConfirm = false
+    @State private var isSavingMedia = false
+    @State private var saveAllTip: String?
 
     var body: some View {
         ScrollView {
@@ -79,6 +82,13 @@ struct HouseDetailView: View {
         } message: {
             Text("隐藏版只显示户型、位置和您的联系方式；完整版额外显示房号、价格、房东和密码。")
         }
+        // v1.15 需求1：一键保存确认（显示将保存的照片/视频数量）
+        .confirmationDialog("保存到手机相册？", isPresented: $showSaveConfirm, titleVisibility: .visible) {
+            Button("保存", role: .destructive) { saveAllToAlbum() }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("将把本房源全部 \(house.photos.count) 张照片、\(house.videos.count) 个视频保存到系统相册。")
+        }
         .fullScreenCover(item: $previewRoute) { route in
             PhotoPreviewView(photos: house.photos, startIndex: route.index, roomKey: house.mediaRoomKey)
         }
@@ -96,6 +106,47 @@ struct HouseDetailView: View {
                         Text("\(Int(shareProgress * 100))%")
                             .font(.caption)
                             .foregroundColor(.white.opacity(0.85))
+                    }
+                    .padding(20)
+                    .background(Color.black.opacity(0.6))
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                }
+            }
+        }
+        // v1.15 需求1：一键保存中 + 保存完成提示（overlay 卡片，不占 alert 链，避开 iOS 17 多弹窗覆盖问题）
+        .overlay {
+            if isSavingMedia {
+                ZStack {
+                    Color.black.opacity(0.35).ignoresSafeArea()
+                    VStack(spacing: 12) {
+                        ProgressView()
+                            .tint(.white)
+                        Text("正在保存到相册…")
+                            .font(.footnote)
+                            .foregroundColor(.white)
+                    }
+                    .padding(20)
+                    .background(Color.black.opacity(0.6))
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                }
+            } else if let tip = saveAllTip {
+                ZStack {
+                    Color.black.opacity(0.35).ignoresSafeArea()
+                    VStack(spacing: 12) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 40))
+                            .foregroundColor(.green)
+                        Text(tip)
+                            .font(.footnote)
+                            .foregroundColor(.white)
+                            .multilineTextAlignment(.center)
+                        Button("好") { saveAllTip = nil }
+                            .font(.footnote)
+                            .padding(.horizontal, 20)
+                            .padding(.vertical, 6)
+                            .background(Color.white)
+                            .foregroundColor(.black)
+                            .clipShape(Capsule())
                     }
                     .padding(20)
                     .background(Color.black.opacity(0.6))
@@ -411,16 +462,17 @@ struct HouseDetailView: View {
             }
             .buttonStyle(.bordered)
 
-            // v1.14 需求5：一键转存到微信（图片前 9 张 + 视频全部进分享面板，用户到微信里选「收藏」，再手动转发朋友圈）
+            // v1.15 需求1：一键保存（全部图片+视频保存到手机相册，先弹确认）
             Button {
-                transferToWeChat()
+                confirmSaveToAlbum()
             } label: {
-                Label("转存到微信", systemImage: "tray.and.arrow.down")
+                // v1.15 需求1：转存到微信 → 一键保存（全部图片+视频保存到手机相册）
+                Label("一键保存", systemImage: "square.and.arrow.down")
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 4)
             }
             .buttonStyle(.bordered)
-            .disabled(isForwarding)
+            .disabled(isSavingMedia)
 
             Button(role: .destructive) {
                 showDeleteConfirm = true
@@ -514,16 +566,21 @@ struct HouseDetailView: View {
         }
     }
 
-    // MARK: - v1.14 需求5：转存到微信（替代原「转发朋友圈」）
+    // MARK: - v1.15 需求1：一键保存（全部图片+视频保存到手机相册）
 
-    /// 转存到微信：图片（自动取前 9 张，不足取全部）+ 视频（全部）一次性进系统分享面板，
-    /// 用户到微信里选「收藏」后，可自行在微信内手动转发朋友圈（微信限制视频/多图不能直接转朋友圈）。
-    private func transferToWeChat() {
+    /// 确认弹窗：统计本房源可保存的照片/视频数量，弹窗确认后写入相册
+    private func confirmSaveToAlbum() {
         guard !house.mediaItems.isEmpty else {
-            shareError = "这套房源还没有照片或视频，先编辑添加素材再转存"
+            shareError = "这套房源还没有照片或视频，先编辑添加素材再保存"
             return
         }
-        let imageURLs = house.photos.prefix(9)
+        showSaveConfirm = true
+    }
+
+    /// 一键保存：全部照片 + 全部视频（不再是前 9 张）保存到系统相册。
+    /// 用 Photos 框架的 performChanges 批量创建资源（add-only 权限即可，无需读图占内存）。
+    private func saveAllToAlbum() {
+        let imageURLs = house.photos
             .map { MediaStore.url(for: $0.fileName, roomKey: house.mediaRoomKey) }
             .filter { FileManager.default.fileExists(atPath: $0.path) }
         let videoURLs = house.videos
@@ -534,11 +591,37 @@ struct HouseDetailView: View {
             shareError = "照片或视频文件不存在，请重新添加"
             return
         }
-        isForwarding = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-            isForwarding = false
-            shareItems = urls
-            showShare = true
+        isSavingMedia = true
+        Task {
+            do {
+                try await saveMediaUrls(urls)
+                await MainActor.run {
+                    isSavingMedia = false
+                    saveAllTip = "已保存到相册：\(imageURLs.count) 张照片、\(videoURLs.count) 个视频"
+                }
+            } catch {
+                await MainActor.run {
+                    isSavingMedia = false
+                    shareError = "保存失败：\(error.localizedDescription)"
+                }
+            }
+        }
+    }
+
+    /// 请求相册写入权限（add-only 仅需「添加照片」权限），通过后批量写入
+    private func saveMediaUrls(_ urls: [URL]) async throws {
+        let status = await PHPhotoLibrary.requestAuthorization(for: .addOnly)
+        guard status == .authorized || status == .limited else {
+            throw BackupV5Error.invalidBackup("未获得相册权限，请到「设置 → 隐私 → 照片」允许本 App 添加照片")
+        }
+        try await PHPhotoLibrary.shared().performChanges {
+            for url in urls {
+                if url.pathExtension.lowercased() == "mp4" || url.pathExtension.lowercased() == "mov" || url.pathExtension.lowercased() == "m4v" {
+                    PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: url)
+                } else {
+                    PHAssetChangeRequest.creationRequestForAssetFromImage(atFileURL: url)
+                }
+            }
         }
     }
 }

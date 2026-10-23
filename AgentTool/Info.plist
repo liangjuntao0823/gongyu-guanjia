@@ -2,6 +2,9 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<!-- v1.15 需求1：一键保存到相册需要「添加照片」权限 -->
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>用于将房源照片和视频一键保存到您的手机相册</string>
 	<!-- v1.13 需求17：声明可打开 zip 备份文件，系统「用其他 App 打开」表单中出现「公寓管家」 -->
 	<key>CFBundleDocumentTypes</key>
 	<array>

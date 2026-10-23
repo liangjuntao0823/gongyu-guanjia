@@ -313,24 +313,54 @@ struct BackupFileBrowseViewV5: View {
                     Text("")
                 }
             }
-            .alert("恢复完成", isPresented: Binding(
-                get: { restoreStats != nil && restoreError == nil },
-                set: { if !$0 { restoreStats = nil } }
-            )) {
-                Button("好", role: .cancel) {}
-            } message: {
-                if let stats = restoreStats {
-                    VStack(alignment: .leading, spacing: 4) {
-                        ForEach(stats.summaryLines, id: \.self) { line in
-                            Text(line)
+            // v1.15 需求3：恢复完成改 overlay 卡片弹窗（iOS 17 alert 的 message 区对多行 VStack 渲染不可靠，
+            // 只显示第一行「成交96条」；改用 overlay 卡片可完整显示 11 行口径 + 来源 + 安全备份清理提示）
+            .overlay {
+                if let stats = restoreStats, restoreError == nil {
+                    ZStack {
+                        Color.black.opacity(0.35).ignoresSafeArea()
+                        VStack(spacing: 14) {
+                            Text("恢复完成")
+                                .font(.headline)
+                                .foregroundColor(.white)
+                            VStack(alignment: .leading, spacing: 4) {
+                                ForEach(stats.summaryLines, id: \.self) { line in
+                                    Text(line)
+                                        .font(.subheadline)
+                                        .foregroundColor(.white)
+                                }
+                                Text("全部核对无误")
+                                    .font(.subheadline)
+                                    .foregroundColor(.green)
+                                if let note = restoreSourceNote {
+                                    Text(note)
+                                        .font(.footnote)
+                                        .foregroundColor(.white.opacity(0.85))
+                                }
+                                // v1.15 需求3：恢复成功后安全快照已在 restore 成功路径自动删除，明确告知
+                                Text("恢复前的安全备份已自动清理")
+                                    .font(.footnote)
+                                    .foregroundColor(.white.opacity(0.85))
+                            }
+                            .padding(14)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Color.white.opacity(0.12))
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                            Button("好") {
+                                restoreStats = nil
+                                restoreSourceNote = nil
+                            }
+                            .font(.subheadline)
+                            .padding(.horizontal, 32)
+                            .padding(.vertical, 8)
+                            .background(Color.white)
+                            .foregroundColor(.black)
+                            .clipShape(Capsule())
                         }
-                        Text("全部核对无误")
-                        // v1.14 需求3：恢复来源提示（本地复用 or 云端下载）
-                        if let note = restoreSourceNote {
-                            Text(note)
-                                .font(.footnote)
-                                .foregroundColor(.secondary)
-                        }
+                        .padding(20)
+                        .frame(maxWidth: 320)
+                        .background(Color.black.opacity(0.75))
+                        .clipShape(RoundedRectangle(cornerRadius: 16))
                     }
                 }
             }
@@ -739,6 +769,7 @@ struct BackupFileBrowseViewV5: View {
                     await MainActor.run {
                         isRestoring = false
                         restoreStats = stats
+                        restoreSourceNote = "本次恢复使用本地备份文件"
                         BackupLogStore.log(category: "恢复", action: "本地恢复", result: "成功", detail: stats.summaryLines.joined(separator: " / "))
                     }
                 } else if let data = target.legacyData, let scope = target.legacyScope {
@@ -746,6 +777,7 @@ struct BackupFileBrowseViewV5: View {
                     await MainActor.run {
                         isRestoring = false
                         restoreStats = stats
+                        restoreSourceNote = "本次恢复使用旧版 JSON 备份"
                         BackupLogStore.log(category: "恢复", action: "旧版恢复", result: "成功", detail: stats.summaryLines.joined(separator: " / "))
                     }
                 } else {

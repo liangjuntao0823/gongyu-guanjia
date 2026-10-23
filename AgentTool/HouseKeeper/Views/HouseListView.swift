@@ -35,17 +35,27 @@ struct HouseListView: View {
     @State private var isGenerating = false
     @State private var generateTip = ""
     @State private var generateProgress = 0.0   // v1.13 需求13：上传百分比进度
-    @State private var shareError: String?
-    // v1.12：多选模式批量操作——批量已租 / 批量删除（保留原有多选分享逻辑不动）
-    @State private var batchResultTip: String? = nil
-
-    /// v1.14 需求6：单一弹窗枚举（多选分享 / 单套分享 / 单删 / 批量删）
+        // v1.12：多选模式批量操作——批量已租 / 批量删除（保留原有多选分享逻辑不动）
+    
+    /// v1.15 需求2：单一弹窗枚举（iOS 17 同一视图多个 confirmationDialog/alert 会互相覆盖、且 swipeActions
+    /// 手势会拦截 confirmationDialog 按钮点击，删除确认因此无反应）——统一改用单一 alert 呈现所有确认/提示
     enum HouseListDialog: Identifiable {
         case multiShare
         case singleShare
         case delete
         case batchDelete
-        var id: Self { self }
+        case shareError(String)
+        case batchTip(String)
+        var id: String {
+            switch self {
+            case .multiShare: return "multiShare"
+            case .singleShare: return "singleShare"
+            case .delete: return "delete"
+            case .batchDelete: return "batchDelete"
+            case .shareError: return "shareError"
+            case .batchTip: return "batchTip"
+            }
+        }
     }
 
     /// 筛选后的房源：默认待租，并按「座号 + 楼层 + 房号」升序排列（1座在前，同座先按楼层、再按房号从小到大）
@@ -88,6 +98,8 @@ struct HouseListView: View {
         case .singleShare: return "选择分享方式"
         case .delete: return "删除这套房源？"
         case .batchDelete: return "删除选中的 \(selectedHouseIDs.count) 套房源？"
+        case .shareError: return "无法分享"
+        case .batchTip: return "批量操作"
         case nil: return ""
         }
     }
@@ -143,17 +155,13 @@ struct HouseListView: View {
             .navigationDestination(item: $showDetailHouse) { house in
                 HouseDetailView(house: house)
             }
-            // v1.14 需求6：合并为单一 confirmationDialog（iOS 17 同一视图多个 confirmationDialog 会互相覆盖，
-            // 导致删除确认弹窗不显示）。标题/按钮/文案按 activeDialog 分发。
-            .confirmationDialog(
-                dialogTitle,
-                isPresented: Binding(
-                    get: { activeDialog != nil },
-                    set: { if !$0 { activeDialog = nil } }
-                ),
-                titleVisibility: .visible
-            ) {
-                switch activeDialog {
+            // v1.15 需求2：统一用单一 alert 呈现所有确认/提示（iOS 17 多 confirmationDialog/alert 同链会互相覆盖、
+            // swipeActions 手势会拦截 confirmationDialog 按钮点击——删除确认因此无反应；alert 无此问题，与成交板块一致）
+            .alert(dialogTitle, isPresented: Binding(
+                get: { activeDialog != nil },
+                set: { if !$0 { activeDialog = nil } }
+            ), presenting: activeDialog) { dialog in
+                switch dialog {
                 case .multiShare:
                     Button("发给客户（隐藏版）") { generateShareQueue(mode: .masked) }
                     Button("发给同事（完整版）") { generateShareQueue(mode: .full) }
@@ -172,11 +180,13 @@ struct HouseListView: View {
                 case .batchDelete:
                     Button("移入回收站", role: .destructive) { batchSoftDelete() }
                     Button("取消", role: .cancel) {}
-                case nil:
-                    EmptyView()
+                case .shareError:
+                    Button("好", role: .cancel) {}
+                case .batchTip:
+                    Button("好", role: .cancel) {}
                 }
-            } message: {
-                switch activeDialog {
+            } message: { dialog in
+                switch dialog {
                 case .multiShare:
                     Text("已选 \(selectedHouseIDs.count) 套，将生成一个合集分享卡片：好友点开链接即可查看全部房源，每套单独一页（含实拍图/视频）。隐藏版不显示房号/价格/房东，完整版显示全部信息。")
                 case .singleShare:
@@ -185,8 +195,10 @@ struct HouseListView: View {
                     Text("删除后进入「设置 → 回收站」可恢复；照片和视频保留在本地，彻底删除时才会移除。")
                 case .batchDelete:
                     Text("删除后进入「设置 → 回收站」可恢复；照片和视频保留在本地，彻底删除时才会移除。")
-                case nil:
-                    Text("")
+                case .shareError(let msg):
+                    Text(msg)
+                case .batchTip(let msg):
+                    Text(msg)
                 }
             }
             .sheet(item: $currentShareStep, onDismiss: {
@@ -221,23 +233,7 @@ struct HouseListView: View {
                     }
                 }
             }
-            .alert("无法分享", isPresented: Binding(
-                get: { shareError != nil },
-                set: { if !$0 { shareError = nil } }
-            )) {
-                Button("好", role: .cancel) {}
-            } message: {
-                Text(shareError ?? "")
-            }
-            // v1.12：批量操作结果提示
-            .alert("批量操作", isPresented: Binding(
-                get: { batchResultTip != nil },
-                set: { if !$0 { batchResultTip = nil } }
-            )) {
-                Button("好", role: .cancel) {}
-            } message: {
-                Text(batchResultTip ?? "")
-            }
+            // v1.15：shareError / batchResultTip 已并入上方单一 alert（.shareError/.batchTip 分支），不再独立挂载
         }
         .onAppear {
             reloadHouses()
@@ -522,7 +518,8 @@ struct HouseListView: View {
                         .disabled(selectedHouseIDs.isEmpty)
                         // v1.12：批量删除——移入回收站（二级确认，不删照片视频）
                         Button(role: .destructive) {
-                            activeDialog = .batchDelete                        } label: {
+                            activeDialog = .batchDelete
+                        } label: {
                             Text("删除（\(selectedHouseIDs.count)）")
                                 .font(.subheadline.weight(.semibold))
                                 .frame(maxWidth: .infinity)
@@ -606,7 +603,7 @@ struct HouseListView: View {
         NotificationCenter.default.post(name: Self.houseStoreChanged, object: nil)
         let total = selectedHouseIDs.count
         exitMultiSelect()
-        batchResultTip = "已将 \(changed) 套标记为已租（共选中 \(total) 套）"
+        activeDialog = .batchTip("已将 \(changed) 套标记为已租（共选中 \(total) 套）")
     }
 
     /// 批量删除：选中的房源全部软删除进回收站（不删照片/视频文件）
@@ -622,7 +619,7 @@ struct HouseListView: View {
         NotificationCenter.default.post(name: Self.houseStoreChanged, object: nil)
         let total = selectedHouseIDs.count
         exitMultiSelect()
-        batchResultTip = "已将 \(changed) 套移入回收站（共选中 \(total) 套）"
+        activeDialog = .batchTip("已将 \(changed) 套移入回收站（共选中 \(total) 套）")
     }
 
     /// v1.7：卡片左滑「分享」→ 单套分享卡片（脱敏 / 完整），生成链接后弹系统分享面板
@@ -630,11 +627,11 @@ struct HouseListView: View {
     private func generateSingleShare(mode: ShareMode) {
         guard let house = singleShareHouse else { return }
         guard let config = CosConfig.load(), config.isValid else {
-            shareError = "请先到「设置 → 房源分享 → 远程配置」填写云存储配置（腾讯云 COS）并保存验证，再分享卡片链接"
+            activeDialog = .shareError("请先到「设置 → 房源分享 → 远程配置」填写云存储配置（腾讯云 COS）并保存验证，再分享卡片链接")
             return
         }
         guard !house.mediaItems.isEmpty else {
-            shareError = "这套房源还没有照片或视频，先编辑添加素材再分享"
+            activeDialog = .shareError("这套房源还没有照片或视频，先编辑添加素材再分享")
             return
         }
         let files = house.mediaItems.map { ShareMediaFile(name: $0.fileName, kind: $0.kind) }
@@ -670,7 +667,7 @@ struct HouseListView: View {
             } catch {
                 await MainActor.run {
                     isGenerating = false
-                    shareError = error.localizedDescription
+                    activeDialog = .shareError(error.localizedDescription)
                     singleShareHouse = nil
                 }
             }
@@ -680,13 +677,13 @@ struct HouseListView: View {
     private func startMultiShare() {
         guard !selectedHouseIDs.isEmpty else { return }
         guard let config = CosConfig.load(), config.isValid else {
-            shareError = "请先到「设置 → 房源分享 → 远程配置」填写云存储配置（腾讯云 COS）并保存验证，再分享卡片链接"
+            activeDialog = .shareError("请先到「设置 → 房源分享 → 远程配置」填写云存储配置（腾讯云 COS）并保存验证，再分享卡片链接")
             return
         }
         // 过滤出有素材的房源（无照片视频的无法生成卡片）
         let shareable = houses.filter { selectedHouseIDs.contains($0.id) && !$0.mediaItems.isEmpty }
         guard !shareable.isEmpty else {
-            shareError = "选中的房源都没有照片或视频，先编辑添加素材再分享"
+            activeDialog = .shareError("选中的房源都没有照片或视频，先编辑添加素材再分享")
             return
         }
         activeDialog = .multiShare    }
@@ -695,12 +692,12 @@ struct HouseListView: View {
     /// 注意：值类型（ShareCollectionItem）在主线程构建完成，Task 内只传递值，绝不直接访问 SwiftData @Model（跨线程读取模型会闪退）
     private func generateShareQueue(mode: ShareMode) {
         guard let config = CosConfig.load(), config.isValid else {
-            shareError = "请先到「设置 → 房源分享 → 远程配置」填写云存储配置（腾讯云 COS）并保存验证，再分享卡片链接"
+            activeDialog = .shareError("请先到「设置 → 房源分享 → 远程配置」填写云存储配置（腾讯云 COS）并保存验证，再分享卡片链接")
             return
         }
         let shareable = houses.filter { selectedHouseIDs.contains($0.id) && !$0.mediaItems.isEmpty }
         guard !shareable.isEmpty else {
-            shareError = "选中的房源都没有照片或视频，先编辑添加素材再分享"
+            activeDialog = .shareError("选中的房源都没有照片或视频，先编辑添加素材再分享")
             return
         }
         let sortedShareable = shareable.sorted { a, b in
@@ -744,7 +741,7 @@ struct HouseListView: View {
             } catch {
                 await MainActor.run {
                     isGenerating = false
-                    shareError = error.localizedDescription
+                    activeDialog = .shareError(error.localizedDescription)
                     exitMultiSelect()
                 }
             }

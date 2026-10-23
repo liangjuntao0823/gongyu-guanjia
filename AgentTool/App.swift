@@ -415,25 +415,50 @@ struct MainTabView: View {
                 .cornerRadius(12)
                 .shadow(radius: 8)
             }
-            Color.clear.frame(width: 1, height: 1)
-                .alert("恢复完成", isPresented: Binding(
-                    get: { importRestoreStats != nil && importRestoreError == nil },
-                    set: { if !$0 { importRestoreStats = nil } }
-                )) {
-                    Button("好", role: .cancel) {}
-                } message: {
-                    if let stats = importRestoreStats {
+            // v1.15 需求3：导入恢复完成改 overlay 卡片（与备份中心一致；iOS 17 alert message 多行 VStack 渲染不全）
+            if let stats = importRestoreStats, importRestoreError == nil {
+                ZStack {
+                    Color.black.opacity(0.35).ignoresSafeArea()
+                    VStack(spacing: 14) {
+                        Text("恢复完成")
+                            .font(.headline)
+                            .foregroundColor(.white)
                         VStack(alignment: .leading, spacing: 4) {
                             ForEach(stats.summaryLines, id: \.self) { line in
                                 Text(line)
+                                    .font(.subheadline)
+                                    .foregroundColor(.white)
                             }
                             Text("全部核对无误")
+                                .font(.subheadline)
+                                .foregroundColor(.green)
                             Text("恢复来源：外部导入的备份")
                                 .font(.footnote)
-                                .foregroundColor(.secondary)
+                                .foregroundColor(.white.opacity(0.85))
+                            Text("恢复前的安全备份已自动清理")
+                                .font(.footnote)
+                                .foregroundColor(.white.opacity(0.85))
                         }
+                        .padding(14)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.white.opacity(0.12))
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        Button("好") {
+                            importRestoreStats = nil
+                        }
+                        .font(.subheadline)
+                        .padding(.horizontal, 32)
+                        .padding(.vertical, 8)
+                        .background(Color.white)
+                        .foregroundColor(.black)
+                        .clipShape(Capsule())
                     }
+                    .padding(20)
+                    .frame(maxWidth: 320)
+                    .background(Color.black.opacity(0.75))
+                    .clipShape(RoundedRectangle(cornerRadius: 16))
                 }
+            }
             Color.clear.frame(width: 1, height: 1)
                 .alert("恢复失败", isPresented: Binding(
                     get: { importRestoreError != nil },
