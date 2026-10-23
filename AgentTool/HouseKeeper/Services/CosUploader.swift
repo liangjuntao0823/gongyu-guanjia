@@ -1701,7 +1701,7 @@ extension CosUploader {
     }
 
     /// 读取桶内对象（GET 签名，短时效）
-    private static func fetchObjectData(path: String, config: CosConfig) async throws -> Data {
+    static func fetchObjectData(path: String, config: CosConfig) async throws -> Data {
         let url = try presignedGetURL(for: path, expires: 300, config: config)
         let (data, resp) = try await URLSession.shared.data(from: url)
         guard let http = resp as? HTTPURLResponse, http.statusCode == 200 else {
@@ -2370,5 +2370,93 @@ struct StatCard: View {
         .padding(14)
         .background(Color(.secondarySystemGroupedBackground))
         .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+}
+
+// MARK: - v1.19 多用户（用户名）
+
+/// 每台设备一个用户名：操作日志 / 分享 / 统计都带着它；桶内私有数据按用户名分目录隔离。
+/// 房源共享走公共区 h/，不受用户名影响。
+enum CloudUser {
+    private static let key = "cloud.username"
+    static var username: String {
+        get { UserDefaults.standard.string(forKey: key) ?? "" }
+        set { UserDefaults.standard.set(newValue, forKey: key) }
+    }
+    static var displayName: String { username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "未设置" : username }
+}
+
+// MARK: - v1.19 云端房源账本（共享房源的结构化数据）
+
+/// 房源「账本」单条：只含结构化字段 + 媒体文件名清单；媒体文件仍存 h/<roomKey>/<name>。
+/// 多台设备共享这一份账本（最后写入优先，不搞冲突合并）。
+struct CloudHouseRecord: Codable, Identifiable {
+    var id: String { roomKey }
+    var roomKey: String
+    var roomNo: String
+    var tower: Int
+    var landlord: String
+    var layout: String
+    var price: Int
+    var password: String
+    var remark: String
+    var status: String
+    var updatedAt: Date
+    var updatedBy: String
+    var mediaNames: [String]
+}
+
+/// 云端房源账本读写：桶内 h/_houses.json（覆盖写，读改写）。任何失败由调用方 try? 静默处理。
+enum CloudHouseSync {
+    static let accountPath = "h/_houses.json"
+
+    static func record(from house: House, username: String) -> CloudHouseRecord {
+        CloudHouseRecord(
+            roomKey: house.mediaRoomKey,
+            roomNo: house.roomNo,
+            tower: house.tower,
+            landlord: house.landlord,
+            layout: house.layout,
+            price: house.price,
+            password: house.password,
+            remark: house.remark,
+            status: house.statusRaw,
+            updatedAt: house.lastUpdatedAt ?? house.updatedAt,
+            updatedBy: username,
+            mediaNames: house.mediaItems.map { $0.fileName }
+        )
+    }
+
+    /// 拉取云端账本（不存在或读失败 → 空数组）
+    static func fetchAll(config: CosConfig) async throws -> [CloudHouseRecord] {
+        guard let data = try? await CosUploader.fetchObjectData(path: accountPath, config: config),
+              let arr = try? JSONDecoder().decode([CloudHouseRecord].self, from: data) else { return [] }
+        return arr
+    }
+
+    /// 覆盖写整个账本
+    static func uploadRecords(_ records: [CloudHouseRecord], config: CosConfig) async throws {
+        let data = try JSONEncoder().encode(records)
+        try await CosUploader.upload(data: data, to: accountPath, contentType: "application/json", config: config)
+    }
+
+    /// 上传单个房源（读改写：同房号覆盖）
+    static func uploadOne(house: House, username: String, config: CosConfig) async throws {
+        try await upload(record: record(from: house, username: username), config: config)
+    }
+
+    /// 上传单条记录（读改写：同房号覆盖）
+    static func upload(record: CloudHouseRecord, config: CosConfig) async throws {
+        var recs = try await fetchAll(config: config)
+        recs.removeAll { $0.roomKey == record.roomKey }
+        recs.append(record)
+        try await uploadRecords(recs, config: config)
+    }
+
+    /// 删除云端某房
+    static func delete(roomKey: String, config: CosConfig) async throws {
+        var recs = try await fetchAll(config: config)
+        recs.removeAll { $0.roomKey == roomKey }
+        try await uploadRecords(recs, config: config)
     }
 }

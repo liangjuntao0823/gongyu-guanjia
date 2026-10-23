@@ -35,6 +35,14 @@ final class House {
     /// 带 unique 属性的模型加「非可选」字段会打不开库，这是 v1.7 存储异常的根因）
     var isDeleted: Bool?
     var deletedAt: Date?
+    /// v1.19：云端状态——该房源在云端的存在情况
+    ///  local = 仅本地（尚未上传 / 云端已删）
+    ///  cloud = 纯云端（本机无完整数据，来自另一台设备）
+    ///  both  = 本地 + 云端双份（已同步过）
+    /// 可选字段避免旧库迁移问题（与 isDeleted 同策略）；nil 视为 local
+    var cloudStatusRaw: String?
+    /// v1.19：最后更新时间（首次录入取录入时间；改已租/待租状态或编辑时刷新）
+    var lastUpdatedAt: Date?
 
     @Relationship(deleteRule: .cascade, inverse: \MediaItem.house)
     var mediaItems: [MediaItem]
@@ -70,8 +78,27 @@ final class House {
         self.updatedAt = Date()
         self.isDeleted = false
         self.deletedAt = nil
+        self.cloudStatusRaw = nil
+        self.lastUpdatedAt = Date()
         self.mediaItems = []
     }
+}
+
+// MARK: - v1.19 云端状态辅助
+
+extension House {
+    /// 房源云端三态
+    enum CloudStatus: String {
+        case local = "local"   // 仅本地
+        case cloud = "cloud"   // 纯云端
+        case both = "both"     // 本地 + 云端双份
+    }
+    var cloudStatus: CloudStatus {
+        get { CloudStatus(rawValue: cloudStatusRaw ?? "") ?? .local }
+        set { cloudStatusRaw = newValue.rawValue }
+    }
+    /// 是否已存在于云端（云端或双端都算）
+    var isInCloud: Bool { cloudStatus == .cloud || cloudStatus == .both }
 }
 
 /// 房源媒体（照片 / 视频），文件存 Documents/Media，模型只存文件名

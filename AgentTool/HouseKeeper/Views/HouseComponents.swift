@@ -148,6 +148,8 @@ struct HouseCardView: View {
                         .font(.headline.weight(.bold))
                         .foregroundColor(AppTheme.accent)
                     Spacer(minLength: 0)
+                    // v1.19：云端三态标识（本地 / 云端 / 双端）
+                    CloudBadge(status: house.cloudStatus)
                     StatusBadge(status: house.status)
                 }
 
@@ -180,6 +182,11 @@ struct HouseCardView: View {
                     .font(.footnote)
                     .foregroundColor(.secondary)
                     .lineLimit(1)
+
+                // v1.19：最后更新时间（首次录入取录入时间；改状态/编辑时刷新）
+                Text("更新于 \(HouseCardView.timeText(house.lastUpdatedAt ?? house.updatedAt))")
+                    .font(.caption2)
+                    .foregroundColor(.secondary.opacity(0.8))
             }
             .padding(.vertical, 2)
         }
@@ -231,6 +238,42 @@ struct HouseCardView: View {
             playingVideo = firstVideo
         } else if !house.photos.isEmpty {
             previewRoute = PhotoPreviewRoute(index: 0)
+        }
+    }
+
+    /// v1.19：最后更新时间格式化
+    static func timeText(_ date: Date) -> String {
+        let f = DateFormatter()
+        f.dateFormat = "MM-dd HH:mm"
+        return f.string(from: date)
+    }
+}
+
+// MARK: - v1.19 云端三态标识徽章（本地 / 云端 / 双端）
+
+struct CloudBadge: View {
+    let status: House.CloudStatus
+    var body: some View {
+        Text(label)
+            .font(.caption2.weight(.semibold))
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(color.opacity(0.15))
+            .foregroundColor(color)
+            .clipShape(Capsule())
+    }
+    private var label: String {
+        switch status {
+        case .local: return "本地"
+        case .cloud: return "云端"
+        case .both: return "双端"
+        }
+    }
+    private var color: Color {
+        switch status {
+        case .local: return .gray
+        case .cloud: return .blue
+        case .both: return .green
         }
     }
 }

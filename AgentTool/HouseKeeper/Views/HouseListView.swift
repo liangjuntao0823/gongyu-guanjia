@@ -122,6 +122,15 @@ struct HouseListView: View {
             .navigationTitle("房源管理")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                // v1.19：左上角手动同步（与下拉刷新同效果——拉取云端房源）
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        Task { await syncCloudHouses() }
+                    } label: {
+                        Image(systemName: "arrow.triangle.2.circlepath")
+                    }
+                    .disabled(isSelecting)
+                }
                 // v1.7：房源设置已合并进主 App 设置页，左上角设置按钮移除（无独立设置入口）
                 ToolbarItem(placement: .topBarTrailing) {
                     if isSelecting {
@@ -485,6 +494,10 @@ struct HouseListView: View {
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)
                 .background(AppTheme.background)
+                // v1.19：下拉刷新 = 从云端拉取房源（与左上角手动同步同效果）
+                .refreshable {
+                    await syncCloudHouses()
+                }
             }
         }
         // v1.21：多选模式底部操作栏（v1.12：增加批量已租 / 批量删除，分享逻辑保留不动）
@@ -604,11 +617,93 @@ struct HouseListView: View {
 
     /// v1.11：卡片左滑状态切换按钮——待租→已租、已租→待租，按当前状态动态显示并反向切换。
     /// 默认列表筛选口径为「待租」，切换为已租后该房源从当前列表消失；已租筛选下左滑可一键改回待租。
+    /// v1.19：切换时刷新最后更新时间，并把新状态同步到云端账本（共享房源）。
     private func toggleHouseStatus(_ house: House) {
         guard let ctx = houseModelContext else { return }
         house.status = (house.status == .rented) ? .available : .rented
+        house.lastUpdatedAt = Date()
         try? ctx.save()
+        pushHouseToCloud(house)
         NotificationCenter.default.post(name: Self.houseStoreChanged, object: nil)
+    }
+
+    // MARK: - v1.19 云端房源同步（共享房源）
+
+    /// 把单套房源推送到云端账本（读改写，同房号覆盖）。无云存储配置则跳过（仅本地）。
+    private func pushHouseToCloud(_ house: House) {
+        guard let config = CosConfig.load() else { return }
+        let record = CloudHouseSync.record(from: house, username: CloudUser.username)
+        Task {
+            do {
+                try await CloudHouseSync.upload(record: record, config: config)
+                await MainActor.run {
+                    house.cloudStatus = .both
+                    try? houseModelContext?.save()
+                }
+                BackupLogStore.log(category: "房源", action: "同步云端", result: "成功", detail: house.displayRoomNo)
+            } catch {
+                BackupLogStore.log(category: "房源", action: "同步云端", result: "失败", detail: "\(house.displayRoomNo)：\(error.localizedDescription)")
+            }
+        }
+    }
+
+    /// 从云端拉取房源账本并同步到本地（下拉刷新 / 左上角手动同步同效果）。
+    /// 规则：云端有本地没有 → 建纯云端占位（只读，本机无媒体）；云端比本地新 → 覆盖文字字段保留媒体、标双端；
+    /// 本地有云端没有 → 补推到云端（标双端）。
+    private func syncCloudHouses() async {
+        let config = CosConfig.load()
+        guard let config else {
+            infoMessage = "未配置云存储，无法同步云端房源"; showInfoAlert = true
+            return
+        }
+        guard let ctx = houseModelContext else { return }
+        do {
+            let recs = try await CloudHouseSync.fetchAll(config: config)
+            await MainActor.run {
+                let local = (try? ctx.fetch(FetchDescriptor<House>())) ?? []
+                var localByKey: [String: House] = [:]
+                for h in local where !h.isTrashed { localByKey[h.mediaRoomKey] = h }
+                var localKeys = Set(localByKey.keys)
+                var uploaded = 0
+                for rec in recs {
+                    if let h = localByKey[rec.roomKey] {
+                        localKeys.remove(rec.roomKey)
+                        let cloudTime = rec.updatedAt
+                        if cloudTime > (h.lastUpdatedAt ?? h.updatedAt) {
+                            h.roomNo = rec.roomNo; h.tower = rec.tower; h.landlord = rec.landlord
+                            h.layout = rec.layout; h.price = rec.price; h.password = rec.password
+                            h.remark = rec.remark; h.statusRaw = rec.status
+                            h.lastUpdatedAt = cloudTime
+                        }
+                        h.cloudStatus = .both
+                    } else {
+                        // 纯云端占位（本机无媒体，只读）
+                        let h = House(
+                            roomNo: rec.roomNo, tower: rec.tower, landlord: rec.landlord,
+                            layout: rec.layout, price: rec.price, password: rec.password,
+                            remark: rec.remark, status: HouseStatus(rawValue: rec.status) ?? .available
+                        )
+                        h.lastUpdatedAt = rec.updatedAt
+                        h.cloudStatus = .cloud
+                        ctx.insert(h)
+                    }
+                }
+                // 本地有云端没有 → 补推云端（后台）
+                for key in localKeys {
+                    if let h = localByKey[key] {
+                        pushHouseToCloud(h); uploaded += 1
+                    }
+                }
+                try? ctx.save()
+                reloadHouses()
+            }
+            let msg = uploaded > 0 ? "已同步云端 \(recs.count) 套，并补传本地 \(uploaded) 套" : "已同步云端房源 \(recs.count) 套"
+            infoMessage = msg; showInfoAlert = true
+            BackupLogStore.log(category: "同步", action: "同步云端房源", result: "成功", detail: msg)
+        } catch {
+            infoMessage = "同步失败：\(error.localizedDescription)"; showInfoAlert = true
+            BackupLogStore.log(category: "同步", action: "同步云端房源", result: "失败", detail: error.localizedDescription)
+        }
     }
 
     // MARK: - v1.12 多选批量操作（批量已租 / 批量删除）
