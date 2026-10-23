@@ -590,7 +590,7 @@ struct HouseDetailView: View {
     /// 手动下载：把云端 h/<房号>/ 的媒体拉到本地（纯云端房源专用）
     private func downloadHouseToLocal() {
         guard let config = CosConfig.load() else {
-            cloudDeleteMessage = "未配置云存储，无法下载云端房源"; showCloudDeleteAlert = true
+            cloudDeleteMessage = "未配置云存储，无法下载云端房源";
             return
         }
         isDownloading = true
@@ -607,12 +607,12 @@ struct HouseDetailView: View {
                     house.cloudStatus = .both
                     try? modelContext.save()
                     isDownloading = false
-                    cloudDeleteMessage = "已下载 \(files.count) 个媒体到本地，现在可以编辑、分享或一键保存了。"; showCloudDeleteAlert = true
+                    cloudDeleteMessage = "已下载 \(files.count) 个媒体到本地，现在可以编辑、分享或一键保存了。";
                 }
             } catch {
                 await MainActor.run {
                     isDownloading = false
-                    cloudDeleteMessage = "下载失败：\(error.localizedDescription)"; showCloudDeleteAlert = true
+                    cloudDeleteMessage = "下载失败：\(error.localizedDescription)";
                 }
             }
         }
@@ -639,12 +639,12 @@ struct HouseDetailView: View {
                     house.cloudStatus = .both
                     try? modelContext.save()
                     isDownloading = false
-                    cloudDeleteMessage = "云端房源已自动下载到本地，请再点一次刚才的操作。"; showCloudDeleteAlert = true
+                    cloudDeleteMessage = "云端房源已自动下载到本地，请再点一次刚才的操作。";
                 }
             } catch {
                 await MainActor.run {
                     isDownloading = false
-                    cloudDeleteMessage = "下载失败：\(error.localizedDescription)"; showCloudDeleteAlert = true
+                    cloudDeleteMessage = "下载失败：\(error.localizedDescription)";
                 }
             }
         }
