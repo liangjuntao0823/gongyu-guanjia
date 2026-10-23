@@ -879,15 +879,17 @@ struct BackupLogsView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var logs = BackupLogStore.all()
     @State private var exportTip: String?
+    // v1.19：日志搜索
+    @State private var searchText = ""
 
     var body: some View {
         NavigationStack {
             List {
-                if logs.isEmpty {
-                    Text("暂无操作日志")
+                if filteredLogs.isEmpty {
+                    Text(logs.isEmpty ? "暂无操作日志" : "没有匹配的日志")
                         .foregroundColor(.secondary)
                 } else {
-                    ForEach(Array(logs.enumerated()), id: \.offset) { _, entry in
+                    ForEach(Array(filteredLogs.enumerated()), id: \.offset) { _, entry in
                         VStack(alignment: .leading, spacing: 3) {
                             HStack {
                                 Text(entry.category)
@@ -907,15 +909,24 @@ struct BackupLogsView: View {
                             Text(entry.detail.isEmpty ? entry.result : entry.detail)
                                 .font(.footnote)
                                 .foregroundColor(.secondary)
-                            if !entry.checksum.isEmpty {
-                                Text("校验和：\(entry.checksum.prefix(12))…")
-                                    .font(.caption2)
-                                    .foregroundColor(.secondary)
+                            HStack(spacing: 8) {
+                                // v1.19：显示操作者用户名（多用户区分）
+                                if let name = entry.username, !name.isEmpty {
+                                    Text("操作者：\(name)")
+                                        .font(.caption2)
+                                        .foregroundColor(.secondary)
+                                }
+                                if !entry.checksum.isEmpty {
+                                    Text("校验和：\(entry.checksum.prefix(12))…")
+                                        .font(.caption2)
+                                        .foregroundColor(.secondary)
+                                }
                             }
                         }
                     }
                 }
             }
+            .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: "搜索日志（分类/动作/详情/操作者）")
             .navigationTitle("操作日志")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -940,6 +951,19 @@ struct BackupLogsView: View {
         }
     }
 
+    /// v1.19：搜索过滤（分类/动作/详情/操作者/结果）
+    private var filteredLogs: [BackupLogEntry] {
+        let q = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty else { return logs }
+        return logs.filter { entry in
+            entry.category.localizedCaseInsensitiveContains(q) ||
+            entry.action.localizedCaseInsensitiveContains(q) ||
+            entry.detail.localizedCaseInsensitiveContains(q) ||
+            entry.result.localizedCaseInsensitiveContains(q) ||
+            (entry.username ?? "").localizedCaseInsensitiveContains(q)
+        }
+    }
+
     /// v1.17 需求3：把操作日志导出为 txt，落盘到 app 根目录（Documents），命名「操作日志_导出日期.txt」
     private func exportLogs() {
         guard !logs.isEmpty else {
@@ -952,7 +976,9 @@ struct BackupLogsView: View {
         let fileName = "操作日志_\(df.string(from: Date())).txt"
         var lines = ["公寓管家 · 操作日志", "导出时间：\(Date())", "共 \(logs.count) 条", "------------------"]
         for entry in logs {
-            lines.append("[\(entry.date.formatted(date: .numeric, time: .standard))] \(entry.category) / \(entry.action) / \(entry.result)")
+            var line = "[\(entry.date.formatted(date: .numeric, time: .standard))] \(entry.category) / \(entry.action) / \(entry.result)"
+            if let name = entry.username, !name.isEmpty { line += " / 操作者：\(name)" }
+            lines.append(line)
             if !entry.detail.isEmpty { lines.append("   详情：\(entry.detail)") }
             if !entry.checksum.isEmpty { lines.append("   校验和：\(entry.checksum)") }
             lines.append("")

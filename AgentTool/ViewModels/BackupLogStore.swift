@@ -5,18 +5,19 @@ import Foundation
 
 struct BackupLogEntry: Codable {
     var date: Date
-    var category: String     // 备份 / 恢复 / 上传 / 删除 / 同步
+    var category: String     // 备份 / 恢复 / 上传 / 删除 / 同步 / 房源 / 成交 / 收租 / 水电 ...
     var action: String       // 快速备份 / 全量备份 / 恢复完成 / 上传成功 等
     var result: String       // 成功 / 失败
     var detail: String       // 统计摘要 / 错误信息
     var checksum: String     // sha1（zip 或 JSON 数据），失败时为空
+    var username: String?    // v1.19：操作者用户名（云端/多用户操作显示是谁）
 }
 
 enum BackupLogStore {
     private static let key = "backupLogs.v1"
-    private static let maxCount = 200
-    /// v1.13 需求8：日志只保留最近 30 天
-    private static let retentionDays = 30
+    private static let maxCount = 500
+    /// v1.13 需求8：日志只保留最近 30 天；v1.19 需求：改为 45 天
+    private static let retentionDays = 45
 
     static func all() -> [BackupLogEntry] {
         guard let data = UserDefaults.standard.data(forKey: key),
@@ -24,16 +25,23 @@ enum BackupLogStore {
         return list.sorted { $0.date > $1.date }
     }
 
-    static func log(category: String, action: String, result: String, detail: String = "", checksum: String = "") {
+    static func log(category: String, action: String, result: String, detail: String = "", checksum: String = "", username: String? = nil) {
         var list = all()
-        list.insert(BackupLogEntry(date: Date(), category: category, action: action, result: result, detail: detail, checksum: checksum), at: 0)
-        // v1.13 需求8：超过一个月的日志自动清理
+        let name = username ?? CloudUser.username
+        list.insert(BackupLogEntry(date: Date(), category: category, action: action, result: result, detail: detail, checksum: checksum,
+                                   username: name.isEmpty ? nil : name), at: 0)
+        // v1.13 需求8：超过保留天数的日志自动清理
         let cutoff = Calendar.current.date(byAdding: .day, value: -retentionDays, to: Date()) ?? Date()
         list = list.filter { $0.date >= cutoff }
         if list.count > maxCount { list = Array(list.prefix(maxCount)) }
         if let data = try? JSONEncoder().encode(list) {
             UserDefaults.standard.set(data, forKey: key)
         }
+    }
+
+    /// v1.19：日志占用空间（字节），设置页展示用
+    static func sizeBytes() -> Int {
+        UserDefaults.standard.data(forKey: key)?.count ?? 0
     }
 
     static func clear() {
