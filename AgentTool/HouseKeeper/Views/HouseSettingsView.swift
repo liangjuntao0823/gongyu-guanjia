@@ -174,6 +174,7 @@ struct CosConfigView: View {
     @State private var secretId = ""
     @State private var secretKey = ""
     @State private var customDomain = ""
+    @State private var functionURL = ""   // v1.18：云函数地址（后台网址），管理后台入口走此地址
     @State private var savedTip: String?
     @State private var isVerifying = false
     // v1.34：文件备份 / 恢复 + 清空配置（v1.35：备份直写「备份」文件夹；v1.36：恢复改为列表选择）
@@ -194,6 +195,7 @@ struct CosConfigView: View {
         _secretId = State(initialValue: i)
         _secretKey = State(initialValue: k)
         _customDomain = State(initialValue: d)
+        _functionURL = State(initialValue: CloudConfig.functionURL)
     }
 
     var body: some View {
@@ -203,6 +205,26 @@ struct CosConfigView: View {
                 LabeledContent("有效期", value: "长期有效（不自动过期）")
             } footer: {
                 Text("分享时 App 会把该房源的图片和视频上传到腾讯云 COS，生成一个链接卡片发给微信好友；好友点开卡片即可查看，链接长期有效。")
+            }
+
+            // v1.18：云函数后台——管理后台网址（可设置）、后台口令、部署包下载
+            Section("云函数后台") {
+                TextField("云函数地址（后台网址）", text: $functionURL)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .keyboardType(.URL)
+                NavigationLink {
+                    AdminPasswordView()
+                } label: {
+                    Label("后台口令", systemImage: "lock")
+                }
+                Button {
+                    downloadDeployPack()
+                } label: {
+                    Label("下载云端部署包（zip）", systemImage: "square.and.arrow.down")
+                }
+            } footer: {
+                Text("云函数地址即管理后台网页的网址。给别的房东用：导出下方部署包，让他在自己的腾讯云部署，再把他的云函数地址填到这里，App 首页「管理后台」就会打开他的后台。")
             }
 
             Section("腾讯云 COS 配置") {
@@ -301,7 +323,7 @@ struct CosConfigView: View {
                     .foregroundColor(.secondary)
             }
         }
-        .navigationTitle("远程配置")
+        .navigationTitle("云端配置")
         .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $showRestoreList) {
             ConfigRestoreListView(
@@ -348,6 +370,10 @@ struct CosConfigView: View {
         secretId = secretId.trimmingCharacters(in: trimSet)
         secretKey = secretKey.trimmingCharacters(in: trimSet)
         customDomain = customDomain.trimmingCharacters(in: trimSet)
+        functionURL = functionURL.trimmingCharacters(in: trimSet)
+        if !functionURL.isEmpty {
+            CloudConfig.functionURL = functionURL
+        }
 
         // 1. 写入钥匙串：任一项写失败都要明确提示（v1.20 之前写入失败被静默吞掉）
         var allSaved = true
@@ -415,6 +441,26 @@ struct CosConfigView: View {
             savedTip = "配置备份成功 ✅\n文件已生成到：文件 App → 我的 iPhone → 公寓管家 → 备份 → CosConfig\n\(backupFileName)\n（随「备份」文件夹一起拷贝/共享即可留底）"
         } catch {
             savedTip = "生成备份文件失败：\(error.localizedDescription)"
+        }
+    }
+
+    /// v1.18：下载云端部署包——从 App 内导出 zip 到「备份」文件夹（内含 deploy.py 脚本 + 图文说明，给房东部署云端后台用）
+    private func downloadDeployPack() {
+        guard let url = Bundle.main.url(forResource: "云端部署包", withExtension: "zip") else {
+            savedTip = "未找到云端部署包资源，请确认安装的是最新版 App"
+            return
+        }
+        let dir = DataRoot.url().appendingPathComponent("备份", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let target = dir.appendingPathComponent("云端部署包.zip")
+        do {
+            if FileManager.default.fileExists(atPath: target.path) {
+                try? FileManager.default.removeItem(at: target)
+            }
+            try FileManager.default.copyItem(at: url, to: target)
+            savedTip = "云端部署包已导出到本地 ✅\n位置：文件 App → 公寓管家 → 备份 → 云端部署包.zip\n内含 deploy.py 部署脚本 + 图文说明，发给房东在电脑上解压运行即可在自己腾讯云部署后台。"
+        } catch {
+            savedTip = "导出失败：\(error.localizedDescription)"
         }
     }
 
