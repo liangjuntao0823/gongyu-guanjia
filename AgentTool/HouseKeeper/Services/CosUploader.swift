@@ -1731,9 +1731,9 @@ extension CosUploader {
         return data
     }
 
-    /// v1.36：分享记录云端化——读改写桶内 h/_share_records.json（追加当前分享；最多保留 500 条；失败不抛错，由调用方 try? 静默）
+    /// v1.36：分享记录云端化——读改写桶内分享记录（v1.24 改为按用户名隔离：h/_share_records_<用户名>.json，各用户只看自己发的分享）
     static func appendShareRecord(roomKey: String, displayRoomNo: String, mode: ShareMode, url: String, config: CosConfig) async throws {
-        let path = "h/_share_records.json"
+        let path = CloudUser.shareRecordPath
         var records: [[String: String]] = []
         if let data = try? await fetchObjectData(path: path, config: config),
            let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: String]] {
@@ -2224,7 +2224,7 @@ struct AdminDashboardView: View {
                             }
                         }
                     } footer: {
-                        Text("分享记录存于云端桶 h/_share_records.json，App 与网页后台共同读取。")
+                        Text("分享记录按用户名隔离存于云端桶（h/_share_records_<用户名>.json），各用户只看自己发的分享。")
                     }
                 }
                 .listStyle(.insetGrouped)
@@ -2245,7 +2245,9 @@ struct AdminDashboardView: View {
     private func loadShares() {
         shares = []
         statsError = nil
-        guard let url = URL(string: "\(CloudConfig.functionURL)?act=shares&k=\(CloudConfig.passwordHash)") else {
+        // v1.24：按用户名读自己的分享记录（云函数 do_shares 按 u 过滤）
+        let u = (CloudUser.username).addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+        guard let url = URL(string: "\(CloudConfig.functionURL)?act=shares&k=\(CloudConfig.passwordHash)&u=\(u)") else {
             statsError = "云函数地址无效"
             return
         }
@@ -2562,6 +2564,17 @@ enum CloudUser {
         set { UserDefaults.standard.set(newValue, forKey: key) }
     }
     static var displayName: String { username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "未设置" : username }
+    /// v1.24：多用户数据隔离——用户名不设默认（默认空，不预填「涛」），强制用户自行设置。
+    /// 隔离路径里空用户名用「未设置」占位，绝不落到公共前缀（避免不同设备误共用同一目录互相覆盖）。
+    /// 返回去首尾空白的用户名；为空返回「未设置」。
+    static var safeName: String {
+        let t = username.trimmingCharacters(in: .whitespacesAndNewlines)
+        return t.isEmpty ? "未设置" : t
+    }
+    /// 云端备份隔离前缀：backups/<用户名>/（媒体镜像 backups/media/ 去重共享，不含隐私）
+    static var backupPrefix: String { "backups/\(safeName)/" }
+    /// 分享记录隔离路径：h/_share_records_<用户名>.json（各用户只看自己的分享）
+    static var shareRecordPath: String { "h/_share_records_\(safeName).json" }
 }
 
 // MARK: - v1.37 云端操作记录（操作日志云端区）

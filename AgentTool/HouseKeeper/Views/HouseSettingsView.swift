@@ -490,7 +490,11 @@ struct CosConfigView: View {
         Task {
             do {
                 let hostUsed = try await CosUploader.verifyConnection(config: config)
-                savedTip = "配置正确：云存储连接成功 ✅\n已保存地域：\(region)\n实际使用域名：\(hostUsed)\n现在可以去详情页「分享」生成卡片链接"
+                // v1.24：多用户隔离——云端模式若没设用户名，提醒先设置（备份/分享按用户名隔离，未设名统一落到「未设置」，避免误覆盖）
+                let unameTip = CloudUser.username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    ? "\n⚠️ 还没设置用户名：云端备份/分享会归到「未设置」名下，建议在下方「多用户」填写自己的用户名，多人共用时好区分"
+                    : ""
+                savedTip = "配置正确：云存储连接成功 ✅\n已保存地域：\(region)\n实际使用域名：\(hostUsed)\n现在可以去详情页「分享」生成卡片链接\(unameTip)"
             } catch {
                 savedTip = "验证失败：\(error.localizedDescription)"
             }

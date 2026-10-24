@@ -12,8 +12,10 @@ final class CloudBackupService {
     static let shared = CloudBackupService()
     private init() {}
 
-    static let cloudBackupPrefix = "backups/"          // 备份 zip 云端目录
-    static let cloudMediaPrefix = "backups/media/"     // 媒体镜像云端目录（按 sha1 去重）
+    // v1.24 多用户隔离：备份 zip 按用户名分目录 backups/<用户名>/，各用户只看得到自己的备份；
+    // 媒体镜像 backups/media/ 按 sha1 去重共享（不含隐私，保留全局）。
+    static var cloudBackupPrefix: String { CloudUser.backupPrefix }     // 备份 zip 云端目录（按用户隔离）
+    static let cloudMediaPrefix = "backups/media/"                      // 媒体镜像云端目录（按 sha1 去重，全局共享）
 
     // MARK: - 云端记录（本地权威清单）
 
@@ -24,7 +26,8 @@ final class CloudBackupService {
         var isAuto: Bool
     }
 
-    private static let recordsKey = "cloudBackupRecords.v1"
+    // v1.24：本地权威记录按用户名分 key（切用户名互不串），空名用「未设置」占位
+    private static var recordsKey: String { "cloudBackupRecords.\(CloudUser.safeName)" }
 
     static func cloudRecords() -> [CloudRecord] {
         guard let data = UserDefaults.standard.data(forKey: recordsKey),
@@ -63,7 +66,8 @@ final class CloudBackupService {
 
     // MARK: - 待上传重试队列（断网/被系统杀死后下次启动自动重试）
 
-    private static let pendingKey = "cloudBackupPending.v1"
+    // v1.24：待上传重试队列也按用户名分 key
+    private static var pendingKey: String { "cloudBackupPending.\(CloudUser.safeName)" }
 
     static func pendingUploadNames() -> [String] {
         UserDefaults.standard.stringArray(forKey: pendingKey) ?? []
