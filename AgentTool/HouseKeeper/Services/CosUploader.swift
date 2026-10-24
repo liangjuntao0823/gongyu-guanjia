@@ -21,6 +21,7 @@ enum KeychainKey {
     static let customDomain = "cos.customDomain"   // v1.19：自定义域名（可空），空 = 用 COS 默认域名
     static let shareName = "share.name"            // v1.21：分享名片-姓名（可空，空 = 梁涛）
     static let sharePhone = "share.phone"          // v1.21：分享名片-电话（可空，空 = 13288251132）
+    static let adminPassword = "cloud.adminPassword"  // v1.40：后台口令改存钥匙串（重装 App 不丢，避免云端后台 401）
 }
 
 enum KeychainStore {
@@ -207,10 +208,9 @@ enum CosUploader {
         // v1.20：微信渲染卡片必须走自定义域名；没填就不生成链接，直接告诉用户去哪填
         guard !config.customDomain.isEmpty else { throw CosError.customDomainMissing }
 
-        // 0. 缓存命中（按模式）：媒体清单、房源信息、COS 配置（含自定义域名）都没变化 → 直接复用上次链接，零上传
-        // v1.23：压缩开关也纳入缓存校验——开关变化 → 旧缓存失效 → 重新压缩上传
-        // v1.25：HTML 模板版本纳入校验——模板改动 → 旧缓存失效 → 重新生成新页面（避免改设计后还用旧链接）
-        // v1.27：二维码是否存在（qrcodeSet）纳入校验——设置/清除二维码后旧缓存失效重新生成
+        // 0. 缓存命中（按模式）：v1.40 第7点简化——用户私有目录里已有缓存且关键渲染参数
+        //    （桶/域名/压缩开关/模板版本/二维码/水印）未变 → 直接复用上次链接，零上传；
+        //    不再逐项比对媒体清单与房源信息（媒体新增走下方增量上传；信息变化只重生成页面，不重复传媒体）
         let compressOnShare = shareCompressionEnabled
         let hasQR = QrcodeStore.exists()
         if let cached = ShareCacheStore.load(roomKey: roomKey, mode: mode.rawValue),
@@ -221,8 +221,6 @@ enum CosUploader {
            (cached.templateVersion ?? 0) == htmlTemplateVersion,
            (cached.qrcodeSet ?? false) == hasQR,
            (cached.watermarkHash ?? "") == Self.watermarkHash(WatermarkSettingsStore.current),
-           Set(cached.mediaFiles) == Set(mediaFiles),
-           cached.info == info,
            let cachedURL = URL(string: cached.shareURL) {
             progress?(1.0)
             return cachedURL
@@ -256,6 +254,8 @@ enum CosUploader {
         // v1.23：开启「分享时压缩」开关 → 视频压到 720p（H.264 mp4）、图片轻压缩（长边≤1600 JPEG q0.8）后再上传
         // v1.25：视频封面改为独立首帧图（vthumb.jpg）——封面不再用视频 URL 当背景图，彻底避免微信预取视频流；
         //   video 标签无 src 无 poster，微信绝无自动播放的可能，只有点击封面才注入 src 播放
+        // v1.40 第2点：上传前先探测桶内是否已有该媒体（HEAD），已有则跳过上传直接引用——换机/清缓存后不再重复覆盖桶内原文件
+        // v1.40 第6点：H5 页面/封面/视频首帧图/二维码全部改到用户私有目录 users/<用户名>/，只有房源原始媒体留在共享区 h/<房号>/
         var videoTags: [String] = []
         var imageAbsURLs: [String] = []
         for item in ordered {
@@ -264,35 +264,51 @@ enum CosUploader {
             let remoteName = isVideo ? cloudVideoName(for: item.name) : item.name
             let remotePath = "h/\(roomKey)/\(remoteName)"
             if toUpload.contains(item) {
-                let url = MediaStore.url(for: item.name, roomKey: roomKey)
-                guard FileManager.default.fileExists(atPath: url.path) else { continue }
-                var data = try Data(contentsOf: url)
-                var contentType = mimeType(for: item.kind, name: remoteName)
-                if isVideo {
-                    // v1.29：无论压缩开关，视频一律转 mp4 上传——安卓微信对 .mov/QuickTime 容器支持差，
-                    // mp4（H.264+AAC）iOS/安卓通吃；压缩开关开 → 720p，关 → 原质量转封装（不重编码，秒级）
-                    if let mp4 = await uploadVideoData(from: url, compress: compressOnShare) {
-                        data = mp4
-                        contentType = "video/mp4"
+                // v1.40：桶内已存在同一对象 → 跳过上传（复用），不重复覆盖
+                if await remoteObjectExists(path: remotePath, config: config) == false {
+                    let url = MediaStore.url(for: item.name, roomKey: roomKey)
+                    guard FileManager.default.fileExists(atPath: url.path) else { continue }
+                    var data = try Data(contentsOf: url)
+                    var contentType = mimeType(for: item.kind, name: remoteName)
+                    if isVideo {
+                        // v1.29：无论压缩开关，视频一律转 mp4 上传——安卓微信对 .mov/QuickTime 容器支持差，
+                        // mp4（H.264+AAC）iOS/安卓通吃；压缩开关开 → 720p，关 → 原质量转封装（不重编码，秒级）
+                        if let mp4 = await uploadVideoData(from: url, compress: compressOnShare) {
+                            data = mp4
+                            contentType = "video/mp4"
+                        }
+                    } else if compressOnShare, let compressed = compressedImageData(from: url) {
+                        data = compressed
+                        contentType = "image/jpeg"
                     }
-                } else if compressOnShare, let compressed = compressedImageData(from: url) {
-                    data = compressed
-                    contentType = "image/jpeg"
-                }
-                try await uploadWithProgress(data: data, to: remotePath, contentType: contentType, config: config) { p in
-                    // 媒体项自身进度占 1 个任务
-                    reportProgress(Double(p))
-                }
-                // v1.25：视频同时上传首帧封面图（几十 KB），页面封面用图片而非视频流
-                if isVideo, let thumbData = makeVideoThumbJPEG(from: url) {
-                    try? await upload(data: thumbData, to: "h/\(roomKey)/\(item.name).vthumb.jpg", contentType: "image/jpeg", config: config)
+                    do {
+                        try await uploadWithProgress(data: data, to: remotePath, contentType: contentType, config: config) { p in
+                            // 媒体项自身进度占 1 个任务
+                            reportProgress(Double(p))
+                        }
+                    } catch {
+                        // v1.40 第5点：上传失败入队，App 启动/回前台自动补传
+                        HouseMediaUploadQueue.enqueue(roomKey: roomKey, fileName: item.name, kind: item.kind)
+                        throw error
+                    }
                 }
                 completedTasks += 1
+            }
+            // v1.25/v1.40：视频首帧封面图——每个 H5 页面都重新生成上传（用户第 a2 点裁决：不检测云端/本地是否有，
+            // 因为创建房源时不会生成该缩略图，检测无意义）；路径改用户私有目录
+            if isVideo {
+                let thumbRemotePath = "\(CloudUser.sharePagePrefix)\(roomKey)/\(item.name).vthumb.jpg"
+                let localURL = MediaStore.url(for: item.name, roomKey: roomKey)
+                if FileManager.default.fileExists(atPath: localURL.path),
+                   let thumbData = makeVideoThumbJPEG(from: localURL) {
+                    try? await upload(data: thumbData, to: thumbRemotePath, contentType: "image/jpeg", config: config)
+                }
             }
             let absURL = try presignedGetURL(for: remotePath, expires: shareLinkExpires, config: config).absoluteString
             if isVideo {
                 // v1.25：video 无 src、无 poster、无 autoplay；封面用独立首帧图；点击封面 playVideo 才注入 src 并播放
-                let thumbURL = (try? presignedGetURL(for: "h/\(roomKey)/\(item.name).vthumb.jpg", expires: shareLinkExpires, config: config).absoluteString) ?? absURL
+                let thumbRemotePath = "\(CloudUser.sharePagePrefix)\(roomKey)/\(item.name).vthumb.jpg"
+                let thumbURL = (try? presignedGetURL(for: thumbRemotePath, expires: shareLinkExpires, config: config).absoluteString) ?? absURL
                 videoTags.append("<div class=\"vwrap\" onclick=\"playVideo(this,'\(absURL)')\"><div class=\"vthumb\" style=\"background-image:url('\(thumbURL)')\"></div><div class=\"vplay\">▶</div><video class=\"v\" controls controlsList=\"nodownload\" disablepictureinpicture playsinline webkit-playsinline preload=\"none\"></video></div>")
             } else {
                 imageAbsURLs.append(absURL)
@@ -301,10 +317,11 @@ enum CosUploader {
         guard !videoTags.isEmpty || !imageAbsURLs.isEmpty else { throw CosError.missingMedia }
 
         // 4. 压缩封面（v1.19）：第一张照片压缩成最长边 400px JPEG 上传为 h/<roomKey>/cover（两模式共用）
+        // v1.40 第6点：封面改存用户私有目录 users/<用户名>/shares/<房号>/cover（仅自己页面引用，微信 og:image 用签名 URL）
         var coverSrc = imageAbsURLs.first ?? ""
         if let firstImage = mediaFiles.first(where: { $0.kind == "image" }),
            let coverData = makeCoverJPEG(from: MediaStore.url(for: firstImage.name, roomKey: roomKey)) {
-            let coverPath = "h/\(roomKey)/cover"
+            let coverPath = "\(CloudUser.sharePagePrefix)\(roomKey)/cover"
             do {
                 try await uploadWithProgress(data: coverData, to: coverPath, contentType: "image/jpeg", config: config) { p in
                     reportProgress(Double(p))
@@ -316,21 +333,22 @@ enum CosUploader {
             completedTasks += 1
         }
 
-        // 4.1 名片微信二维码（v1.27）：设置页已上传时，压成小图覆盖写到 COS 固定路径 h/_qrcode/qr.jpg；
-        //     页面用固定路径签名 URL 引用 → 之后更换二维码，已发出的旧链接也自动显示新图
+        // 4.1 名片微信二维码（v1.27）：设置页已上传时，压成小图覆盖写到用户私有目录 users/<用户名>/qrcode.jpg；
+        //     v1.40 第6点：从公共 h/_qrcode/qr.jpg 迁移到用户目录，避免其他用户读到自己的二维码
         var qrSrc = ""
         if hasQR, let qrData = makeQRCodeJPEG() {
-            try? await uploadWithProgress(data: qrData, to: "h/_qrcode/qr.jpg", contentType: "image/jpeg", config: config) { p in
+            try? await uploadWithProgress(data: qrData, to: CloudUser.qrPath, contentType: "image/jpeg", config: config) { p in
                 reportProgress(Double(p))
             }
-            qrSrc = (try? presignedGetURL(for: "h/_qrcode/qr.jpg", expires: shareLinkExpires, config: config).absoluteString) ?? ""
+            qrSrc = (try? presignedGetURL(for: CloudUser.qrPath, expires: shareLinkExpires, config: config).absoluteString) ?? ""
             completedTasks += 1
         }
 
         // 5. 生成并上传分享页。v1.36：文件名=房号+模式+日期时间（空 app 无存量链接，直接换新命名）。
         //    链接追加版本参数 v（内容更新 → v 变 → 微信重新抓卡片）
+        //    v1.40 第6点：页面改存用户私有目录 users/<用户名>/shares/<房号>/
         let wm = Self.watermarkOverlayHTML(WatermarkSettingsStore.current)
-        let pagePath = "h/\(roomKey)/\(Self.safeFileName(info.displayRoomNo))_\(mode.modeLabel)_\(Self.shareTimeTag()).html"
+        let pagePath = "\(CloudUser.sharePagePrefix)\(roomKey)/\(Self.safeFileName(info.displayRoomNo))_\(mode.modeLabel)_\(Self.shareTimeTag()).html"
         let shareURL = try presignedGetURL(for: pagePath, expires: shareLinkExpires, config: config)
         let versionedURL = appendVersionParameter(shareURL, version: "\(Int(Date().timeIntervalSince1970))")
 
@@ -439,6 +457,8 @@ enum CosUploader {
         }
 
         // 1. 上传每套媒体（覆盖写，与单套分享共享 h/<roomKey>/<name> 路径）+ 每套封面
+        // v1.40 第2点：上传前先探测桶内是否已有该媒体（HEAD），已有则跳过上传直接引用
+        // v1.40 第6点：封面/视频首帧图/合集页/二维码全部改用户私有目录 users/<用户名>/
         var prepared: [PreparedRoom] = []
         for item in validRooms {
             let ordered = item.mediaFiles.sorted { lhs, rhs in
@@ -452,32 +472,46 @@ enum CosUploader {
                 let isVideo = m.kind == "video"
                 let remoteName = isVideo ? cloudVideoName(for: m.name) : m.name
                 let remotePath = "h/\(item.roomKey)/\(remoteName)"
-                let url = MediaStore.url(for: m.name, roomKey: item.roomKey)
-                guard FileManager.default.fileExists(atPath: url.path) else { continue }
-                var data = try Data(contentsOf: url)
-                var contentType = mimeType(for: m.kind, name: remoteName)
-                if isVideo {
-                    // v1.29：视频统一转 mp4 上传（安卓/微信可播）；压缩开 → 720p，关 → 原质量转封装
-                    if let mp4 = await uploadVideoData(from: url, compress: compressOnShare) {
-                        data = mp4
-                        contentType = "video/mp4"
+                if await remoteObjectExists(path: remotePath, config: config) == false {
+                    let url = MediaStore.url(for: m.name, roomKey: item.roomKey)
+                    guard FileManager.default.fileExists(atPath: url.path) else { continue }
+                    var data = try Data(contentsOf: url)
+                    var contentType = mimeType(for: m.kind, name: remoteName)
+                    if isVideo {
+                        // v1.29：视频统一转 mp4 上传（安卓/微信可播）；压缩开 → 720p，关 → 原质量转封装
+                        if let mp4 = await uploadVideoData(from: url, compress: compressOnShare) {
+                            data = mp4
+                            contentType = "video/mp4"
+                        }
+                    } else if compressOnShare, let compressed = compressedImageData(from: url) {
+                        data = compressed
+                        contentType = "image/jpeg"
                     }
-                } else if compressOnShare, let compressed = compressedImageData(from: url) {
-                    data = compressed
-                    contentType = "image/jpeg"
+                    do {
+                        try await uploadWithProgress(data: data, to: remotePath, contentType: contentType, config: config) { p in
+                            reportProgress(Double(p))
+                        }
+                    } catch {
+                        // v1.40 第5点：上传失败入队，App 启动/回前台自动补传
+                        HouseMediaUploadQueue.enqueue(roomKey: item.roomKey, fileName: m.name, kind: m.kind)
+                        throw error
+                    }
                 }
-                try await uploadWithProgress(data: data, to: remotePath, contentType: contentType, config: config) { p in
-                    reportProgress(Double(p))
-                }
-                // v1.25：视频同时上传首帧封面图（几十 KB），页面封面用图片而非视频流
-                if isVideo, let thumbData = makeVideoThumbJPEG(from: url) {
-                    try? await upload(data: thumbData, to: "h/\(item.roomKey)/\(m.name).vthumb.jpg", contentType: "image/jpeg", config: config)
+                // v1.25/v1.40：视频首帧封面图——每个 H5 页面都重新生成上传（不检测），路径改用户私有目录
+                if isVideo {
+                    let thumbRemotePath = "\(CloudUser.sharePagePrefix)\(item.roomKey)/\(m.name).vthumb.jpg"
+                    let localURL = MediaStore.url(for: m.name, roomKey: item.roomKey)
+                    if FileManager.default.fileExists(atPath: localURL.path),
+                       let thumbData = makeVideoThumbJPEG(from: localURL) {
+                        try? await upload(data: thumbData, to: thumbRemotePath, contentType: "image/jpeg", config: config)
+                    }
                 }
                 completedTasks += 1
                 let absURL = try presignedGetURL(for: remotePath, expires: shareLinkExpires, config: config).absoluteString
                 if isVideo {
                     // v1.25：video 无 src、无 poster、无 autoplay；封面用独立首帧图；点击封面 playVideo 才注入 src 并播放
-                    let thumbURL = (try? presignedGetURL(for: "h/\(item.roomKey)/\(m.name).vthumb.jpg", expires: shareLinkExpires, config: config).absoluteString) ?? absURL
+                    let thumbRemotePath = "\(CloudUser.sharePagePrefix)\(item.roomKey)/\(m.name).vthumb.jpg"
+                    let thumbURL = (try? presignedGetURL(for: thumbRemotePath, expires: shareLinkExpires, config: config).absoluteString) ?? absURL
                     videoTags.append("<div class=\"vwrap\" onclick=\"playVideo(this,'\(absURL)')\"><div class=\"vthumb\" style=\"background-image:url('\(thumbURL)')\"></div><div class=\"vplay\">▶</div><video class=\"v\" controls controlsList=\"nodownload\" disablepictureinpicture playsinline webkit-playsinline preload=\"none\"></video></div>")
                 } else {
                     imageAbsURLs.append(absURL)
@@ -486,7 +520,7 @@ enum CosUploader {
             var coverSrc = imageAbsURLs.first ?? ""
             if let firstImage = item.mediaFiles.first(where: { $0.kind == "image" }),
                let coverData = makeCoverJPEG(from: MediaStore.url(for: firstImage.name, roomKey: item.roomKey)) {
-                let coverPath = "h/\(item.roomKey)/cover"
+                let coverPath = "\(CloudUser.sharePagePrefix)\(item.roomKey)/cover"
                 do {
                     try await uploadWithProgress(data: coverData, to: coverPath, contentType: "image/jpeg", config: config) { p in
                         reportProgress(Double(p))
@@ -501,19 +535,20 @@ enum CosUploader {
         guard !prepared.isEmpty else { throw CosError.missingMedia }
 
         // 2. 生成并上传合集页。v1.36：文件名=首套房号+模式+日期时间（空 app 无存量链接，直接换新命名）
+        // v1.40 第6点：合集页改存用户私有目录 users/<用户名>/shares/_collection/
         let collectionCover = prepared.first?.coverSrc ?? ""
-        // v1.27：名片微信二维码——固定路径覆盖写，旧合集链接自动显示新二维码
+        // v1.27/v1.40：名片微信二维码——用户私有目录覆盖写，旧合集链接自动显示新二维码
         var qrSrc = ""
         if hasQR, let qrData = makeQRCodeJPEG() {
-            try? await uploadWithProgress(data: qrData, to: "h/_qrcode/qr.jpg", contentType: "image/jpeg", config: config) { p in
+            try? await uploadWithProgress(data: qrData, to: CloudUser.qrPath, contentType: "image/jpeg", config: config) { p in
                 reportProgress(Double(p))
             }
-            qrSrc = (try? presignedGetURL(for: "h/_qrcode/qr.jpg", expires: shareLinkExpires, config: config).absoluteString) ?? ""
+            qrSrc = (try? presignedGetURL(for: CloudUser.qrPath, expires: shareLinkExpires, config: config).absoluteString) ?? ""
             completedTasks += 1
         }
         let wm = Self.watermarkOverlayHTML(WatermarkSettingsStore.current)
         let firstRoomLabel = prepared.first?.item.displayRoomNo ?? "合集"
-        let pagePath = "h/_collection/\(Self.safeFileName(firstRoomLabel))_\(mode.modeLabel)_\(Self.shareTimeTag()).html"
+        let pagePath = "\(CloudUser.sharePagePrefix)_collection/\(Self.safeFileName(firstRoomLabel))_\(mode.modeLabel)_\(Self.shareTimeTag()).html"
         let html = buildCollectionHTML(rooms: prepared, mode: mode, name: name, phone: phone, coverSrc: collectionCover, qrSrc: qrSrc,
                                        wm: wm, trackScript: Self.cloudTrackScript(room: firstRoomLabel, mode: mode.modeLabel))
         try await uploadWithProgress(data: Data(html.utf8), to: pagePath, contentType: "text/html; charset=utf-8", config: config) { p in
@@ -1203,10 +1238,55 @@ enum CosUploader {
         }
     }
 
+    /// v1.40 第2点：HEAD 探测桶内对象是否存在（省流量，不下载对象体）
+    static func remoteObjectExists(path: String, config: CosConfig) async -> Bool {
+        guard let url = try? presignedURL(for: path, method: "HEAD", expires: 300, headers: [], config: config) else { return false }
+        var request = URLRequest(url: url)
+        request.httpMethod = "HEAD"
+        do {
+            let (_, response) = try await URLSession.shared.data(for: request)
+            if let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) {
+                return true
+            }
+            return false
+        } catch {
+            return false
+        }
+    }
+
+    /// v1.40 第5点：上传单个房源媒体到共享区 h/<房号>/（图片直传；视频转 mp4 + 用户区首帧图）。
+    /// 供 HouseMediaUploadQueue 自动补传；与 shareCard 内媒体上传逻辑保持一致。
+    static func uploadHouseMedia(fileName: String, kind: String, roomKey: String, config: CosConfig, compress: Bool) async throws {
+        let url = MediaStore.url(for: fileName, roomKey: roomKey)
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            throw CosError.uploadFailed("本地文件不存在")
+        }
+        let isVideo = kind == "video"
+        let remoteName = isVideo ? cloudVideoName(for: fileName) : fileName
+        let remotePath = "h/\(roomKey)/\(remoteName)"
+        // 桶内已存在 → 幂等跳过（不重复覆盖）
+        if await remoteObjectExists(path: remotePath, config: config) { return }
+        var data = try Data(contentsOf: url)
+        var contentType = mimeType(for: kind, name: remoteName)
+        if isVideo {
+            if let mp4 = await uploadVideoData(from: url, compress: compress) {
+                data = mp4
+                contentType = "video/mp4"
+            }
+        } else if compress, let compressed = compressedImageData(from: url) {
+            data = compressed
+            contentType = "image/jpeg"
+        }
+        try await upload(data: data, to: remotePath, contentType: contentType, config: config)
+        // 视频同步补用户区首帧图（每次重新生成，与分享逻辑一致）
+        if isVideo, let thumbData = makeVideoThumbJPEG(from: url) {
+            try? await upload(data: thumbData, to: "\(CloudUser.sharePagePrefix)\(roomKey)/\(fileName).vthumb.jpg", contentType: "image/jpeg", config: config)
+        }
+    }
+
     /// v1.13 需求13：带字节级进度的上传（房源分享上传到桶时显示百分比）。
     /// progress 0~1 回调（后台线程回调，调用方自行切主线程）。
-    internal static func uploadWithProgress(data: Data, to remotePath: String, contentType: String, config: CosConfig, progress: @escaping (Double) -> Void) async throws {
-        let url = try presignedPutURL(for: remotePath, contentType: contentType, config: config)
+    internal static func uploadWithProgress(data: Data, to remotePath: String, contentType: String, config: CosConfig, progress: @escaping (Double) -> Void) async throws {        let url = try presignedPutURL(for: remotePath, contentType: contentType, config: config)
         var request = URLRequest(url: url)
         request.httpMethod = "PUT"
         request.setValue(contentType, forHTTPHeaderField: "Content-Type")
@@ -1653,15 +1733,33 @@ enum WebCache {
 }
 
 enum CloudConfig {
-    static let defaultFunctionURL = "https://1511251056-csopw5c0jd.ap-hongkong.tencentscf.com"
+    // v1.40：云函数地址不再内置默认值——新装 App 的地址栏为空，由用户自行填写保存。
+    // 旧版默认地址仅供升级用户参考（若 UserDefaults 无值且钥匙串有旧值则读取兼容）。
     static var functionURL: String {
-        get { UserDefaults.standard.string(forKey: "cloud.functionURL") ?? defaultFunctionURL }
+        get {
+            // 兼容：v1.39 及更早版本把地址存在 UserDefaults；v1.40 起统一存 UserDefaults（非敏感）。
+            if let s = UserDefaults.standard.string(forKey: "cloud.functionURL"), !s.isEmpty { return s }
+            if let s = KeychainStore.load("cloud.functionURL"), !s.isEmpty { return s }
+            return ""
+        }
         set { UserDefaults.standard.set(newValue, forKey: "cloud.functionURL") }
     }
+    static func clearFunctionURL() {
+        UserDefaults.standard.removeObject(forKey: "cloud.functionURL")
+        _ = KeychainStore.save("", for: "cloud.functionURL")
+    }
     /// 管理后台口令（网页版登录；App 内免登录直接带哈希）。默认 12345678，可在设置页修改。
+    /// v1.40：改存钥匙串——重装 App 后 UserDefaults 清空但钥匙串保留，口令不丢，云端后台不会因口令回默认而 401。
     static var adminPassword: String {
-        get { UserDefaults.standard.string(forKey: "cloud.adminPassword") ?? "12345678" }
-        set { UserDefaults.standard.set(newValue, forKey: "cloud.adminPassword") }
+        get {
+            if let s = KeychainStore.load(KeychainKey.adminPassword), !s.isEmpty { return s }
+            if let s = UserDefaults.standard.string(forKey: "cloud.adminPassword"), !s.isEmpty {
+                _ = KeychainStore.save(s, for: KeychainKey.adminPassword)
+                return s
+            }
+            return "12345678"
+        }
+        set { _ = KeychainStore.save(newValue, for: KeychainKey.adminPassword) }
     }
     static var passwordHash: String {
         let data = Data(adminPassword.utf8)
@@ -1731,12 +1829,18 @@ extension CosUploader {
         return data
     }
 
-    /// v1.36：分享记录云端化——读改写桶内分享记录（v1.24 改为按用户名隔离：h/_share_records_<用户名>.json，各用户只看自己发的分享）
+    /// v1.36：分享记录云端化——读改写桶内分享记录
+    /// v1.24 改为按用户名隔离：h/_share_records_<用户名>.json，各用户只看自己发的分享
+    /// v1.40 第6点：迁移到用户私有目录 users/<用户名>/share_records.json（读取兼容旧路径）
     static func appendShareRecord(roomKey: String, displayRoomNo: String, mode: ShareMode, url: String, config: CosConfig) async throws {
         let path = CloudUser.shareRecordPath
         var records: [[String: String]] = []
         if let data = try? await fetchObjectData(path: path, config: config),
            let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: String]] {
+            records = arr
+        } else if let data = try? await fetchObjectData(path: CloudUser.legacyShareRecordPath, config: config),
+                  let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: String]] {
+            // v1.40：旧路径有记录（升级前分享过）→ 先读取并随本次一并写入新路径，完成平滑迁移
             records = arr
         }
         let df = DateFormatter()
@@ -1752,6 +1856,15 @@ extension CosUploader {
         if records.count > 500 { records = Array(records.suffix(500)) }
         guard let json = try? JSONSerialization.data(withJSONObject: records) else { return }
         try await upload(data: json, to: path, contentType: "application/json", config: config)
+        // v1.40 B5：新路径写入成功后删除旧路径记录，避免桶里新旧两份重复（旧版 App 的兼容读取已废弃）
+        if let legacyURL = try? presignedURL(for: CloudUser.legacyShareRecordPath, method: "DELETE", expires: 600, headers: [], config: config) {
+            var req = URLRequest(url: legacyURL)
+            req.httpMethod = "DELETE"
+            let (_, resp) = try? await URLSession.shared.data(for: req)
+            if let http = resp as? HTTPURLResponse, http.statusCode == 200 || http.statusCode == 204 || http.statusCode == 404 {
+                // 删除成功或已不存在，均视为已清理
+            }
+        }
     }
 }
 
@@ -1788,8 +1901,12 @@ struct WatermarkSettingsView: View {
         Form {
             Section {
                 Toggle("分享页加水印", isOn: $enabled)
+                    .onChange(of: enabled) { _, newValue in
+                        // v1.40 第1点：开关即改即存——拨动立即生效，不再依赖「保存」按钮，避免误以为关不掉
+                        WatermarkSettingsStore.current = draft
+                    }
             } footer: {
-                Text("开启后，新生成的分享 H5 会在每张图片右下角叠加水印；已分享出去的旧链接不受影响。")
+                Text("开启后，新生成的分享 H5 会在每张图片右下角叠加水印；已分享出去的旧链接不受影响。关闭即保存，下次分享不带水印。")
             }
 
             Section("水印内容") {
@@ -1829,8 +1946,8 @@ struct WatermarkSettingsView: View {
                     savedFlash = true
                     dismiss()
                 }
-                Button("清除水印并恢复默认", role: .destructive) {
-                    enabled = true
+                Button("恢复默认样式", role: .destructive) {
+                    // v1.40 第1点：只重置文本与样式，不强制打开开关（此前「清除」把开关强制开成 true，用户以为关不掉）
                     text = WatermarkSettings.defaultText
                     fontSize = 14
                     opacity = 0.5
@@ -1842,7 +1959,7 @@ struct WatermarkSettingsView: View {
                     dismiss()
                 }
             } footer: {
-                Text("清除 = 恢复默认文本与样式；关闭开关后默认水印也失效。")
+                Text("恢复默认 = 重置水印文本与样式；开关状态保持不变。")
             }
         }
         .navigationTitle("分享水印")
@@ -2180,6 +2297,17 @@ struct AdminDashboardView: View {
         }
     }
 
+    /// v1.40 第4点（B4）：云函数请求失败的统一文案——401 明确提示后台口令不匹配，跳转设置页修改
+    private func cloudFunctionError(_ resp: URLResponse?, fallback: String) -> String {
+        if let http = resp as? HTTPURLResponse, http.statusCode == 401 {
+            return "后台口令不匹配（请到 设置→云端配置→后台口令 修改后重试）"
+        }
+        if let http = resp as? HTTPURLResponse {
+            return "云函数请求失败（HTTP \(http.statusCode)），请确认函数已部署且地址正确"
+        }
+        return fallback
+    }
+
     private func loadStats() {
         stats = nil
         statsError = nil
@@ -2190,7 +2318,7 @@ struct AdminDashboardView: View {
         URLSession.shared.dataTask(with: url) { data, resp, _ in
             guard let data = data,
                   let obj = try? JSONDecoder().decode(AdminStats.self, from: data), obj.ok else {
-                DispatchQueue.main.async { statsError = "云函数未返回有效数据（请确认函数已部署）" }
+                DispatchQueue.main.async { statsError = self.cloudFunctionError(resp, fallback: "云函数未返回有效数据（请确认函数已部署）") }
                 return
             }
             DispatchQueue.main.async { stats = obj }
@@ -2254,7 +2382,7 @@ struct AdminDashboardView: View {
         URLSession.shared.dataTask(with: url) { data, resp, _ in
             guard let data = data,
                   let obj = try? JSONDecoder().decode(AdminShares.self, from: data), obj.ok else {
-                DispatchQueue.main.async { statsError = "云函数未返回分享记录（请确认函数已部署）" }
+                DispatchQueue.main.async { statsError = self.cloudFunctionError(resp, fallback: "云函数未返回分享记录（请确认函数已部署）") }
                 return
             }
             DispatchQueue.main.async { shares = obj.records }
@@ -2439,7 +2567,7 @@ struct AdminDashboardView: View {
         URLSession.shared.dataTask(with: url) { data, _, _ in
             guard let data = data,
                   let obj = try? JSONDecoder().decode(AdminListResponse.self, from: data), obj.ok else {
-                DispatchQueue.main.async { bucketError = "云函数未返回桶数据（请确认函数已部署）"; bucketLoading = false }
+                DispatchQueue.main.async { bucketError = self.cloudFunctionError(resp, fallback: "云函数未返回桶数据（请确认函数已部署）"); bucketLoading = false }
                 return
             }
             let iso = ISO8601DateFormatter()
@@ -2466,9 +2594,9 @@ struct AdminDashboardView: View {
             usageError = "云函数地址无效"
             return
         }
-        URLSession.shared.dataTask(with: url) { data, _, _ in
+        URLSession.shared.dataTask(with: url) { data, resp, _ in
             guard let data = data, let obj = try? JSONDecoder().decode(UsageResponse.self, from: data), obj.ok else {
-                DispatchQueue.main.async { usageError = "用量加载失败（请确认函数已部署）" }
+                DispatchQueue.main.async { usageError = self.cloudFunctionError(resp, fallback: "用量加载失败（请确认函数已部署）") }
                 return
             }
             DispatchQueue.main.async { usage = obj }
@@ -2498,16 +2626,17 @@ struct AdminDashboardView: View {
         guard let config = CosConfig.load(), config.isValid else { return }
         let title: String
         let message: String
+        // v1.40 第12点：桶管理删除只删云端对象，本地文件一律保留（此前文案「本地与云端同步生效」误导）
         if entry.isDir {
-            title = "删除目录 \(entry.name.split(separator: "/").last.map(String.init) ?? entry.name)"
-            message = "将删除该目录下 \(entry.objectCount) 个对象，本地与云端同步生效，不可恢复。"
+            title = "删除云端目录 \(entry.name.split(separator: "/").last.map(String.init) ?? entry.name)"
+            message = "仅删除云端该目录下 \(entry.objectCount) 个对象，本机文件不受影响。删除后不可恢复，确认？"
         } else {
-            title = "删除文件 \(entry.name.split(separator: "/").last.map(String.init) ?? entry.name)"
-            message = "本地与云端同步生效，不可恢复。"
+            title = "删除云端文件 \(entry.name.split(separator: "/").last.map(String.init) ?? entry.name)"
+            message = "仅删除云端该对象，本机文件不受影响。删除后不可恢复，确认？"
         }
         let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: "取消", style: .cancel))
-        alert.addAction(UIAlertAction(title: "彻底删除", style: .destructive) { _ in
+        alert.addAction(UIAlertAction(title: "仅删云端", style: .destructive) { _ in
             Task {
                 do {
                     if entry.isDir {
@@ -2571,10 +2700,23 @@ enum CloudUser {
         let t = username.trimmingCharacters(in: .whitespacesAndNewlines)
         return t.isEmpty ? "未设置" : t
     }
-    /// 云端备份隔离前缀：backups/<用户名>/（媒体镜像 backups/media/ 去重共享，不含隐私）
-    static var backupPrefix: String { "backups/\(safeName)/" }
-    /// 分享记录隔离路径：h/_share_records_<用户名>.json（各用户只看自己的分享）
-    static var shareRecordPath: String { "h/_share_records_\(safeName).json" }
+    // MARK: v1.40 云端按用户名分目录（第6点：一个用户名一个文件夹，该用户名下所有私有数据都在里面）
+    /// 用户私有根目录：users/<用户名>/
+    static var userRootPrefix: String { "users/\(safeName)/" }
+    /// 用户私有分享产物（H5 页面 / 封面 / 视频首帧图）：users/<用户名>/shares/
+    static var sharePagePrefix: String { "users/\(safeName)/shares/" }
+    /// 用户私有名片二维码：users/<用户名>/qrcode.jpg（原公共 h/_qrcode/qr.jpg，避免他用户读到）
+    static var qrPath: String { "users/\(safeName)/qrcode.jpg" }
+    /// 云端备份隔离前缀：users/<用户名>/backups/（v1.40 从 backups/<用户名>/ 迁移，旧路径读取时兼容）
+    static var backupPrefix: String { "users/\(safeName)/backups/" }
+    /// 分享记录隔离路径：users/<用户名>/share_records.json（v1.40 从 h/_share_records_<用户名>.json 迁移，读取兼容旧路径）
+    static var shareRecordPath: String { "users/\(safeName)/share_records.json" }
+    /// v1.40：旧版分享记录路径（读取兼容，迁移期只读）
+    static var legacyShareRecordPath: String { "h/_share_records_\(safeName).json" }
+    /// v1.40：全量备份的媒体镜像（按 sha1 去重，v1.40 起收进用户目录）：users/<用户名>/media/
+    static var mediaMirrorPrefix: String { "users/\(safeName)/media/" }
+    /// v1.24：旧版媒体镜像前缀（读取兼容，迁移期只读；不再写入）
+    static var legacyMediaMirrorPrefix: String { "backups/media/" }
 }
 
 // MARK: - v1.37 云端操作记录（操作日志云端区）

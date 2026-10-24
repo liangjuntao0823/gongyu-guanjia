@@ -214,21 +214,46 @@ struct CosConfigView: View {
                 Text("分享时 App 会把该房源的图片和视频上传到腾讯云 COS，生成一个链接卡片发给微信好友；好友点开卡片即可查看，链接长期有效。")
             }
 
-            // v1.18：云函数后台——管理后台网址（可设置）、后台口令、部署包下载
+            // v1.18：云函数后台——管理后台网址（可设置）、后台口令、部署教程
             Section {
                 TextField("云函数地址（后台网址）", text: $functionURL)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                     .keyboardType(.URL)
+                // v1.40 第3点：地址独立「保存 / 验证 / 清空」——此前保存按钮依赖桶配置填全，
+                // 只填地址点不动、退出又回默认；现地址单独保存，另加验证与清空
+                HStack(spacing: 8) {
+                    Button {
+                        saveFunctionURL()
+                    } label: {
+                        Label("保存地址", systemImage: "checkmark.circle")
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(isVerifying)
+                    Button {
+                        verifyFunctionURL()
+                    } label: {
+                        Label(isVerifying ? "验证中…" : "验证地址", systemImage: "antenna.radiowaves.left.and.right")
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(isVerifying)
+                    Button {
+                        clearFunctionURL()
+                    } label: {
+                        Label("清空地址", systemImage: "xmark.circle")
+                    }
+                    .buttonStyle(.bordered)
+                }
                 NavigationLink {
                     AdminPasswordView()
                 } label: {
                     Label("后台口令", systemImage: "lock")
                 }
-                Button {
-                    downloadDeployPack()
+                // v1.40 第4点：部署包下载入口改为图文教程（教程内仍可下载部署包 zip）
+                NavigationLink {
+                    DeployGuideView()
                 } label: {
-                    Label("下载云端部署包（zip）", systemImage: "square.and.arrow.down")
+                    Label("云端部署图文教程", systemImage: "book")
                 }
                 // v1.38：网页后台每次改动（重新部署）后，点此刷新——清 App 网页缓存 + 换新版本戳，safari 打开的后台立即是最新版，无需重新构建 App
                 Button {
@@ -239,7 +264,7 @@ struct CosConfigView: View {
             } header: {
                 Text("云函数后台")
             } footer: {
-                Text("云函数地址即管理后台网页的网址。给别的房东用：导出下方部署包，让他在自己的腾讯云部署，再把他的云函数地址填到这里，App 首页「管理后台」就会打开他的后台。")
+                Text("云函数地址即管理后台网页的网址。地址可独立保存/验证/清空（验证会访问后台首页，不依赖口令）。给别的房东用：点「云端部署图文教程」按步骤部署，再把他的云函数地址填到这里。")
             }
 
             // v1.37：使用说明——单用户/多用户详细说明（展开块）+ 三端互通说明（已移到云端配置）
@@ -441,6 +466,49 @@ struct CosConfigView: View {
         }
     }
 
+    // v1.40 第3点：云函数地址独立保存（不再依赖桶配置填全）
+    private func saveFunctionURL() {
+        functionURL = functionURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        CloudConfig.functionURL = functionURL
+        savedTip = functionURL.isEmpty ? "云函数地址已清空" : "云函数地址已保存"
+    }
+
+    // v1.40 第3点：验证云函数地址——访问后台首页（act=admin 无需口令），200 = 部署正常
+    private func verifyFunctionURL() {
+        let urlText = functionURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !urlText.isEmpty else {
+            savedTip = "请先填写云函数地址"
+            return
+        }
+        CloudConfig.functionURL = urlText
+        guard let url = URL(string: "\(urlText)?act=admin") else {
+            savedTip = "地址格式不正确（应包含 https://）"
+            return
+        }
+        isVerifying = true
+        URLSession.shared.dataTask(with: url) { data, resp, err in
+            DispatchQueue.main.async {
+                self.isVerifying = false
+                if let http = resp as? HTTPURLResponse, http.statusCode == 200 {
+                    self.savedTip = "地址正确，后台可连接 ✅"
+                } else if let http = resp as? HTTPURLResponse {
+                    self.savedTip = "云函数返回 HTTP \(http.statusCode)，请确认函数已部署且地址完整（末尾带 .tencentscf.com）"
+                } else if let err = err {
+                    self.savedTip = "连接失败：\(err.localizedDescription)"
+                } else {
+                    self.savedTip = "连接失败，请检查网络与地址"
+                }
+            }
+        }.resume()
+    }
+
+    // v1.40 第3点：清空云函数地址（不再回退到旧默认值）
+    private func clearFunctionURL() {
+        CloudConfig.clearFunctionURL()
+        functionURL = ""
+        savedTip = "已清空云函数地址（新装状态）"
+    }
+
     private func saveAndVerify() {
         // 0. 统一去除首尾空格（粘贴带入空白会导致签名失败或地域识别异常）
         let trimSet = CharacterSet.whitespacesAndNewlines
@@ -531,12 +599,13 @@ struct CosConfigView: View {
     }
 
     /// v1.18：下载云端部署包——从 App 内导出 zip 到「备份」文件夹（内含 deploy.py 脚本 + 图文说明，给房东部署云端后台用）
+    /// v1.40 第4点：入口改为图文教程页内按钮；顺带修复路径（此前 DataRoot 已是「备份」，又拼了一层「备份」导致导到 备份/备份/）
     private func downloadDeployPack() {
         guard let url = Bundle.main.url(forResource: "云端部署包", withExtension: "zip") else {
             savedTip = "未找到云端部署包资源，请确认安装的是最新版 App"
             return
         }
-        let dir = DataRoot.url().appendingPathComponent("备份", isDirectory: true)
+        let dir = DataRoot.url()
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let target = dir.appendingPathComponent("云端部署包.zip")
         do {
@@ -724,6 +793,98 @@ struct CosConfigView: View {
 }
 
 // MARK: - 恢复配置（v1.36：列表式选择，替代系统文件选择器避免点击无反应）
+
+
+// MARK: - v1.40 第4点：云端部署图文教程（替代原「下载部署包 zip」入口；教程内仍可下载部署包）
+
+struct DeployGuideView: View {
+    @State private var tip: String?
+    @State private var showTip = false
+
+    private struct Step {
+        let icon: String
+        let title: String
+        let body: String
+    }
+
+    private let steps: [Step] = [
+        Step(icon: "person.crop.circle.badge.checkmark", title: "1. 准备腾讯云账号", body: "打开 cloud.tencent.com 注册并完成实名认证。新用户可先领取免费额度。"),
+        Step(icon: "function", title: "2. 开通云函数 SCF", body: "搜索「云函数 SCF」进入控制台，开通服务（按量付费，日常个人使用基本不产生费用）。"),
+        Step(icon: "square.and.arrow.down", title: "3. 下载部署包", body: "点下方「下载部署包」，把 zip 发到电脑（或 iPhone 上用文件 App 存着）。部署包内含 app.py、admin.html、deploy.py 和说明。"),
+        Step(icon: "plus.circle", title: "4. 创建函数并上传", body: "云函数控制台 → 函数服务 → 创建：运行环境选 Python 3，创建方式选「从头开始」；创建后进入函数 → 函数代码 → 上传 zip 部署包（覆盖 index.py 逻辑）。"),
+        Step(icon: "slider.horizontal.3", title: "5. 配置环境变量", body: "在函数「配置 → 环境变量」添加：BUCKET（存储桶名）、REGION（地域，如 ap-hongkong）、SECRET_ID、SECRET_KEY、PASSWORD（后台口令，默认 12345678）。保存后点「部署」。"),
+        Step(icon: "link", title: "6. 找到云函数地址", body: "函数详情页 → 「触发管理」→ 复制访问路径（形如 https://xxxx.ap-hongkong.tencentscf.com）。把完整地址填到 App「云端配置 → 云函数地址」，点「验证地址」。"),
+        Step(icon: "checkmark.seal", title: "7. 验证与使用", body: "验证提示「地址正确，后台可连接」即可。App 首页「管理后台」就能打开网页后台：看访问统计、分享记录、管理桶文件。"),
+        Step(icon: "arrow.triangle.2.circlepath", title: "8. 重新部署", body: "以后升级后台：把新版部署包 zip 重新上传并部署；部署完在 App 里点「刷新网页后台缓存」，后台立即是最新版，不用重新安装 App。")
+    ]
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                ForEach(steps, id: \.title) { step in
+                    HStack(alignment: .top, spacing: 12) {
+                        Image(systemName: step.icon)
+                            .font(.system(size: 18))
+                            .foregroundColor(Color(red: 31/255, green: 58/255, blue: 95/255))
+                            .frame(width: 30)
+                            .padding(.top, 2)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(step.title)
+                                .font(.subheadline)
+                                .fontWeight(.semibold)
+                            Text(step.body)
+                                .font(.footnote)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                }
+                // 下载部署包 zip（教程核心操作）
+                Button {
+                    downloadPack()
+                } label: {
+                    Label("下载部署包（zip，含脚本+说明）", systemImage: "square.and.arrow.down")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(Color(red: 31/255, green: 58/255, blue: 95/255))
+                .padding(.top, 4)
+                Text("部署包导出到：文件 App → 公寓管家 → 备份 → 云端部署包.zip")
+                    .font(.footnote)
+                    .foregroundColor(.secondary)
+            }
+            .padding(16)
+        }
+        .navigationTitle("云端部署图文教程")
+        .navigationBarTitleDisplayMode(.inline)
+        .alert("提示", isPresented: $showTip) {
+            Button("好", role: .cancel) {}
+        } message: {
+            Text(tip ?? "")
+        }
+    }
+
+    private func downloadPack() {
+        guard let url = Bundle.main.url(forResource: "云端部署包", withExtension: "zip") else {
+            tip = "未找到云端部署包资源，请确认安装的是最新版 App"; showTip = true
+            return
+        }
+        let dir = DataRoot.url()
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let target = dir.appendingPathComponent("云端部署包.zip")
+        do {
+            if FileManager.default.fileExists(atPath: target.path) {
+                try? FileManager.default.removeItem(at: target)
+            }
+            try FileManager.default.copyItem(at: url, to: target)
+            tip = "云端部署包已导出到本地 ✅\n位置：文件 App → 公寓管家 → 备份 → 云端部署包.zip"
+            showTip = true
+        } catch {
+            tip = "导出失败：\(error.localizedDescription)"; showTip = true
+        }
+    }
+}
 
 /// 列出「备份」文件夹内的 .json 备份文件，点击直接恢复（与主 App 恢复备份同款列表写法）；
 /// 列表底部提供「从其他位置选择」用系统文件选择器兜底（保留自由选择路径的能力）

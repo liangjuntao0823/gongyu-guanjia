@@ -33,6 +33,13 @@ struct HouseListView: View {
     @State private var showShareModeAlert = false
     @State private var showInfoAlert = false
     @State private var infoMessage = ""
+    // v1.40 第11点：同步先弹变化确认（预览 → 确认 → 应用）
+    @State private var showSyncConfirm = false
+    @State private var pendingSyncRecs: [CloudHouseRecord] = []
+    @State private var pendingSyncAdded: [(roomNo: String, roomKey: String, mediaNames: [String])] = []
+    @State private var pendingSyncUpdated: [(roomNo: String, byUser: String)] = []
+    @State private var pendingSyncDeleted: [String] = []
+    @State private var pendingSyncPushed: [String] = []
     @State private var activeDialog: HouseListDialog?
 
     // v1.22：首页多选分享——一次选多套，生成【一个合集分享卡片】（好友点开链接即可查看全部 N 套），
@@ -192,6 +199,15 @@ struct HouseListView: View {
                 Button("好", role: .cancel) {}
             } message: {
                 Text(infoMessage)
+            }
+            // v1.40 第11点：同步变化确认——先展示变化详情，确认后才应用
+            .alert("发现云端变化", isPresented: $showSyncConfirm) {
+                Button("确认同步", role: .destructive) {
+                    Task { await applySyncPreview() }
+                }
+                Button("取消", role: .cancel) {}
+            } message: {
+                Text(syncChangeSummary())
             }
             .sheet(item: $currentShareStep, onDismiss: {
                 // 上一张分享面板关闭后自动弹下一张；全部发完自动退出多选
@@ -687,15 +703,85 @@ struct HouseListView: View {
         guard let ctx = houseModelContext else { return }
         do {
             let recs = try await CloudHouseSync.fetchAll(config: config)
-            var addedCount = 0, updatedCount = 0, deletedCount = 0, pushedCount = 0
-            var addedRoomNo: [String] = []   // v1.37：新增房号列表（弹窗/日志展示）
+            // v1.40 第11点：先算 diff 弹确认，确认后才应用（此前直接执行后才弹结果，用户无法拦截误覆盖）
+            var added: [(roomNo: String, roomKey: String, mediaNames: [String])] = []
+            var updated: [(roomNo: String, byUser: String)] = []
+            var deleted: [String] = []
+            var pushed: [String] = []
             var mediaRoomKeys: [String] = []
             await MainActor.run {
                 let local = (try? ctx.fetch(FetchDescriptor<House>())) ?? []
                 var localByKey: [String: House] = [:]
                 for h in local where !h.isTrashed { localByKey[h.mediaRoomKey] = h }
                 let cloudKeys = Set(recs.map { $0.roomKey })
-                // 增 / 改：云端账本里的每套
+                for rec in recs {
+                    if let h = localByKey[rec.roomKey] {
+                        if rec.updatedAt > (h.lastUpdatedAt ?? h.updatedAt) {
+                            // v1.40 B1：多人冲突提示——云端由他人更新时展示修改者
+                            updated.append((rec.roomNo, rec.updatedBy))
+                        }
+                        if !rec.mediaNames.isEmpty {
+                            let localFiles = MediaStore.existingFileNames(roomKey: h.mediaRoomKey)
+                            if !rec.mediaNames.allSatisfy({ localFiles.contains($0) }) {
+                                mediaRoomKeys.append(h.mediaRoomKey)
+                            }
+                        }
+                    } else {
+                        added.append((rec.roomNo, rec.roomKey, rec.mediaNames))
+                        if !rec.mediaNames.isEmpty { mediaRoomKeys.append(rec.roomKey) }
+                    }
+                }
+                for (key, h) in localByKey where !cloudKeys.contains(key) {
+                    if h.cloudStatus == .both || h.cloudStatus == .cloud {
+                        deleted.append(key)
+                    } else {
+                        pushed.append(key)
+                    }
+                }
+            }
+            let hasChange = !added.isEmpty || !updated.isEmpty || !deleted.isEmpty || !pushed.isEmpty || !mediaRoomKeys.isEmpty
+            guard hasChange else {
+                infoMessage = "已刷新，无变化"; showInfoAlert = true
+                return
+            }
+            pendingSyncRecs = recs
+            pendingSyncAdded = added
+            pendingSyncUpdated = updated
+            pendingSyncDeleted = deleted
+            pendingSyncPushed = pushed
+            showSyncConfirm = true
+        } catch {
+            infoMessage = "同步失败：\(error.localizedDescription)"; showInfoAlert = true
+            BackupLogStore.log(category: "同步", action: "同步云端房源", result: "失败", detail: error.localizedDescription, cloud: true)
+        }
+    }
+
+    /// v1.40 第11点：确认弹窗里的变化详情
+    private func syncChangeSummary() -> String {
+        var parts: [String] = []
+        if !pendingSyncAdded.isEmpty { parts.append("新增\(pendingSyncAdded.count)套：\(pendingSyncAdded.map { $0.roomNo }.prefix(8).joined(separator: "，"))") }
+        if !pendingSyncUpdated.isEmpty {
+            let upd = pendingSyncUpdated.prefix(8).map { "\($0.roomNo)（\($0.byUser.isEmpty ? "他人" : $0.byUser)改）" }.joined(separator: "，")
+            parts.append("更新\(pendingSyncUpdated.count)套：\(upd)")
+        }
+        if !pendingSyncDeleted.isEmpty { parts.append("云端已删\(pendingSyncDeleted.count)套，本地跟随删除") }
+        if !pendingSyncPushed.isEmpty { parts.append("本地新增\(pendingSyncPushed.count)套将补传云端") }
+        return parts.joined(separator: "\n") + "\n\n确认后才会同步；取消则本次不动任何数据。"
+    }
+
+    /// v1.40 第11点：确认后应用同步（原执行逻辑）
+    private func applySyncPreview() async {
+        guard let config = CosConfig.load(), let ctx = houseModelContext else { return }
+        let recs = pendingSyncRecs
+        do {
+            var addedCount = 0, updatedCount = 0, deletedCount = 0, pushedCount = 0
+            var addedRoomNo: [String] = []
+            var mediaRoomKeys: [String] = []
+            await MainActor.run {
+                let local = (try? ctx.fetch(FetchDescriptor<House>())) ?? []
+                var localByKey: [String: House] = [:]
+                for h in local where !h.isTrashed { localByKey[h.mediaRoomKey] = h }
+                let cloudKeys = Set(recs.map { $0.roomKey })
                 for rec in recs {
                     if let h = localByKey[rec.roomKey] {
                         if rec.updatedAt > (h.lastUpdatedAt ?? h.updatedAt) {
@@ -705,16 +791,14 @@ struct HouseListView: View {
                             h.lastUpdatedAt = rec.updatedAt
                             updatedCount += 1
                         }
-                        // 本地媒体缺失（目录实际文件对不上云端清单）但云端有媒体 → 下载（v1.37：按实际文件判断，手动删文件夹也能回补）
                         if !rec.mediaNames.isEmpty {
-                            let local = MediaStore.existingFileNames(roomKey: h.mediaRoomKey)
-                            if !rec.mediaNames.allSatisfy({ local.contains($0) }) {
+                            let localFiles = MediaStore.existingFileNames(roomKey: h.mediaRoomKey)
+                            if !rec.mediaNames.allSatisfy({ localFiles.contains($0) }) {
                                 mediaRoomKeys.append(h.mediaRoomKey)
                             }
                         }
                         h.cloudStatus = .both
                     } else {
-                        // 云端新增 → 建本地房源（先无媒体，稍后下载）
                         let h = House(
                             roomNo: rec.roomNo, tower: rec.tower, landlord: rec.landlord,
                             layout: rec.layout, price: rec.price, password: rec.password,
@@ -724,19 +808,16 @@ struct HouseListView: View {
                         h.cloudStatus = .cloud
                         ctx.insert(h)
                         addedCount += 1
-                        addedRoomNo.append(rec.roomNo)   // v1.37：记录新增房号
+                        addedRoomNo.append(rec.roomNo)
                         if !rec.mediaNames.isEmpty { mediaRoomKeys.append(h.mediaRoomKey) }
                     }
                 }
-                // 减：本地有、云端账本没有
                 for (key, h) in localByKey where !cloudKeys.contains(key) {
                     if h.cloudStatus == .both || h.cloudStatus == .cloud {
-                        // 来自云端的副本，云端已删 → 本地跟随删除
                         MediaStore.deleteHouseDirectory(roomKey: key)
                         ctx.delete(h)
                         deletedCount += 1
                     } else {
-                        // 纯本地未上传 → 补传云端
                         pushHouseToCloud(h)
                         pushedCount += 1
                     }
@@ -744,7 +825,6 @@ struct HouseListView: View {
                 try? ctx.save()
                 reloadHouses()
             }
-            // 媒体下载（非主线程，只传值 roomKey；下载完在主线程挂模型）
             var mediaSaved = 0
             if !mediaRoomKeys.isEmpty {
                 for roomKey in mediaRoomKeys {
@@ -766,25 +846,18 @@ struct HouseListView: View {
                     }
                 }
             }
-            let changed = addedCount + updatedCount + deletedCount + pushedCount + mediaSaved > 0
-            if changed {
-                var parts: [String] = []
-                if addedCount > 0 { parts.append("新增\(addedCount)套") }
-                if updatedCount > 0 { parts.append("更新\(updatedCount)套") }
-                if deletedCount > 0 { parts.append("删除\(deletedCount)套") }
-                if pushedCount > 0 { parts.append("补传\(pushedCount)套") }
-                if mediaSaved > 0 { parts.append("下载媒体\(mediaSaved)个") }
-                var msg = "已同步：\(parts.joined(separator: "，"))"
-                // v1.37：有新增时单独一行列出新增房号（弹窗 + 操作日志都带）
-                if addedCount > 0 {
-                    msg += "\n新增房号：\(addedRoomNo.joined(separator: "，"))"
-                }
-                infoMessage = msg; showInfoAlert = true
-                BackupLogStore.log(category: "同步", action: "同步云端房源", result: "成功", detail: msg, cloud: true)
-            } else {
-                // v1.19 补全 #6：无变化 → 提示「已刷新，无变化」，不记日志
-                infoMessage = "已刷新，无变化"; showInfoAlert = true
+            var parts: [String] = []
+            if addedCount > 0 { parts.append("新增\(addedCount)套") }
+            if updatedCount > 0 { parts.append("更新\(updatedCount)套") }
+            if deletedCount > 0 { parts.append("删除\(deletedCount)套") }
+            if pushedCount > 0 { parts.append("补传\(pushedCount)套") }
+            if mediaSaved > 0 { parts.append("下载媒体\(mediaSaved)个") }
+            var msg = "已同步：\(parts.joined(separator: "，"))"
+            if addedCount > 0 {
+                msg += "\n新增房号：\(addedRoomNo.joined(separator: "，"))"
             }
+            infoMessage = msg; showInfoAlert = true
+            BackupLogStore.log(category: "同步", action: "同步云端房源", result: "成功", detail: msg, cloud: true)
         } catch {
             infoMessage = "同步失败：\(error.localizedDescription)"; showInfoAlert = true
             BackupLogStore.log(category: "同步", action: "同步云端房源", result: "失败", detail: error.localizedDescription, cloud: true)

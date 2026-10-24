@@ -248,7 +248,7 @@ final class BackupV5Manager {
         return list
     }
 
-    /// 创建快速备份（快照 zip：manifest + business + houses + media_manifest；不含媒体文件）
+    /// 创建快速备份（快照 zip：manifest + business + houses + media_manifest + 操作日志 + 崩溃日志；不含媒体文件）
     @MainActor
     @discardableResult
     static func createFastBackup(mainContext: ModelContext, houseContext: ModelContext, isAuto: Bool = false, date: Date = Date()) -> URL? {
@@ -268,12 +268,15 @@ final class BackupV5Manager {
             let fingerprintData = try JSONEncoder().encode(fingerprints)
             let name = fileName(kind: .fast, isAuto: isAuto, date: date)
             let url = backupsDirectory.appendingPathComponent(name)
-            try ZipStore.createZip(entries: [
+            // v1.40 第8点：操作日志 + 崩溃日志并入快速备份（诊断数据）
+            var entries: [(path: String, data: Data)] = [
                 ("manifest.json", manifestData),
                 ("business.json", business),
                 ("houses.json", houses),
                 ("media_manifest.json", fingerprintData)
-            ], to: url)
+            ]
+            entries.append(contentsOf: logEntriesForBackup())
+            try ZipStore.createZip(entries: entries, to: url)
             return url
         } catch {
             return nil
@@ -304,6 +307,13 @@ final class BackupV5Manager {
         }
         guard let prepared = prepared else { return nil }
 
+        // v1.40 C5：全量备份媒体完整性校验——房源清单引用的媒体 vs 本地实际文件，缺失只记日志提示（不阻塞打包）
+        let missing = missingMediaReport(housesData: prepared.houses, fingerprints: prepared.fingerprints)
+        if missing.missing > 0 {
+            BackupLogStore.log(category: "备份", action: "全量备份", result: "提示",
+                               detail: "房源清单引用 \(missing.missing) 个媒体本地缺失（\(missing.rooms.joined(separator: "，"))），已按现有文件打包，恢复后这些房源图片/视频会不全", cloud: false)
+        }
+
         // 2. 后台打包（不碰 ModelContext，只读写文件与内存）
         let name = fileName(kind: .full, isAuto: isAuto, date: date)
         let url = backupsDirectory.appendingPathComponent(name)
@@ -318,6 +328,8 @@ final class BackupV5Manager {
                     ("houses.json", prepared.houses),
                     ("media_manifest.json", fingerprintData)
                 ]
+                // v1.40 第8点：操作日志 + 崩溃日志并入全量备份（诊断数据）
+                entries.append(contentsOf: BackupV5Manager.logEntriesForBackup())
                 var body = Data()
                 var central: [Data] = []
                 var offset: UInt64 = 0
@@ -436,16 +448,19 @@ final class BackupV5Manager {
             }
             phaseProgress(0.70)
 
-            // 3.3 媒体文件：仅全量备份覆盖 Media 目录
+            // 3.3 媒体文件：仅全量备份覆盖 media 目录
             if kind == .full {
                 stageMessage("正在还原照片视频…")
+                // v1.40 第5点修复：zip 内媒体条目为 media/<房号>/<文件>，解压到 Documents 根目录
+                // → 自动落位 Documents/media/<房号>/<文件>（此前解压到 media 目录内，多套一层 media/media 导致详情页识别不到）
+                let docsRoot = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
                 try await MainActor.run {
                     try? FileManager.default.removeItem(at: MediaStore.mediaDirectory())
                     try FileManager.default.createDirectory(at: MediaStore.mediaDirectory(), withIntermediateDirectories: true)
                 }
-                // 解压媒体（流式，后台线程执行）
+                // 解压媒体（流式，后台线程执行；只解压 media/ 前缀条目，避免 manifest 等散落到 Documents 根）
                 try await Task.detached(priority: .userInitiated) {
-                    try ZipStore.extractAll(at: zipURL, to: MediaStore.mediaDirectory())
+                    try ZipStore.extractAll(at: zipURL, to: docsRoot) { $0.hasPrefix("media/") }
                 }.value
                 phaseProgress(0.90)
             }
@@ -599,10 +614,12 @@ final class BackupV5Manager {
         // 媒体：存在 media_before.zip 时还原（全量恢复场景）
         let mediaBeforeZip = preDir.appendingPathComponent("media_before.zip")
         if FileManager.default.fileExists(atPath: mediaBeforeZip.path) {
+            // v1.40 第5点：与恢复一致——解压到 Documents 根，落位 Documents/media/
+            let docsRoot = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
             try? FileManager.default.removeItem(at: MediaStore.mediaDirectory())
             try FileManager.default.createDirectory(at: MediaStore.mediaDirectory(), withIntermediateDirectories: true)
             try await Task.detached(priority: .userInitiated) {
-                try ZipStore.extractAll(at: mediaBeforeZip, to: MediaStore.mediaDirectory())
+                try ZipStore.extractAll(at: mediaBeforeZip, to: docsRoot) { $0.hasPrefix("media/") }
             }.value
         }
     }
@@ -635,6 +652,49 @@ final class BackupV5Manager {
     }
 
     // MARK: - 工具
+
+    /// v1.40 C5：媒体完整性校验——房源清单（houses.json）里引用的媒体 vs 本地 media 实际文件。
+    /// 返回缺失数量与涉及房号（用于备份前提示，防止「备份存在但恢复后发现媒体不全」）。
+    static func missingMediaReport(housesData: Data, fingerprints: [MediaFingerprintV5]) -> (missing: Int, rooms: [String]) {
+        guard let bundle = try? JSONDecoder().decode(HouseBundleDTO.self, from: housesData) else { return (0, []) }
+        let actual = Set(fingerprints.map { "\($0.roomKey)|\($0.fileName)" })
+        var missing = 0
+        var rooms: Set<String> = []
+        for h in bundle.houses {
+            let clean = h.roomNo.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "2－", with: "2-")
+            let noPrefix = clean.hasPrefix("2-") ? String(clean.dropFirst(2)) : clean
+            let roomKey = h.tower == 2 ? "2-\(noPrefix)" : noPrefix
+            for m in h.mediaItems where !actual.contains("\(roomKey)|\(m.fileName)") {
+                missing += 1
+                rooms.insert(h.roomNo)
+            }
+        }
+        return (missing, rooms.sorted())
+    }
+
+    /// v1.40 第8点：操作日志 + 崩溃日志 → 备份 zip 条目（诊断数据；恢复时不导入，仅随备份留档）
+    static func logEntriesForBackup() -> [(path: String, data: Data)] {
+        var entries: [(path: String, data: Data)] = []
+        // 操作日志（本地最近 45 天）
+        let ops = BackupLogStore.all()
+        if let data = try? JSONEncoder().encode(ops) {
+            entries.append(("ops_log.json", data))
+        }
+        // 崩溃日志（最近 5 份文本合并）
+        let crashFiles = CrashLogCollector.logFiles()
+        if !crashFiles.isEmpty {
+            var text = ""
+            for url in crashFiles {
+                if let s = try? String(contentsOf: url, encoding: .utf8) {
+                    text += "===== \(url.lastPathComponent) =====\n\(s)\n\n"
+                }
+            }
+            if let data = text.data(using: .utf8) {
+                entries.append(("crash_log.txt", data))
+            }
+        }
+        return entries
+    }
 
     /// 扫描 Media/ 下全部媒体文件（归档条目）
     static func collectMediaFileEntries() -> [(path: String, fileURL: URL)] {

@@ -31,6 +31,8 @@ struct HouseEditView: View {
     @State private var loadingMedia = false
     @State private var showError = false
     @State private var errorMessage = ""
+    // v1.40 第10点：无网络保存确认
+    @State private var showOfflineAlert = false
 
     /// 用户是否手动改过座号（改过后不再被房号前缀自动覆盖）
     @State private var towerTouched = false
@@ -241,6 +243,13 @@ struct HouseEditView: View {
             } message: {
                 Text(errorMessage)
             }
+            // v1.40 第10点：无网络时保存新增/编辑房源 → 先提示「仅存本机」，确认后才落盘（联网后可同步云端）
+            .alert("当前无网络", isPresented: $showOfflineAlert) {
+                Button("仅存本机", role: .destructive) { performSave() }
+                Button("取消", role: .cancel) {}
+            } message: {
+                Text("检测不到网络连接，本次保存只会存在本机，不会同步到云端。联网后可在房源列表刷新同步。")
+            }
             .onAppear(perform: loadFromHouse)
         }
     }
@@ -317,6 +326,15 @@ struct HouseEditView: View {
     }
 
     private func save() {
+        // v1.40 第10点：无稳定网络 → 先提示「仅存本机」，用户确认后再保存（避免静默只存本地造成误解）
+        if !NetworkMonitor.shared.isReachable {
+            showOfflineAlert = true
+            return
+        }
+        performSave()
+    }
+
+    private func performSave() {
         let trimmedRoomNo = roomNo.trimmingCharacters(in: .whitespacesAndNewlines)
             .replacingOccurrences(of: "2－", with: "2-")
         let cleanRoomNo = trimmedRoomNo.hasPrefix("2-") ? String(trimmedRoomNo.dropFirst(2)) : trimmedRoomNo

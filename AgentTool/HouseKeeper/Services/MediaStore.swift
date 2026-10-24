@@ -6,6 +6,8 @@ import Foundation
 ///   qrcode.png（名片二维码）、ShareCache/（分享缓存）、备份说明.txt
 /// 「文件」App 里「公寓管家」根目录保持整洁，只看到一个「备份」文件夹；
 /// 复制「备份」子文件夹（或整个「公寓管家」文件夹）= 备份，放回 = 恢复。
+/// v1.40 第9点（本地根目录重建）：软件根目录下平级两个子文件夹——「备份」与「media」。
+/// 「备份」= 数据库/备份包/配置/说明/缓存；「media」= 房源媒体（原 备份/Media 整体移出）。
 enum DataRoot {
     static let name = "备份"
 
@@ -17,21 +19,40 @@ enum DataRoot {
     }
 }
 
-/// 房源照片 / 视频文件管理：按房号子目录存到 App 的 Documents/备份/Media/<房号>/ 目录
+/// 房源照片 / 视频文件管理：按房号子目录存到 App 的 Documents/media/<房号>/ 目录
+/// （v1.40 前为 Documents/备份/Media/<房号>/，升级启动时自动整体迁移，读取兼容旧位置）
 /// 数据库里只保存文件名，文件本体在磁盘，避免 SwiftData 存储膨胀
 /// Documents 已开启文件共享（UIFileSharingEnabled），可在 iOS「文件」App 中查看
 /// 文件命名规则：照片「房号-JPG-1.jpg / 房号-JPG-2.jpg …」，视频「房号-MOV-1.mov / 房号-MOV-2.mov …」
 ///   （序号从 1 开始，取当前第一个空缺序号；删除后自动复用；旧版 UUID 命名的文件仍可正常读取）
 enum MediaStore {
-    static let mediaDirectoryName = "Media"
+    static let mediaDirectoryName = "media"
 
     static func mediaDirectory() -> URL {
-        let dir = DataRoot.url().appendingPathComponent(mediaDirectoryName, isDirectory: true)
+        // v1.40 第9点：媒体独立到 Documents/media/，与「备份」平级，不再挂在备份文件夹下
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let dir = docs.appendingPathComponent(mediaDirectoryName, isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
     }
 
-    /// 某套房源对应的媒体目录（Documents/Media/<房号>/）
+    /// v1.40 旧版媒体目录（Documents/备份/Media/，升级前的位置，迁移后仅用于兼容读取/清理）
+    static var legacyMediaDirectory: URL {
+        DataRoot.url().appendingPathComponent("Media", isDirectory: true)
+    }
+
+    /// v1.40 第9点：启动时幂等迁移——把 备份/Media 整体搬到 Documents/media/
+    /// 目标已存在（迁移过/新装）则跳过；只搬不移删，不丢数据
+    static func migrateLegacyMediaIfNeeded() {
+        let fm = FileManager.default
+        let legacy = legacyMediaDirectory
+        let target = mediaDirectory()
+        guard fm.fileExists(atPath: legacy.path) else { return }   // 无旧目录 = 全新安装
+        guard !fm.fileExists(atPath: target.path) else { return }  // 新目录已有内容 = 已完成，跳过
+        try? fm.moveItem(at: legacy, to: target)
+    }
+
+    /// 某套房源对应的媒体目录（Documents/media/<房号>/）
     static func houseDirectory(roomKey: String) -> URL {
         let dir = mediaDirectory().appendingPathComponent(roomKey, isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -68,12 +89,18 @@ enum MediaStore {
         return fileName
     }
 
-    /// 获取文件完整路径；优先按房号目录读取，兼容旧版平铺目录（Documents/Media/<文件名>）
+    /// 获取文件完整路径；优先按新目录读取，兼容旧版目录结构（备份/Media/<房号>/）与旧版平铺目录（备份/Media/<文件名>）
     static func url(for fileName: String, roomKey: String) -> URL {
         let newURL = houseDirectory(roomKey: roomKey).appendingPathComponent(fileName)
         if FileManager.default.fileExists(atPath: newURL.path) {
             return newURL
         }
+        // v1.40 兼容：升级前旧目录 备份/Media/<房号>/<文件>（迁移未完成或读取旧备份时）
+        let legacyHouseURL = legacyMediaDirectory.appendingPathComponent(roomKey, isDirectory: true).appendingPathComponent(fileName)
+        if FileManager.default.fileExists(atPath: legacyHouseURL.path) {
+            return legacyHouseURL
+        }
+        // 旧版平铺目录（备份/Media/<文件名>；迁移后平铺文件已随目录一起进入 media/）
         return mediaDirectory().appendingPathComponent(fileName)
     }
 
@@ -83,7 +110,10 @@ enum MediaStore {
         guard !fileName.isEmpty else { return }
         let newURL = houseDirectory(roomKey: roomKey).appendingPathComponent(fileName)
         try? FileManager.default.removeItem(at: newURL)
-        let legacyURL = mediaDirectory().appendingPathComponent(fileName)
+        // v1.40：旧目录结构与平铺路径一并清理
+        let legacyHouseURL = legacyMediaDirectory.appendingPathComponent(roomKey, isDirectory: true).appendingPathComponent(fileName)
+        try? FileManager.default.removeItem(at: legacyHouseURL)
+        let legacyURL = legacyMediaDirectory.appendingPathComponent(fileName)
         try? FileManager.default.removeItem(at: legacyURL)
     }
 
@@ -162,27 +192,33 @@ enum MediaStore {
 // MARK: - v1.30 数据备份说明（微信式文件夹备份）
 
 /// 在「备份」子文件夹生成「备份说明.txt」（只写一次），引导用户：备份 = 复制「备份」子文件夹，恢复 = 放回原位。
+/// v1.40 第9点：根目录重建后更新说明——media 独立在「公寓管家」根目录，与「备份」平级
 enum BackupGuide {
     static func ensureExists() {
         let url = DataRoot.url().appendingPathComponent("备份说明.txt")
-        guard !FileManager.default.fileExists(atPath: url.path) else { return }
+        // v1.40：文件不存在，或还是旧结构说明（不含「media/」标记）→ 重写为新版说明
+        if let existing = try? String(contentsOf: url, encoding: .utf8), existing.contains("media/") {
+            return
+        }
         let text = """
-        「公寓管家 · 房源」数据备份说明
+        「公寓管家」数据目录说明
         ========================
 
-        本板块的全部数据都放在「备份」这个子文件夹里：
-        · housekeeper.store（房源信息数据库）
-        · Media/（所有房源图片和视频，按房号分文件夹）
-        · qrcode.png（名片二维码）
-        · ShareCache/（分享缓存，可忽略）
+        App 数据放在「文件」App → 我的 iPhone → 公寓管家 下，分两个子文件夹：
 
-        【备份】在 iOS「文件」App → 我的 iPhone → 公寓管家 → 备份，长按「备份」文件夹 →
-        拷贝/共享到电脑、网盘或微信（建议存两处）。整个「备份」文件夹一起复制，一个都不能少。
+        · 备份/ —— 房源信息数据库（housekeeper.store）、备份包（Backups/）、
+          恢复前快照（PreRestore/）、云端配置（CosConfig/）、分享缓存（ShareCache/）、
+          名片二维码（qrcode.png）、操作日志（Logs/）、本说明文件
+        · media/ —— 所有房源图片和视频，按房号分文件夹
 
-        【恢复】重装 App 后，把之前备份的「备份」文件夹放回「文件」App → 我的 iPhone →
-        公寓管家 目录内，再打开 App，房源信息和图片视频全部还原。
+        【备份】把「备份」和「media」两个文件夹一起拷贝/共享到电脑、网盘或微信（建议存两处），
+        一个都不能少。
 
-        【注意】不要只复制 housekeeper.store——图片视频在 Media/ 里，备份必须复制整个「备份」文件夹。
+        【恢复】重装 App 后，把之前备份的「备份」「media」两个文件夹放回
+        「文件」App → 我的 iPhone → 公寓管家 目录内，再打开 App，房源信息和图片视频全部还原。
+
+        【注意】图片视频在 media/ 里，不在 备份/ 里——备份必须两个文件夹一起复制。
+        更省心的是用 App 内的「一键备份」（快速备份：数据+日志；全量备份：数据+日志+全部媒体）。
         """
         try? text.write(to: url, atomically: true, encoding: .utf8)
     }

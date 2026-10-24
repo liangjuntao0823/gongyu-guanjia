@@ -102,8 +102,9 @@ enum ZipStore {
         return data.subdata(in: dataStart..<(dataStart + length))
     }
 
-    /// 全量解压到目录（media 恢复用）：跳过目录项，覆盖已存在文件；流式读避免大文件进内存
-    static func extractAll(at url: URL, to directory: URL) throws {
+    /// 全量解压到目录（media 恢复用）：跳过目录项，覆盖已存在文件；流式读避免大文件进内存。
+    /// includePath：可选过滤——只解压满足条件的条目（v1.40 第5点：全量备份恢复只解压 media/ 前缀到 Documents 根）
+    static func extractAll(at url: URL, to directory: URL, includePath: ((String) -> Bool)? = nil) throws {
         let handle = try FileHandle(forReadingFrom: url)
         defer { try? handle.close() }
         let totalSize = try handle.seekToEnd()
@@ -150,6 +151,8 @@ enum ZipStore {
 
             guard !path.hasSuffix("/") else { continue }
             guard method == 0 else { throw ZipError.corrupted }  // 本工具只支持 STORE 条目
+            // v1.40：可选路径过滤（全量恢复只解压 media/ 条目，避免 manifest 等散落到 Documents 根）
+            if let includePath = includePath, !includePath(path) { continue }
             let safePath = normalizeArchivePath(path)
             let target = directory.appendingPathComponent(safePath)
             try FileManager.default.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)

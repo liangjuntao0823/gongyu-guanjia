@@ -20,9 +20,12 @@ struct AgentToolApp: App {
         UserDefaults.standard.synchronize()
         LocalNotificationManager.shared.configure()
 
-        // 房源板块数据存独立 store（Documents/备份/housekeeper.store + Media 文件夹），
-        // 与主 App 经营数据（默认 default.store）完全隔离：复制「备份」文件夹即可整体还原房源数据
+        // 房源板块数据存独立 store（Documents/备份/housekeeper.store + media 文件夹），
+        // 与主 App 经营数据（默认 default.store）完全隔离：复制「备份」「media」两个文件夹即可整体还原房源数据
         BackupGuide.ensureExists()
+
+        // v1.40 第9点：本地根目录重建——启动时把 备份/Media 整体迁移到 Documents/media/（幂等，不丢数据）
+        MediaStore.migrateLegacyMediaIfNeeded()
 
         // v1.13 需求16：启动时执行一次性目录迁移——旧分区备份 JSON 迁入 备份/旧版备份/，COS 配置 json 迁入 备份/CosConfig/
         DataBackupManager.migrateLegacyDirectories()
@@ -335,6 +338,8 @@ struct MainTabView: View {
             checkAutoBackup()
             Task { await CloudBackupService.retryPendingUploads() }
             Task { await CloudBackupService.enforceCloudRetention() }
+            // v1.40 第5点：启动时重试房源媒体自动补传队列（分享上传失败后下次启动/回前台自动补传）
+            Task { await HouseMediaUploadQueue.retryAll() }
             LocalNotificationManager.shared.deliverMissedNotifications()
             LocalNotificationManager.shared.rebuildAll(modelContext: modelContext)
             WidgetDataSync.sync(modelContext: modelContext)
@@ -347,6 +352,8 @@ struct MainTabView: View {
             checkAutoBackup()
             // v1.12：回前台重试未上传的云端备份
             Task { await CloudBackupService.retryPendingUploads() }
+            // v1.40 第5点：回前台重试房源媒体补传队列
+            Task { await HouseMediaUploadQueue.retryAll() }
             WidgetDataSync.sync(modelContext: modelContext)
         }
         .onReceive(automaticBackupTimer) { _ in

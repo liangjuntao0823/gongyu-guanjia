@@ -14,8 +14,9 @@ final class CloudBackupService {
 
     // v1.24 多用户隔离：备份 zip 按用户名分目录 backups/<用户名>/，各用户只看得到自己的备份；
     // 媒体镜像 backups/media/ 按 sha1 去重共享（不含隐私，保留全局）。
+    // v1.40 第6点：全部私有数据收进用户目录 users/<用户名>/ —— 备份 zip 与媒体镜像都改到用户目录下
     static var cloudBackupPrefix: String { CloudUser.backupPrefix }     // 备份 zip 云端目录（按用户隔离）
-    static let cloudMediaPrefix = "backups/media/"                      // 媒体镜像云端目录（按 sha1 去重，全局共享）
+    static var cloudMediaPrefix: String { CloudUser.mediaMirrorPrefix } // 媒体镜像云端目录（按 sha1 去重，v1.40 起收进用户目录）
 
     // MARK: - 云端记录（本地权威清单）
 
@@ -311,12 +312,17 @@ final class CloudBackupService {
         throw CosUploader.CosError.uploadFailed("云端删除失败（HTTP \(http?.statusCode ?? 0)）" + CosUploader.extractCosError(from: data))
     }
 
-    /// 删除房源在桶里的整个文件夹（h/<roomKey>/ 下全部对象）。
+    /// 删除房源在桶里的整个文件夹（h/<房号>/ 共享媒体 + users/<用户名>/shares/<房号>/ 私有分享页）。
+    /// v1.40 第6点：分享页/封面/视频首帧图已移入用户私有目录，删房时必须一并删除，避免残留
     /// 无云端配置或桶里无该房源的文件夹时静默返回（不打断本地删除）；
     /// 单个对象删除失败会继续删其余对象，最终把第一个错误抛给上层（供 App 分开提示本地已删、云端失败）。
     static func deleteHouseRemoteFolder(roomKey: String, config: CosConfig?) async throws {
         guard let config = config ?? CosConfig.load(), config.isValid else { return }
-        let objects = try await listHouseRemoteObjects(roomKey: roomKey, config: config)
+        var objects = try await listHouseRemoteObjects(roomKey: roomKey, config: config)
+        // v1.40：私有分享页目录（用户区）
+        let sharePrefix = CloudUser.sharePagePrefix + roomKey + "/"
+        let shareObjects = (try? await CosUploader.listObjects(prefix: sharePrefix, delimiter: nil, config: config).map { $0.name }) ?? []
+        objects.append(contentsOf: shareObjects)
         guard !objects.isEmpty else { return }   // 桶里没有该房源的文件夹
         var firstError: Error?
         for name in objects {
@@ -330,7 +336,7 @@ final class CloudBackupService {
         if let firstError {
             throw firstError
         }
-        BackupLogStore.log(category: "删除", action: "云端删除房源文件夹", result: "成功", detail: "h/\(roomKey)/ 共 \(objects.count) 个对象", cloud: true)
+        BackupLogStore.log(category: "删除", action: "云端删除房源文件夹", result: "成功", detail: "h/\(roomKey)/ + 用户分享页 共 \(objects.count) 个对象", cloud: true)
     }
 
     // MARK: - 云端保留（快速_ 且文件名带 _自动 的自动备份保留最近 10 份）
