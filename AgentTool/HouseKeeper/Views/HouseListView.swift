@@ -627,16 +627,16 @@ struct HouseListView: View {
                     try await CloudBackupService.deleteHouseRemoteFolder(roomKey: roomKey, config: config)
                     // v1.19：同时从云端房源账本移除该房
                     try? await CloudHouseSync.delete(roomKey: roomKey, config: config)
-                    BackupLogStore.log(category: "删除房源", action: "云端删除", result: "成功", detail: roomKey)
+                    BackupLogStore.log(category: "删除房源", action: "云端删除", result: "成功", detail: roomKey, cloud: true)
                 } catch {
-                    BackupLogStore.log(category: "删除房源", action: "云端删除", result: "失败", detail: "\(roomKey) \(error.localizedDescription)")
+                    BackupLogStore.log(category: "删除房源", action: "云端删除", result: "失败", detail: "\(roomKey) \(error.localizedDescription)", cloud: true)
                     await MainActor.run {
                         infoMessage = "云端删除失败：\(error.localizedDescription)。可在「管理后台 → 桶管理」手动清理 h/\(roomKey)/"; showInfoAlert = true
                     }
                 }
             }
         } else {
-            BackupLogStore.log(category: "删除房源", action: "云端删除", result: "跳过", detail: "未配置云存储 \(roomKey)")
+            BackupLogStore.log(category: "删除房源", action: "云端删除", result: "跳过", detail: "未配置云存储 \(roomKey)", cloud: true)
         }
     }
 
@@ -665,9 +665,9 @@ struct HouseListView: View {
                     house.cloudStatus = .both
                     try? houseModelContext?.save()
                 }
-                BackupLogStore.log(category: "房源", action: "同步云端", result: "成功", detail: house.displayRoomNo)
+                BackupLogStore.log(category: "房源", action: "同步云端", result: "成功", detail: house.displayRoomNo, cloud: true)
             } catch {
-                BackupLogStore.log(category: "房源", action: "同步云端", result: "失败", detail: "\(house.displayRoomNo)：\(error.localizedDescription)")
+                BackupLogStore.log(category: "房源", action: "同步云端", result: "失败", detail: "\(house.displayRoomNo)：\(error.localizedDescription)", cloud: true)
             }
         }
     }
@@ -780,14 +780,14 @@ struct HouseListView: View {
                     msg += "\n新增房号：\(addedRoomNo.joined(separator: "，"))"
                 }
                 infoMessage = msg; showInfoAlert = true
-                BackupLogStore.log(category: "同步", action: "同步云端房源", result: "成功", detail: msg)
+                BackupLogStore.log(category: "同步", action: "同步云端房源", result: "成功", detail: msg, cloud: true)
             } else {
                 // v1.19 补全 #6：无变化 → 提示「已刷新，无变化」，不记日志
                 infoMessage = "已刷新，无变化"; showInfoAlert = true
             }
         } catch {
             infoMessage = "同步失败：\(error.localizedDescription)"; showInfoAlert = true
-            BackupLogStore.log(category: "同步", action: "同步云端房源", result: "失败", detail: error.localizedDescription)
+            BackupLogStore.log(category: "同步", action: "同步云端房源", result: "失败", detail: error.localizedDescription, cloud: true)
         }
     }
 
@@ -838,14 +838,14 @@ struct HouseListView: View {
                         try await CloudBackupService.deleteHouseRemoteFolder(roomKey: roomKey, config: config)
                         // v1.19：同时从云端房源账本移除该房
                         try? await CloudHouseSync.delete(roomKey: roomKey, config: config)
-                        BackupLogStore.log(category: "删除房源", action: "云端删除", result: "成功", detail: roomKey)
+                        BackupLogStore.log(category: "删除房源", action: "云端删除", result: "成功", detail: roomKey, cloud: true)
                     } catch {
-                        BackupLogStore.log(category: "删除房源", action: "云端删除", result: "失败", detail: "\(roomKey) \(error.localizedDescription)")
+                        BackupLogStore.log(category: "删除房源", action: "云端删除", result: "失败", detail: "\(roomKey) \(error.localizedDescription)", cloud: true)
                     }
                 }
             }
         } else {
-            BackupLogStore.log(category: "删除房源", action: "云端删除", result: "跳过", detail: "未配置云存储 共\(deletedKeys.count)套")
+            BackupLogStore.log(category: "删除房源", action: "云端删除", result: "跳过", detail: "未配置云存储 共\(deletedKeys.count)套", cloud: true)
         }
         let total = selectedHouseIDs.count
         exitMultiSelect()

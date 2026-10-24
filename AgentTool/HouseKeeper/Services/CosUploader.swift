@@ -2402,6 +2402,72 @@ enum CloudUser {
     static var displayName: String { username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "未设置" : username }
 }
 
+// MARK: - v1.37 云端操作记录（操作日志云端区）
+// 同桶多用户对桶的操作（增删改房源、删桶文件、清空统计等）统一记到桶 h/_ops.json，带用户名。
+// App 操作日志分「本机操作」（本地）+「云端操作」（桶记录，显示操作者用户名）。
+
+struct CloudOpEntry: Codable, Identifiable, Hashable {
+    var id: String { "\(t)|\(op)|\(room)|\(user)|\(detail)" }
+    let t: String
+    let op: String
+    let room: String
+    let user: String
+    let detail: String
+}
+struct CloudOpsResponse: Codable {
+    let ok: Bool
+    let records: [CloudOpEntry]
+}
+
+enum CloudOps {
+    static var isConfigured: Bool {
+        !CloudConfig.functionURL.isEmpty && !CloudConfig.secretId.isEmpty && !CloudConfig.secretKey.isEmpty
+    }
+    private static var baseURL: URL? { URL(string: CloudConfig.functionURL) }
+
+    /// 本机发起云端操作 → 写一条云端操作记录（带当前用户名）
+    static func log(category: String, action: String, result: String, detail: String, room: String = "") {
+        guard isConfigured, let base = baseURL else { return }
+        let op = "\(category)·\(action)·\(result)"
+        var q = URLComponents()
+        q.queryItems = [
+            .init(name: "act", value: "logOp"),
+            .init(name: "k", value: CloudConfig.passwordHash),
+            .init(name: "op", value: op),
+            .init(name: "room", value: room),
+            .init(name: "uname", value: CloudUser.username),
+            .init(name: "detail", value: detail),
+        ]
+        guard let query = q.percentEncodedQuery, let url = URL(string: base.absoluteString + "?" + query) else { return }
+        URLSession.shared.dataTask(with: url).resume()
+    }
+
+    /// 拉取云端操作记录（日志查看器云端区）
+    static func fetch(completion: @escaping ([CloudOpEntry]) -> Void) {
+        guard isConfigured, let base = baseURL else { completion([]); return }
+        let u = CloudUser.username.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+        guard let url = URL(string: "\(base.absoluteString)?act=ops&k=\(CloudConfig.passwordHash)&u=\(u)") else { completion([]); return }
+        URLSession.shared.dataTask(with: url) { data, _, _ in
+            guard let data = data, let obj = try? JSONDecoder().decode(CloudOpsResponse.self, from: data), obj.ok else { completion([]); return }
+            completion(obj.records)
+        }.resume()
+    }
+
+    /// 删除一条云端操作记录（云端区左滑/多选删除）
+    static func delete(_ e: CloudOpEntry, completion: (() -> Void)? = nil) {
+        guard isConfigured, let base = baseURL else { completion?(); return }
+        let u = CloudUser.username.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+        var q = URLComponents()
+        q.queryItems = [
+            .init(name: "act", value: "delOp"), .init(name: "k", value: CloudConfig.passwordHash), .init(name: "u", value: u),
+            .init(name: "t", value: e.t), .init(name: "op", value: e.op), .init(name: "room", value: e.room),
+            .init(name: "user", value: e.user), .init(name: "detail", value: e.detail),
+        ]
+        guard let query = q.percentEncodedQuery, let url = URL(string: base.absoluteString + "?" + query) else { completion?(); return }
+        URLSession.shared.dataTask(with: url) { _, _, _ in DispatchQueue.main.async { completion?() } }.resume()
+    }
+}
+
 // MARK: - v1.19 云端房源账本（共享房源的结构化数据）
 
 /// 房源「账本」单条：只含结构化字段 + 媒体文件名清单；媒体文件仍存 h/<roomKey>/<name>。

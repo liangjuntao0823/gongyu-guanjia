@@ -708,7 +708,7 @@ struct HouseDetailView: View {
         NotificationCenter.default.post(name: HouseListView.houseStoreChanged, object: nil)
         // 2) 云端删除（异步；本地成功云端失败 → 分开提示 + 写操作日志）
         guard let config = config, config.isValid else {
-            BackupLogStore.log(category: "删除房源", action: "云端删除", result: "跳过", detail: "未配置云存储 \(roomKey)")
+            BackupLogStore.log(category: "删除房源", action: "云端删除", result: "跳过", detail: "未配置云存储 \(roomKey)", cloud: true)
             // v1.19 补全：删除成功提示区分存储位置
             deleteResultMessage = wasCloud == .both ? "已删除本地 + 云端房源" : "已删除本地房源"
             return
@@ -718,13 +718,13 @@ struct HouseDetailView: View {
             do {
                 try await CloudBackupService.deleteHouseRemoteFolder(roomKey: roomKey, config: config)
                 try? await CloudHouseSync.delete(roomKey: roomKey, config: config)   // v1.19 补全：同步从云端账本移除
-                BackupLogStore.log(category: "删除房源", action: "云端删除", result: "成功", detail: roomKey)
+                BackupLogStore.log(category: "删除房源", action: "云端删除", result: "成功", detail: roomKey, cloud: true)
                 await MainActor.run {
                     isDeletingCloud = false
                     deleteResultMessage = wasCloud == .cloud ? "已删除云端房源" : "已删除本地 + 云端房源"
                 }
             } catch {
-                BackupLogStore.log(category: "删除房源", action: "云端删除", result: "失败", detail: "\(roomKey) \(error.localizedDescription)")
+                BackupLogStore.log(category: "删除房源", action: "云端删除", result: "失败", detail: "\(roomKey) \(error.localizedDescription)", cloud: true)
                 await MainActor.run {
                     isDeletingCloud = false
                     cloudDeleteMessage = "本地已删除；云端删除失败：\(error.localizedDescription)。可在「管理后台 → 桶管理」手动清理 h/\(roomKey)/"

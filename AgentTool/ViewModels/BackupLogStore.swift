@@ -3,7 +3,7 @@ import Foundation
 // MARK: - v1.12 操作日志（幂等与校验：每次备份/恢复/上传/同步记录 时间/类型/结果/校验和）
 // 本地 UserDefaults 存储（v1.13 需求8：只保留最近一个月；上限 200 条），设置页可查看。
 
-struct BackupLogEntry: Codable {
+struct BackupLogEntry: Codable, Hashable {
     var date: Date
     var category: String     // 备份 / 恢复 / 上传 / 删除 / 同步 / 房源 / 成交 / 收租 / 水电 ...
     var action: String       // 快速备份 / 全量备份 / 恢复完成 / 上传成功 等
@@ -25,7 +25,12 @@ enum BackupLogStore {
         return list.sorted { $0.date > $1.date }
     }
 
-    static func log(category: String, action: String, result: String, detail: String = "", checksum: String = "", username: String? = nil) {
+    static func log(category: String, action: String, result: String, detail: String = "", checksum: String = "", username: String? = nil, cloud: Bool = false) {
+        if cloud {
+            // v1.37：本机发起的云端操作 → 记到云端操作记录（桶 h/_ops.json，带用户名），不重复写本地
+            CloudOps.log(category: category, action: action, result: result, detail: detail)
+            return
+        }
         var list = all()
         let name = username ?? CloudUser.username
         list.insert(BackupLogEntry(date: Date(), category: category, action: action, result: result, detail: detail, checksum: checksum,
@@ -42,6 +47,15 @@ enum BackupLogStore {
     /// v1.19：日志占用空间（字节），设置页展示用
     static func sizeBytes() -> Int {
         UserDefaults.standard.data(forKey: key)?.count ?? 0
+    }
+
+    /// v1.37：删除指定日志（操作日志左滑 / 多选删除）
+    static func remove(_ entry: BackupLogEntry) {
+        var list = all()
+        list.removeAll { $0 == entry }
+        if let data = try? JSONEncoder().encode(list) {
+            UserDefaults.standard.set(data, forKey: key)
+        }
     }
 
     static func clear() {

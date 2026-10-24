@@ -235,6 +235,35 @@ struct CosConfigView: View {
                 Text("云函数地址即管理后台网页的网址。给别的房东用：导出下方部署包，让他在自己的腾讯云部署，再把他的云函数地址填到这里，App 首页「管理后台」就会打开他的后台。")
             }
 
+            // v1.37：使用说明——单用户/多用户详细说明（展开块）+ 三端互通说明（已移到云端配置）
+            Section("使用说明") {
+                DisclosureGroup("单用户（用自己的配置）") {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("· 单人用只需 3 步：① 填好 云函数地址 / 桶 / 地域 / 自定义域名 / 密钥；② 点「保存并验证连接」；③ 正常用 App。").font(.footnote)
+                        Text("· 房源文字、照片视频会自动传到云端桶；分享卡片发好友能直接看；备份会上传到云端留档。").font(.footnote)
+                        Text("· 网页后台（云函数地址）可看访问统计、管理桶文件、查储存用量。").font(.footnote)
+                        Text("· 换机 / 重装：填同样配置 + 恢复配置备份，下拉同步就把云端房源拉回本地。").font(.footnote)
+                        Text("· 本地数据始终保留，云端只是「第二份」，断开配置也不影响本地使用。").font(.footnote)
+                    }
+                    .padding(.vertical, 4)
+                }
+                DisclosureGroup("多用户（多台共用一套桶）") {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("· 前提：几台手机填同一个桶和云函数地址，各自填不同用户名。").font(.footnote)
+                        Text("· 共享的只有「房源」：一台录入上传，另一台下拉同步就能看到；删房也会同步删云端。").font(.footnote)
+                        Text("· 不共享：名片、二维码、水印、分享记录、访问统计、云端备份——都按用户名分开，绝不会看到别人（备份各管各的）。").font(.footnote)
+                        Text("· 用户名的作用：操作日志 / 分享 / 统计带上用户名，网页后台能看到是谁在操作。").font(.footnote)
+                        Text("· 给别人用不用懂桶和云函数：配好你的后，把「配置」发给对方导入 + 填用户名即可；对方也可以自己整套部署（用下方部署包）用自己的桶。").font(.footnote)
+                    }
+                    .padding(.vertical, 4)
+                }
+                NavigationLink {
+                    InterconnectionInfoView()
+                } label: {
+                    Label("三端互通说明（App ↔ 云函数 ↔ 网页后台）", systemImage: "arrow.triangle.2.circlepath")
+                }
+            }
+
             // v1.19：多用户——每台设备一个用户名，共享房源、其他数据按用户名隔离
             Section {
                 TextField("我的用户名（如：涛）", text: $username)

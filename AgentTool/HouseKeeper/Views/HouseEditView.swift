@@ -402,9 +402,9 @@ struct HouseEditView: View {
                     house.cloudStatus = .both
                     try? modelContext.save()
                 }
-                BackupLogStore.log(category: "房源", action: "新增/编辑同步云端", result: "成功", detail: house.displayRoomNo)
+                BackupLogStore.log(category: "房源", action: "新增/编辑同步云端", result: "成功", detail: house.displayRoomNo, cloud: true)
             } catch {
-                BackupLogStore.log(category: "房源", action: "新增/编辑同步云端", result: "失败", detail: "\(house.displayRoomNo)：\(error.localizedDescription)")
+                BackupLogStore.log(category: "房源", action: "新增/编辑同步云端", result: "失败", detail: "\(house.displayRoomNo)：\(error.localizedDescription)", cloud: true)
             }
         }
     }

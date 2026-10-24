@@ -319,14 +319,14 @@ final class CloudBackupService {
             do {
                 try await deleteRemoteObject(name: name, config: config)
             } catch {
-                BackupLogStore.log(category: "删除", action: "云端删除对象", result: "失败", detail: "\(name)：\(error.localizedDescription)")
+                BackupLogStore.log(category: "删除", action: "云端删除对象", result: "失败", detail: "\(name)：\(error.localizedDescription)", cloud: true)
                 if firstError == nil { firstError = error }
             }
         }
         if let firstError {
             throw firstError
         }
-        BackupLogStore.log(category: "删除", action: "云端删除房源文件夹", result: "成功", detail: "h/\(roomKey)/ 共 \(objects.count) 个对象")
+        BackupLogStore.log(category: "删除", action: "云端删除房源文件夹", result: "成功", detail: "h/\(roomKey)/ 共 \(objects.count) 个对象", cloud: true)
     }
 
     // MARK: - 云端保留（快速_ 且文件名带 _自动 的自动备份保留最近 10 份）

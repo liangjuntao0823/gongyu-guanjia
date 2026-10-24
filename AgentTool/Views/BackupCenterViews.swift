@@ -626,7 +626,7 @@ struct BackupFileBrowseViewV5: View {
                     await MainActor.run {
                         CloudBackupService.recordUpload(name: url.lastPathComponent, size: BackupV5Manager.fileSize(at: url), date: Date(), isAuto: false)
                         uploadingName = nil
-                        BackupLogStore.log(category: "上传", action: "快速备份上传", result: "成功", detail: url.lastPathComponent)
+                        BackupLogStore.log(category: "上传", action: "快速备份上传", result: "成功", detail: url.lastPathComponent, cloud: true)
                         showMessageInContext("已上传云端：\(url.lastPathComponent)")
                         reloadTick += 1
                     }
@@ -642,7 +642,7 @@ struct BackupFileBrowseViewV5: View {
                     await MainActor.run {
                         CloudBackupService.recordUpload(name: url.lastPathComponent, size: BackupV5Manager.fileSize(at: url), date: Date(), isAuto: false)
                         uploadingName = nil
-                        BackupLogStore.log(category: "上传", action: "全量备份上传", result: "成功", detail: url.lastPathComponent)
+                        BackupLogStore.log(category: "上传", action: "全量备份上传", result: "成功", detail: url.lastPathComponent, cloud: true)
                         showMessageInContext("已上传云端：\(url.lastPathComponent)")
                         reloadTick += 1
                     }
@@ -650,7 +650,7 @@ struct BackupFileBrowseViewV5: View {
             } catch {
                 await MainActor.run {
                     uploadingName = nil
-                    BackupLogStore.log(category: "上传", action: isFast ? "快速备份上传" : "全量备份上传", result: "失败", detail: error.localizedDescription)
+                    BackupLogStore.log(category: "上传", action: isFast ? "快速备份上传" : "全量备份上传", result: "失败", detail: error.localizedDescription, cloud: true)
                     showMessageInContext("上传失败：\(error.localizedDescription)")
                 }
             }
@@ -698,10 +698,11 @@ struct BackupFileBrowseViewV5: View {
                 do {
                     try await CloudBackupService.deleteRemoteBackup(name: target.name, config: config)
                     await MainActor.run {
-                        BackupLogStore.log(category: "删除", action: "云端删除", result: "成功", detail: target.name)
+                        BackupLogStore.log(category: "删除", action: "云端删除", result: "成功", detail: target.name, cloud: true)
                         reloadTick += 1
                     }
                 } catch {
+                    BackupLogStore.log(category: "删除", action: "云端删除", result: "失败", detail: "\(target.name)：\(error.localizedDescription)", cloud: true)
                     await MainActor.run { showMessageInContext("云端删除失败：\(error.localizedDescription)") }
                 }
             }
@@ -758,7 +759,7 @@ struct BackupFileBrowseViewV5: View {
                         restoreSourceNote = (localHit != nil)
                             ? "本次恢复使用本地已有副本，未重复下载云端"
                             : "本地无该备份，已自动从云端下载到本地后恢复"
-                        BackupLogStore.log(category: "恢复", action: "云端恢复", result: "成功", detail: "\(stats.summaryLines.joined(separator: " / "))；来源：\((localHit != nil) ? "本地已有副本" : "云端下载")")
+                        BackupLogStore.log(category: "恢复", action: "云端恢复", result: "成功", detail: "\(stats.summaryLines.joined(separator: " / "))；来源：\((localHit != nil) ? "本地已有副本" : "云端下载")", cloud: true)
                     }
                 } else if let url = target.localURL {
                     let stats = try await BackupV5Manager.restore(
@@ -878,103 +879,163 @@ struct UploadProgressOverlay: View {
 struct BackupLogsView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var logs = BackupLogStore.all()
+    @State private var cloudLogs: [CloudOpEntry] = []
     @State private var exportTip: String?
-    // v1.19：日志搜索
     @State private var searchText = ""
+    @State private var section = 0          // 0=本机操作 1=云端操作
+    @State private var isEditing = false
+    @State private var selectedLocal: Set<Int> = []
+    @State private var selectedCloud: Set<Int> = []
+    @State private var showClearConfirm = false
 
     var body: some View {
         NavigationStack {
-            List {
-                if filteredLogs.isEmpty {
-                    Text(logs.isEmpty ? "暂无操作日志" : "没有匹配的日志")
-                        .foregroundColor(.secondary)
+            VStack(spacing: 0) {
+                Picker("分区", selection: $section) {
+                    Text("本机操作").tag(0)
+                    Text("云端操作").tag(1)
+                }
+                .pickerStyle(.segmented)
+                .padding(.horizontal)
+                .padding(.top, 8)
+                if section == 0 {
+                    localList
                 } else {
-                    ForEach(Array(filteredLogs.enumerated()), id: \.offset) { _, entry in
-                        VStack(alignment: .leading, spacing: 3) {
-                            HStack {
-                                Text(entry.category)
-                                    .font(.caption.weight(.semibold))
-                                    .padding(.horizontal, 6)
-                                    .padding(.vertical, 2)
-                                    .background(entry.result == "成功" ? Color.green.opacity(0.15) : Color.red.opacity(0.15))
-                                    .foregroundColor(entry.result == "成功" ? .green : .red)
-                                    .clipShape(Capsule())
-                                Text(entry.action)
-                                    .font(.subheadline.weight(.medium))
-                                Spacer()
-                                Text(entry.date.formatted(date: .abbreviated, time: .shortened))
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                            }
-                            Text(entry.detail.isEmpty ? entry.result : entry.detail)
-                                .font(.footnote)
-                                .foregroundColor(.secondary)
-                            HStack(spacing: 8) {
-                                // v1.19：显示操作者用户名（多用户区分）
-                                if let name = entry.username, !name.isEmpty {
-                                    Text("操作者：\(name)")
-                                        .font(.caption2)
-                                        .foregroundColor(.secondary)
-                                }
-                                if !entry.checksum.isEmpty {
-                                    Text("校验和：\(entry.checksum.prefix(12))…")
-                                        .font(.caption2)
-                                        .foregroundColor(.secondary)
-                                }
-                            }
-                        }
-                    }
+                    cloudList
                 }
             }
-            .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: "搜索日志（分类/动作/详情/操作者）")
             .navigationTitle("操作日志")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                // v1.13：左右上角对调——左上角「清空」，右上角「完成」
-                // v1.17 需求3：右上角「完成」→「导出」：点导出直接生成 txt 到 app 根目录，命名「操作日志+导出日期」
                 ToolbarItem(placement: .topBarLeading) {
-                    Button("清空") { BackupLogStore.clear(); logs = [] }
+                    if isEditing {
+                        Button("取消") { exitEdit() }
+                    } else {
+                        Button("清空") { showClearConfirm = true }
+                    }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("导出") { exportLogs() }
-                        .disabled(logs.isEmpty)
+                    if isEditing {
+                        Button(deleteCountLabel) { deleteSelected() }
+                            .disabled(deleteCount == 0)
+                    } else {
+                        Button("导出") { exportLogs() }
+                            .disabled(section == 0 ? logs.isEmpty : cloudLogs.isEmpty)
+                    }
                 }
             }
-            .alert("导出操作日志", isPresented: Binding(
-                get: { exportTip != nil },
-                set: { if !$0 { exportTip = nil } }
-            )) {
+            .alert("操作日志", isPresented: Binding(get: { exportTip != nil }, set: { if !$0 { exportTip = nil } })) {
                 Button("好", role: .cancel) {}
-            } message: {
-                Text(exportTip ?? "")
+            } message: { Text(exportTip ?? "") }
+            .confirmationDialog("确定清空\(section == 0 ? "本机" : "云端")操作日志？", isPresented: $showClearConfirm, titleVisibility: .visible) {
+                Button("清空", role: .destructive) { performClear() }
+                Button("取消", role: .cancel) {}
+            }
+            .onAppear { if section == 1 { loadCloud() } }
+            .onChange(of: section) { _, s in if s == 1 { loadCloud() } }
+        }
+    }
+
+    // MARK: 本机操作区（本地 UserDefaults，含历史云端操作记录）
+    private var localList: some View {
+        List(selection: $selectedLocal) {
+            if filteredLocal.isEmpty {
+                Text(logs.isEmpty ? "暂无本机操作日志" : "没有匹配的日志").foregroundColor(.secondary)
+            } else {
+                ForEach(Array(filteredLocal.enumerated()), id: \.offset) { idx, entry in
+                    BackupLogRow(entry: entry)
+                        .swipeActions(edge: .trailing) {
+                            Button("删除", role: .destructive) { BackupLogStore.remove(entry); reloadLocal() }
+                        }
+                }
             }
         }
+        .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: "搜索日志（分类/动作/详情/操作者）")
+        .environment(\.editMode, .constant(isEditing ? .active : .inactive))
     }
 
-    /// v1.19：搜索过滤（分类/动作/详情/操作者/结果）
-    private var filteredLogs: [BackupLogEntry] {
+    // MARK: 云端操作区（桶 h/_ops.json，带用户名；同桶多用户的桶操作会同步显示）
+    private var cloudList: some View {
+        List(selection: $selectedCloud) {
+            if filteredCloud.isEmpty {
+                Text(cloudLogs.isEmpty ? (CloudOps.isConfigured ? "暂无云端操作记录" : "未配置云存储，无法读取云端操作") : "没有匹配的记录")
+                    .foregroundColor(.secondary)
+            } else {
+                ForEach(Array(filteredCloud.enumerated()), id: \.offset) { _, entry in
+                    CloudOpRow(entry: entry)
+                        .swipeActions(edge: .trailing) {
+                            Button("删除", role: .destructive) { CloudOps.delete(entry) { loadCloud() } }
+                        }
+                }
+            }
+        }
+        .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: "搜索云端操作（类型/详情/操作者/房号）")
+        .environment(\.editMode, .constant(isEditing ? .active : .inactive))
+        .refreshable { loadCloud() }
+    }
+
+    private var filteredLocal: [BackupLogEntry] {
         let q = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty else { return logs }
-        return logs.filter { entry in
-            entry.category.localizedCaseInsensitiveContains(q) ||
-            entry.action.localizedCaseInsensitiveContains(q) ||
-            entry.detail.localizedCaseInsensitiveContains(q) ||
-            entry.result.localizedCaseInsensitiveContains(q) ||
-            (entry.username ?? "").localizedCaseInsensitiveContains(q)
+        return logs.filter { e in
+            e.category.localizedCaseInsensitiveContains(q) ||
+            e.action.localizedCaseInsensitiveContains(q) ||
+            e.detail.localizedCaseInsensitiveContains(q) ||
+            e.result.localizedCaseInsensitiveContains(q) ||
+            (e.username ?? "").localizedCaseInsensitiveContains(q)
+        }
+    }
+    private var filteredCloud: [CloudOpEntry] {
+        let q = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty else { return cloudLogs }
+        return cloudLogs.filter { e in
+            e.op.localizedCaseInsensitiveContains(q) ||
+            e.detail.localizedCaseInsensitiveContains(q) ||
+            e.user.localizedCaseInsensitiveContains(q) ||
+            e.room.localizedCaseInsensitiveContains(q)
         }
     }
 
-    /// v1.17 需求3：把操作日志导出为 txt，落盘到 app 根目录（Documents），命名「操作日志_导出日期.txt」
-    private func exportLogs() {
-        guard !logs.isEmpty else {
-            exportTip = "暂无操作日志可导出"
-            return
+    private var deleteCount: Int { section == 0 ? selectedLocal.count : selectedCloud.count }
+    private var deleteCountLabel: String { deleteCount == 0 ? "删除" : "删除(\(deleteCount))" }
+
+    private func reloadLocal() { logs = BackupLogStore.all(); selectedLocal = [] }
+    private func loadCloud() {
+        CloudOps.fetch { entries in
+            DispatchQueue.main.async { cloudLogs = entries; selectedCloud = [] }
         }
-        let df = DateFormatter()
-        df.dateFormat = "yyyyMMdd_HHmmss"
-        df.locale = Locale(identifier: "en_US_POSIX")
+    }
+    private func exitEdit() { isEditing = false; selectedLocal = []; selectedCloud = [] }
+    private func performClear() {
+        if section == 0 {
+            BackupLogStore.clear(); reloadLocal()
+        } else {
+            exportTip = "云端操作记录请在本页左滑或勾选后逐条删除（云端不提供一键清空）"
+        }
+        showClearConfirm = false
+    }
+    private func deleteSelected() {
+        if section == 0 {
+            let entries = selectedLocal.compactMap { i in i < filteredLocal.count ? filteredLocal[i] : nil }
+            for e in entries { BackupLogStore.remove(e) }
+            reloadLocal()
+        } else {
+            let entries = selectedCloud.compactMap { i in i < filteredCloud.count ? filteredCloud[i] : nil }
+            for e in entries { CloudOps.delete(e) }
+            loadCloud()
+        }
+        exitEdit()
+    }
+
+    // MARK: 导出（本机 / 云端各自导出 txt 到 app 根目录）
+    private func exportLogs() {
+        if section == 0 { exportLocalLogs() } else { exportCloudLogs() }
+    }
+    private func exportLocalLogs() {
+        guard !logs.isEmpty else { exportTip = "暂无本机操作日志可导出"; return }
+        let df = DateFormatter(); df.dateFormat = "yyyyMMdd_HHmmss"; df.locale = Locale(identifier: "en_US_POSIX")
         let fileName = "操作日志_\(df.string(from: Date())).txt"
-        var lines = ["公寓管家 · 操作日志", "导出时间：\(Date())", "共 \(logs.count) 条", "------------------"]
+        var lines = ["公寓管家 · 操作日志（本机）", "导出时间：\(Date())", "共 \(logs.count) 条", "------------------"]
         for entry in logs {
             var line = "[\(entry.date.formatted(date: .numeric, time: .standard))] \(entry.category) / \(entry.action) / \(entry.result)"
             if let name = entry.username, !name.isEmpty { line += " / 操作者：\(name)" }
@@ -983,6 +1044,22 @@ struct BackupLogsView: View {
             if !entry.checksum.isEmpty { lines.append("   校验和：\(entry.checksum)") }
             lines.append("")
         }
+        writeExport(fileName: fileName, lines: lines)
+    }
+    private func exportCloudLogs() {
+        guard !cloudLogs.isEmpty else { exportTip = "暂无云端操作记录可导出"; return }
+        let df = DateFormatter(); df.dateFormat = "yyyyMMdd_HHmmss"; df.locale = Locale(identifier: "en_US_POSIX")
+        let fileName = "操作日志(云端)_\(df.string(from: Date())).txt"
+        var lines = ["公寓管家 · 云端操作记录", "导出时间：\(Date())", "共 \(cloudLogs.count) 条", "------------------"]
+        for e in cloudLogs {
+            let who = e.user.isEmpty ? "未设置" : e.user
+            lines.append("[\(e.t)] \(e.op)" + (e.room.isEmpty ? "" : " / 房号：\(e.room)") + " / 操作者：\(who)")
+            if !e.detail.isEmpty { lines.append("   详情：\(e.detail)") }
+            lines.append("")
+        }
+        writeExport(fileName: fileName, lines: lines)
+    }
+    private func writeExport(fileName: String, lines: [String]) {
         let content = lines.joined(separator: "\n")
         let fileURL = DataRoot.url().appendingPathComponent(fileName)
         do {
@@ -990,6 +1067,79 @@ struct BackupLogsView: View {
             exportTip = "已导出到：\n\(fileURL.lastPathComponent)\n\n（App 根目录 / 数据文件夹）"
         } catch {
             exportTip = "导出失败：\(error.localizedDescription)"
+        }
+    }
+}
+
+// MARK: - 日志行组件（本机）
+private struct BackupLogRow: View {
+    let entry: BackupLogEntry
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack {
+                Text(entry.category)
+                    .font(.caption.weight(.semibold))
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(entry.result == "成功" ? Color.green.opacity(0.15) : Color.red.opacity(0.15))
+                    .foregroundColor(entry.result == "成功" ? .green : .red)
+                    .clipShape(Capsule())
+                Text(entry.action)
+                    .font(.subheadline.weight(.medium))
+                Spacer()
+                Text(entry.date.formatted(date: .abbreviated, time: .shortened))
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+            Text(entry.detail.isEmpty ? entry.result : entry.detail)
+                .font(.footnote)
+                .foregroundColor(.secondary)
+            HStack(spacing: 8) {
+                if let name = entry.username, !name.isEmpty {
+                    Text("操作者：\(name)").font(.caption2).foregroundColor(.secondary)
+                }
+                if !entry.checksum.isEmpty {
+                    Text("校验和：\(entry.checksum.prefix(12))…").font(.caption2).foregroundColor(.secondary)
+                }
+            }
+        }
+    }
+}
+
+// MARK: - 日志行组件（云端，op=「分类·动作·结果」拆开展示，显示操作者用户名）
+private struct CloudOpRow: View {
+    let entry: CloudOpEntry
+    var body: some View {
+        let parts = entry.op.components(separatedBy: "·")
+        let cat = parts.count > 0 ? parts[0] : entry.op
+        let act = parts.count > 1 ? parts[1] : ""
+        let res = parts.count > 2 ? parts[2] : ""
+        VStack(alignment: .leading, spacing: 3) {
+            HStack {
+                if !cat.isEmpty {
+                    Text(cat)
+                        .font(.caption.weight(.semibold))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(res == "成功" ? Color.green.opacity(0.15) : Color.red.opacity(0.15))
+                        .foregroundColor(res == "成功" ? .green : .red)
+                        .clipShape(Capsule())
+                }
+                if !act.isEmpty { Text(act).font(.subheadline.weight(.medium)) }
+                Spacer()
+                Text(entry.t).font(.caption).foregroundColor(.secondary)
+            }
+            if !entry.detail.isEmpty {
+                Text(entry.detail).font(.footnote).foregroundColor(.secondary)
+            }
+            HStack(spacing: 8) {
+                if !entry.user.isEmpty {
+                    Text("操作者：\(entry.user)").font(.caption2).foregroundColor(.secondary)
+                }
+                if !entry.room.isEmpty {
+                    Text("房号：\(entry.room)").font(.caption2).foregroundColor(.secondary)
+                }
+            }
         }
     }
 }
