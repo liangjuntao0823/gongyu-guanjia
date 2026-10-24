@@ -1973,6 +1973,39 @@ struct BucketEntry: Identifiable {
     let objectCount: Int
 }
 
+// MARK: - v1.22 云函数桶浏览 / 储存用量 / 清空统计接口（App 原生后台与网页后台一致）
+struct AdminListResponse: Codable {
+    let ok: Bool
+    let prefix: String
+    let dirs: [AdminDir]
+    let files: [AdminFile]
+}
+struct AdminDir: Codable {
+    let name: String
+    let isDir: Bool
+}
+struct AdminFile: Codable {
+    let key: String
+    let name: String
+    let size: Int
+    let date: String
+    let isDir: Bool
+}
+struct UsageResponse: Codable {
+    let ok: Bool
+    let total: Int
+    let total_files: Int
+    let parts: [UsagePart]
+}
+struct UsagePart: Codable {
+    let name: String
+    let size: Int
+}
+struct ClearStatsResponse: Codable {
+    let ok: Bool
+    let deleted: Int
+}
+
 struct AdminDashboardView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var tab = 0
@@ -1987,6 +2020,11 @@ struct AdminDashboardView: View {
     @State private var bucketLoading = false
     @State private var bucketError: String?
     @State private var copiedKey: String?
+    // v1.22 储存用量 / 清空访问统计
+    @State private var usage: UsageResponse?
+    @State private var usageError: String?
+    @State private var confirmClearStats = false
+    @State private var clearStatsTip: String?
 
     var body: some View {
         NavigationStack {
@@ -2031,12 +2069,27 @@ struct AdminDashboardView: View {
                 }
             }
             .onAppear(perform: loadAll)
+            .alert("确认清空访问统计？", isPresented: $confirmClearStats) {
+                Button("取消", role: .cancel) {}
+                Button("清空", role: .destructive) { clearStats() }
+            } message: {
+                Text("将删除桶 statistics/ 下全部统计文件（含 test101 等测试记录），重新累计。")
+            }
+            .alert("清空访问统计", isPresented: Binding(
+                get: { clearStatsTip != nil },
+                set: { if !$0 { clearStatsTip = nil } }
+            )) {
+                Button("好", role: .cancel) {}
+            } message: {
+                Text(clearStatsTip ?? "")
+            }
         }
     }
 
     private func loadAll() {
         loadStats()
         loadShares()
+        loadUsage()
         if tab == 2 { loadBucket() }
     }
 
@@ -2054,6 +2107,39 @@ struct AdminDashboardView: View {
         Group {
             if let stats = stats {
                 List {
+                    // v1.22 桶储存用量卡片（与网页后台一致）
+                    if let usage = usage {
+                        Section("桶储存用量") {
+                            HStack {
+                                Text(ByteCountFormatter.string(fromByteCount: Int64(usage.total), countStyle: .file))
+                                    .font(.system(size: 24, weight: .bold, design: .rounded))
+                                Text("\(usage.total_files) 个文件").font(.caption).foregroundStyle(.secondary)
+                                Spacer()
+                                Button { loadUsage() } label: { Image(systemName: "arrow.clockwise") }
+                                    .foregroundStyle(.tint)
+                            }
+                            ForEach(usage.parts, id: \.name) { p in
+                                HStack {
+                                    Text(p.name).font(.subheadline)
+                                    Spacer()
+                                    Text(ByteCountFormatter.string(fromByteCount: Int64(p.size), countStyle: .file))
+                                        .font(.subheadline).foregroundStyle(.secondary)
+                                }
+                            }
+                            Button("清空访问统计", role: .destructive) {
+                                confirmClearStats = true
+                            }
+                            .font(.subheadline)
+                        }
+                    } else if let usageError = usageError {
+                        Section {
+                            HStack {
+                                Text("储存用量加载失败").font(.subheadline).foregroundStyle(.secondary)
+                                Spacer()
+                                Button("重试") { loadUsage() }.font(.subheadline)
+                            }
+                        }
+                    }
                     Section {
                         HStack {
                             StatCard(title: "累计访问", value: "\(stats.total)")
@@ -2314,41 +2400,72 @@ struct AdminDashboardView: View {
     }
 
     private func loadBucket() {
-        guard let config = CosConfig.load(), config.isValid else { return }
         bucketLoading = true
         bucketError = nil
-        Task {
-            do {
-                let objects = try await CosUploader.listObjects(prefix: bucketPrefix, config: config)
-                var dirs: [String: Int] = [:]
-                var files: [BucketEntry] = []
-                for o in objects {
-                    let rest = o.name.dropFirst(bucketPrefix.count)
-                    if let slash = rest.firstIndex(of: "/") {
-                        let dirName = String(rest[...slash])
-                        dirs[dirName, default: 0] += 1
-                    } else {
-                        files.append(BucketEntry(name: o.name, isDir: false, size: o.size, date: o.date, objectCount: 1))
-                    }
-                }
-                let dirEntries = dirs.keys.sorted().map { BucketEntry(name: $0, isDir: true, size: 0, date: nil, objectCount: dirs[$0] ?? 0) }
-                var sortedFiles = files
-                sortedFiles.sort { a, b in
-                    let na = a.name.split(separator: "/").last.map(String.init) ?? a.name
-                    let nb = b.name.split(separator: "/").last.map(String.init) ?? b.name
-                    return na.localizedStandardCompare(nb) == .orderedAscending
-                }
-                await MainActor.run {
-                    bucketEntries = dirEntries + sortedFiles
-                    bucketLoading = false
-                }
-            } catch {
-                await MainActor.run {
-                    bucketError = error.localizedDescription
-                    bucketLoading = false
-                }
-            }
+        let prefix = bucketPrefix
+        // v1.22 改走云函数 adminList（与网页后台一致）：点进房源文件夹自动展开 media/，图片视频直接显示
+        let esc = prefix.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+        guard let url = URL(string: "\(CloudConfig.functionURL)?act=adminList&k=\(CloudConfig.passwordHash)&prefix=\(esc)") else {
+            bucketError = "云函数地址无效"
+            bucketLoading = false
+            return
         }
+        URLSession.shared.dataTask(with: url) { data, _, _ in
+            guard let data = data,
+                  let obj = try? JSONDecoder().decode(AdminListResponse.self, from: data), obj.ok else {
+                DispatchQueue.main.async { bucketError = "云函数未返回桶数据（请确认函数已部署）"; bucketLoading = false }
+                return
+            }
+            let iso = ISO8601DateFormatter()
+            var entries: [BucketEntry] = []
+            for d in obj.dirs {
+                entries.append(BucketEntry(name: d.name, isDir: true, size: 0, date: nil, objectCount: 0))
+            }
+            for f in obj.files {
+                entries.append(BucketEntry(name: f.name, isDir: false, size: Int64(f.size),
+                                           date: iso.date(from: f.date), objectCount: 1))
+            }
+            DispatchQueue.main.async {
+                bucketEntries = entries
+                bucketLoading = false
+            }
+        }.resume()
+    }
+
+    /// v1.22 拉取桶储存用量（云函数 usage）
+    private func loadUsage() {
+        usage = nil
+        usageError = nil
+        guard let url = URL(string: "\(CloudConfig.functionURL)?act=usage&k=\(CloudConfig.passwordHash)") else {
+            usageError = "云函数地址无效"
+            return
+        }
+        URLSession.shared.dataTask(with: url) { data, _, _ in
+            guard let data = data, let obj = try? JSONDecoder().decode(UsageResponse.self, from: data), obj.ok else {
+                DispatchQueue.main.async { usageError = "用量加载失败（请确认函数已部署）" }
+                return
+            }
+            DispatchQueue.main.async { usage = obj }
+        }.resume()
+    }
+
+    /// v1.22 清空访问统计（云函数 clearStats，删除桶 statistics/ 全部埋点）
+    private func clearStats() {
+        guard let url = URL(string: "\(CloudConfig.functionURL)?act=clearStats&k=\(CloudConfig.passwordHash)") else { return }
+        URLSession.shared.dataTask(with: url) { data, _, _ in
+            let msg: String
+            if let data = data, let obj = try? JSONDecoder().decode(ClearStatsResponse.self, from: data), obj.ok {
+                msg = "已清空 \(obj.deleted) 个统计文件，访问统计已清零"
+            } else {
+                msg = "清空失败，请稍后再试"
+            }
+            DispatchQueue.main.async {
+                confirmClearStats = false
+                clearStatsTip = msg
+                loadStats()
+                loadUsage()
+            }
+        }.resume()
     }
 
     private func confirmDelete(entry: BucketEntry) {
