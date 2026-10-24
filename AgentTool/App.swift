@@ -258,76 +258,86 @@ struct MainTabView: View {
         UINavigationBar.appearance().scrollEdgeAppearance = navAppearance
     }
 
+    // v1.40 修复:拆分 body 表达式避免 type-check 超时(7个条件视图+底部导航组合过重)
+    @ViewBuilder
+    private var tabContent: some View {
+        ZStack {
+            Color.themeBg.ignoresSafeArea()
+            if visitedTabs.contains(0) {
+                DashboardView(isActive: tabRouter.selectedTab == 0)
+                    .opacity(tabRouter.selectedTab == 0 ? 1 : 0)
+                    .disabled(tabRouter.selectedTab != 0)
+            }
+            if visitedTabs.contains(1) {
+                HouseListView()
+                    .opacity(tabRouter.selectedTab == 1 ? 1 : 0)
+                    .disabled(tabRouter.selectedTab != 1)
+            }
+            if visitedTabs.contains(2) {
+                DealsView()
+                    .opacity(tabRouter.selectedTab == 2 ? 1 : 0)
+                    .disabled(tabRouter.selectedTab != 2)
+            }
+            if visitedTabs.contains(3) {
+                RentCollectionView()
+                    .opacity(tabRouter.selectedTab == 3 ? 1 : 0)
+                    .disabled(tabRouter.selectedTab != 3)
+            }
+            if visitedTabs.contains(4) {
+                PayoutView()
+                    .opacity(tabRouter.selectedTab == 4 ? 1 : 0)
+                    .disabled(tabRouter.selectedTab != 4)
+            }
+            if visitedTabs.contains(5) {
+                ProfitView()
+                    .opacity(tabRouter.selectedTab == 5 ? 1 : 0)
+                    .disabled(tabRouter.selectedTab != 5)
+            }
+            if visitedTabs.contains(6) {
+                SettingsView()
+                    .opacity(tabRouter.selectedTab == 6 ? 1 : 0)
+                    .disabled(tabRouter.selectedTab != 6)
+            }
+        }
+    }
+
+    private var bottomBar: some View {
+        VStack(spacing: 0) {
+            Divider().background(Color.themeBorder)
+            HStack(spacing: 0) {
+                ForEach(0..<tabs.count, id: \.self) { index in
+                    Button {
+                        tabRouter.selectedTab = index
+                    } label: {
+                        VStack(spacing: 2) {
+                            Image(systemName: tabs[index].icon)
+                                .font(.system(size: 18))
+                            Text(tabs[index].title)
+                                .font(.system(size: 10))
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, 6)
+                        .padding(.bottom, 6)
+                        .foregroundColor(tabRouter.selectedTab == index ? .themeAccent : .themeText3)
+                    }
+                }
+            }
+            .background(Color.themePanel)
+        }
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             // 混合方案：已访问的板块保持渲染（用opacity隐藏，保留滚动位置），未访问的不渲染
-            ZStack {
-                Color.themeBg.ignoresSafeArea()
-                if visitedTabs.contains(0) {
-                    DashboardView(isActive: tabRouter.selectedTab == 0)
-                        .opacity(tabRouter.selectedTab == 0 ? 1 : 0)
-                        .disabled(tabRouter.selectedTab != 0)
+            tabContent
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .onChange(of: tabRouter.selectedTab) { _, newTab in
+                    visitedTabs.insert(newTab)
+                    WidgetDataSync.sync(modelContext: modelContext)
                 }
-                if visitedTabs.contains(1) {
-                    HouseListView()
-                        .opacity(tabRouter.selectedTab == 1 ? 1 : 0)
-                        .disabled(tabRouter.selectedTab != 1)
-                }
-                if visitedTabs.contains(2) {
-                    DealsView()
-                        .opacity(tabRouter.selectedTab == 2 ? 1 : 0)
-                        .disabled(tabRouter.selectedTab != 2)
-                }
-                if visitedTabs.contains(3) {
-                    RentCollectionView()
-                        .opacity(tabRouter.selectedTab == 3 ? 1 : 0)
-                        .disabled(tabRouter.selectedTab != 3)
-                }
-                if visitedTabs.contains(4) {
-                    PayoutView()
-                        .opacity(tabRouter.selectedTab == 4 ? 1 : 0)
-                        .disabled(tabRouter.selectedTab != 4)
-                }
-                if visitedTabs.contains(5) {
-                    ProfitView()
-                        .opacity(tabRouter.selectedTab == 5 ? 1 : 0)
-                        .disabled(tabRouter.selectedTab != 5)
-                }
-                if visitedTabs.contains(6) {
-                    SettingsView()
-                        .opacity(tabRouter.selectedTab == 6 ? 1 : 0)
-                        .disabled(tabRouter.selectedTab != 6)
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .onChange(of: tabRouter.selectedTab) { _, newTab in
-                visitedTabs.insert(newTab)
-                WidgetDataSync.sync(modelContext: modelContext)
-            }
 
             // 底部导航
-            VStack(spacing: 0) {
-                Divider().background(Color.themeBorder)
-                HStack(spacing: 0) {
-                    ForEach(0..<tabs.count, id: \.self) { index in
-                        Button {
-                            tabRouter.selectedTab = index
-                        } label: {
-                            VStack(spacing: 2) {
-                                Image(systemName: tabs[index].icon)
-                                    .font(.system(size: 18))
-                                Text(tabs[index].title)
-                                    .font(.system(size: 10))
-                            }
-                            .frame(maxWidth: .infinity)
-                            .padding(.top, 6)
-                            .padding(.bottom, 6)
-                            .foregroundColor(tabRouter.selectedTab == index ? .themeAccent : .themeText3)
-                        }
-                    }
-                }
-                .background(Color.themePanel)
-            }
+            bottomBar
         }
         .onAppear {
             UNUserNotificationCenter.current().setBadgeCount(0)

@@ -52,6 +52,8 @@
 		A10000010000000000000111 /* CrashLogCollector.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000111 /* CrashLogCollector.swift */; };
 		A10000010000000000000112 /* ZipStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000112 /* ZipStore.swift */; };
 		A10000010000000000000113 /* BackupCenterViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000113 /* BackupCenterViews.swift */; };
+		A10000010000000000000114 /* HouseMediaUploadQueue.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000114 /* HouseMediaUploadQueue.swift */; };
+		A10000010000000000000117 /* NetworkMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000117 /* NetworkMonitor.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -102,6 +104,8 @@
 		B10000010000000000000111 /* CrashLogCollector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrashLogCollector.swift; sourceTree = "<group>"; };
 		B10000010000000000000112 /* ZipStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZipStore.swift; sourceTree = "<group>"; };
 		B10000010000000000000113 /* BackupCenterViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupCenterViews.swift; sourceTree = "<group>"; };
+		B10000010000000000000114 /* HouseMediaUploadQueue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HouseMediaUploadQueue.swift; sourceTree = "<group>"; };
+		B10000010000000000000117 /* NetworkMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkMonitor.swift; sourceTree = "<group>"; };
 		B10000010000000000000115 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -274,6 +278,8 @@
 			children = (
 				B10000010000000000000101 /* CosUploader.swift */,
 				B10000010000000000000102 /* MediaStore.swift */,
+				B10000010000000000000114 /* HouseMediaUploadQueue.swift */,
+				B10000010000000000000117 /* NetworkMonitor.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -408,6 +414,8 @@
 				A10000010000000000000111 /* CrashLogCollector.swift in Sources */,
 				A10000010000000000000112 /* ZipStore.swift in Sources */,
 				A10000010000000000000113 /* BackupCenterViews.swift in Sources */,
+				A10000010000000000000114 /* HouseMediaUploadQueue.swift in Sources */,
+				A10000010000000000000117 /* NetworkMonitor.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

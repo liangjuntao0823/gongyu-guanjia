@@ -1860,9 +1860,10 @@ extension CosUploader {
         if let legacyURL = try? presignedURL(for: CloudUser.legacyShareRecordPath, method: "DELETE", expires: 600, headers: [], config: config) {
             var req = URLRequest(url: legacyURL)
             req.httpMethod = "DELETE"
-            let (_, resp) = try? await URLSession.shared.data(for: req)
-            if let http = resp as? HTTPURLResponse, http.statusCode == 200 || http.statusCode == 204 || http.statusCode == 404 {
-                // 删除成功或已不存在，均视为已清理
+            if let (_, resp) = try? await URLSession.shared.data(for: req) {
+                if let http = resp as? HTTPURLResponse, http.statusCode == 200 || http.statusCode == 204 || http.statusCode == 404 {
+                    // 删除成功或已不存在，均视为已清理
+                }
             }
         }
     }
@@ -2564,7 +2565,7 @@ struct AdminDashboardView: View {
             bucketLoading = false
             return
         }
-        URLSession.shared.dataTask(with: url) { data, _, _ in
+        URLSession.shared.dataTask(with: url) { data, resp, _ in
             guard let data = data,
                   let obj = try? JSONDecoder().decode(AdminListResponse.self, from: data), obj.ok else {
                 DispatchQueue.main.async { bucketError = self.cloudFunctionError(resp, fallback: "云函数未返回桶数据（请确认函数已部署）"); bucketLoading = false }
