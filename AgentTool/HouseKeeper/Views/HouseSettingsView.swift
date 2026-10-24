@@ -177,6 +177,7 @@ struct CosConfigView: View {
     @State private var functionURL = ""   // v1.18：云函数地址（后台网址），管理后台入口走此地址
     @State private var username = ""      // v1.19：多用户——本机用户名（共享房源时区分是谁的操作）
     @State private var savedTip: String?
+    @State private var webCacheTip: String?   // v1.38：刷新网页后台缓存的提示
     @State private var isVerifying = false
     // v1.34：文件备份 / 恢复 + 清空配置（v1.35：备份直写「备份」文件夹；v1.36：恢复改为列表选择）
     @State private var showRestoreList = false
@@ -228,6 +229,12 @@ struct CosConfigView: View {
                     downloadDeployPack()
                 } label: {
                     Label("下载云端部署包（zip）", systemImage: "square.and.arrow.down")
+                }
+                // v1.38：网页后台每次改动（重新部署）后，点此刷新——清 App 网页缓存 + 换新版本戳，safari 打开的后台立即是最新版，无需重新构建 App
+                Button {
+                    WebCache.clear { savedTip = "网页后台缓存已刷新 ✅\n下次在「管理后台」点右上角 Safari 图标打开网页后台，就是最新版本。" }
+                } label: {
+                    Label("刷新网页后台缓存", systemImage: "arrow.clockwise.circle")
                 }
             } header: {
                 Text("云函数后台")

@@ -4,6 +4,7 @@ import Security
 import UIKit
 import AVFoundation
 import SwiftUI
+import WebKit
 
 // MARK: - 钥匙串存取（COS 密钥等敏感配置）
 
@@ -1631,6 +1632,26 @@ enum WatermarkSettingsStore {
 
 // MARK: - v1.36 云函数配置（H5 埋点统计 + 管理后台鉴权）
 
+// MARK: - v1.38 网页后台刷新（清缓存 + 版本戳）
+// App 内「管理后台」是原生界面（直接读云函数接口，天然最新）；safari 打开的网页后台靠版本参数绕缓存。
+// 网页后台每次改动（重新部署云函数 admin.html）后，点一次「刷新网页后台缓存」即可让浏览器下次强制取最新页，无需重新构建 App。
+
+enum WebCache {
+    private static let stampKey = "cloud.webCacheStamp"
+    /// 网页版本戳：每次「刷新网页后台」都更新，safari 打开后台 URL 带上它 → 浏览器缓存立即失效
+    static var stamp: String {
+        UserDefaults.standard.string(forKey: stampKey) ?? "20261023"
+    }
+    /// 清 App 内 WebView 缓存 + 更新版本戳
+    static func clear(completion: (() -> Void)? = nil) {
+        UserDefaults.standard.set("\(Int(Date().timeIntervalSince1970))", forKey: stampKey)
+        WKWebsiteDataStore.default().removeData(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(),
+                                                 modifiedSince: .distantPast) {
+            DispatchQueue.main.async { completion?() }
+        }
+    }
+}
+
 enum CloudConfig {
     static let defaultFunctionURL = "https://1511251056-csopw5c0jd.ap-hongkong.tencentscf.com"
     static var functionURL: String {
@@ -2019,10 +2040,10 @@ struct AdminDashboardView: View {
         if tab == 2 { loadBucket() }
     }
 
-    /// v1.37：在系统浏览器打开云端后台网页（带免登录口令 + 版本参数绕过缓存）
+    /// v1.38：在系统浏览器打开云端后台网页（带免登录口令 + 动态版本戳，网页改动后浏览器强制取最新）
     private func openWebBackend() {
         let u = (CloudUser.username).addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
-        if let url = URL(string: "\(CloudConfig.functionURL)?act=admin&k=\(CloudConfig.passwordHash)&u=\(u)&v=20261023b") {
+        if let url = URL(string: "\(CloudConfig.functionURL)?act=admin&k=\(CloudConfig.passwordHash)&u=\(u)&v=\(WebCache.stamp)") {
             UIApplication.shared.open(url)
         }
     }
