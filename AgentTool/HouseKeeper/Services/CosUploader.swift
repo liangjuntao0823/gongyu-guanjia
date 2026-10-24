@@ -2107,38 +2107,12 @@ struct AdminDashboardView: View {
         Group {
             if let stats = stats {
                 List {
-                    // v1.22 桶储存用量卡片（与网页后台一致）
-                    if let usage = usage {
-                        Section("桶储存用量") {
-                            HStack {
-                                Text(ByteCountFormatter.string(fromByteCount: Int64(usage.total), countStyle: .file))
-                                    .font(.system(size: 24, weight: .bold, design: .rounded))
-                                Text("\(usage.total_files) 个文件").font(.caption).foregroundStyle(.secondary)
-                                Spacer()
-                                Button { loadUsage() } label: { Image(systemName: "arrow.clockwise") }
-                                    .foregroundStyle(.tint)
-                            }
-                            ForEach(usage.parts, id: \.name) { p in
-                                HStack {
-                                    Text(p.name).font(.subheadline)
-                                    Spacer()
-                                    Text(ByteCountFormatter.string(fromByteCount: Int64(p.size), countStyle: .file))
-                                        .font(.subheadline).foregroundStyle(.secondary)
-                                }
-                            }
-                            Button("清空访问统计", role: .destructive) {
-                                confirmClearStats = true
-                            }
-                            .font(.subheadline)
+                    // v1.23 清空访问统计按钮（储存用量已移到「桶管理」页）
+                    Section {
+                        Button("清空访问统计", role: .destructive) {
+                            confirmClearStats = true
                         }
-                    } else if let usageError = usageError {
-                        Section {
-                            HStack {
-                                Text("储存用量加载失败").font(.subheadline).foregroundStyle(.secondary)
-                                Spacer()
-                                Button("重试") { loadUsage() }.font(.subheadline)
-                            }
-                        }
+                        .font(.subheadline)
                     }
                     Section {
                         HStack {
@@ -2319,6 +2293,47 @@ struct AdminDashboardView: View {
                         }
                     }
                     List {
+                        // v1.23 桶储存用量（从获客分析移到桶管理）+ 访问腾讯云储存桶
+                        Section {
+                            VStack(alignment: .leading, spacing: 8) {
+                                HStack {
+                                    Text("桶储存用量").font(.subheadline).foregroundStyle(.secondary)
+                                    Spacer()
+                                    Button { loadUsage() } label: { Image(systemName: "arrow.clockwise") }
+                                        .foregroundStyle(.tint)
+                                        .buttonStyle(.borderless)
+                                }
+                                if let usage = usage {
+                                    HStack {
+                                        Text(ByteCountFormatter.string(fromByteCount: Int64(usage.total), countStyle: .file))
+                                            .font(.system(size: 24, weight: .bold, design: .rounded))
+                                        Text("\(usage.total_files) 个文件").font(.caption).foregroundStyle(.secondary)
+                                    }
+                                    ForEach(usage.parts, id: \.name) { p in
+                                        HStack {
+                                            Text(p.name).font(.subheadline)
+                                            Spacer()
+                                            Text(ByteCountFormatter.string(fromByteCount: Int64(p.size), countStyle: .file))
+                                                .font(.subheadline).foregroundStyle(.secondary)
+                                        }
+                                    }
+                                } else if let usageError = usageError {
+                                    HStack {
+                                        Text("用量加载失败").font(.subheadline).foregroundStyle(.secondary)
+                                        Spacer()
+                                        Button("重试") { loadUsage() }.font(.subheadline).buttonStyle(.borderless)
+                                    }
+                                } else {
+                                    ProgressView("加载用量…")
+                                }
+                            }
+                            Button {
+                                openCOSConsole()
+                            } label: {
+                                Label("访问腾讯云储存桶（浏览器登录）", systemImage: "arrow.up.right.square")
+                            }
+                            .buttonStyle(.borderless)
+                        }
                         Section {
                             ForEach(bucketEntries) { entry in
                                 if entry.isDir {
@@ -2356,11 +2371,13 @@ struct AdminDashboardView: View {
                                                     .font(.caption)
                                             }
                                             .foregroundStyle(.tint)
+                                            .buttonStyle(.borderless)
                                             Button(role: .destructive) {
                                                 confirmDelete(entry: entry)
                                             } label: {
                                                 Label("删除", systemImage: "trash").font(.caption)
                                             }
+                                            .buttonStyle(.borderless)
                                         }
                                     }
                                 }
@@ -2386,6 +2403,13 @@ struct AdminDashboardView: View {
             return "https://\(config.customDomain)/"
         }
         return ""
+    }
+
+    /// v1.23 跳转腾讯云 COS 控制台（浏览器登录后可直接管理储存桶）
+    private func openCOSConsole() {
+        if let url = URL(string: "https://console.cloud.tencent.com/cos/bucket") {
+            UIApplication.shared.open(url)
+        }
     }
 
     private var breadcrumbs: [String] {
