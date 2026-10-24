@@ -361,15 +361,30 @@ struct HouseEditView: View {
             modelContext.insert(target)
         }
 
-        // 编辑时：真正删除「已被移除」的旧媒体（文件 + 记录）
+        // 编辑时：真正删除「已被移除」的旧媒体（文件 + 记录 + 云端对象）
         // 只在保存时执行 → 点「取消」不会落盘，删除可完整回滚
+        // v1.41：删除媒体同时删云端对象（图片原名 / 视频 .mp4 + 用户区首帧图），
+        //        并清除该文件的上传队列——保证「我删了照片，别人也看不到」（此前只删本地是致命缺陷）
         if let house {
             let removed = house.mediaItems.filter { old in
                 !mediaItems.contains { $0.fileName == old.fileName }
             }
             for old in removed {
-                MediaStore.delete(fileName: old.fileName, roomKey: originalRoomKey.isEmpty ? house.mediaRoomKey : originalRoomKey)
+                let rk = originalRoomKey.isEmpty ? house.mediaRoomKey : originalRoomKey
+                MediaStore.delete(fileName: old.fileName, roomKey: rk)
                 modelContext.delete(old)
+                HouseMediaUploadQueue.remove(roomKey: rk, fileName: old.fileName)
+                if let config = CosConfig.load(), config.isValid {
+                    let kind = old.kind
+                    Task {
+                        do {
+                            try await CosUploader.deleteRemoteMedia(fileName: old.fileName, kind: kind, roomKey: rk, config: config)
+                            BackupLogStore.log(category: "房源", action: "删除媒体云端", result: "成功", detail: "\(rk)/\(old.fileName)", cloud: true)
+                        } catch {
+                            BackupLogStore.log(category: "房源", action: "删除媒体云端", result: "失败", detail: "\(rk)/\(old.fileName) \(error.localizedDescription)", cloud: true)
+                        }
+                    }
+                }
             }
         }
 
@@ -401,6 +416,9 @@ struct HouseEditView: View {
         }
 
         try? modelContext.save()
+        // v1.41：保存后把该房全部媒体即时上传到桶（新增/替换照片视频立即云端可见，
+        //        别的设备同步就能看到最新照片视频）；上传失败自动入队，启动/回前台自动补传
+        pushHouseMediaToCloud(target)
         // v1.19：新增 / 编辑保存后同步到云端账本（共享房源）
         pushHouseToCloud(target)
         NotificationCenter.default.post(name: HouseListView.houseStoreChanged, object: nil)
@@ -408,6 +426,39 @@ struct HouseEditView: View {
     }
 
     // MARK: - v1.19 云端双写
+
+    /// v1.41：房源媒体即时上传——保存后把全部媒体传到桶 h/<房号>/（桶内已有则幂等跳过）。
+    /// 上传失败自动入 HouseMediaUploadQueue，App 启动/回前台自动补传；写云端操作日志。
+    /// 与分享上传、队列补传共用 CosUploader.uploadHouseMedia（视频转 mp4 + 用户区首帧图），行为一致。
+    private func pushHouseMediaToCloud(_ house: House) {
+        guard let config = CosConfig.load(), config.isValid else { return }
+        let roomKey = house.mediaRoomKey
+        let compress = shareCompressionEnabled
+        Task {
+            var success = 0, failed = 0
+            for item in house.mediaItems {
+                let url = MediaStore.url(for: item.fileName, roomKey: roomKey)
+                guard FileManager.default.fileExists(atPath: url.path) else {
+                    HouseMediaUploadQueue.enqueue(roomKey: roomKey, fileName: item.fileName, kind: item.kind)
+                    failed += 1
+                    continue
+                }
+                do {
+                    try await CosUploader.uploadHouseMedia(fileName: item.fileName, kind: item.kind, roomKey: roomKey, config: config, compress: compress)
+                    HouseMediaUploadQueue.remove(roomKey: roomKey, fileName: item.fileName)
+                    success += 1
+                } catch {
+                    HouseMediaUploadQueue.enqueue(roomKey: roomKey, fileName: item.fileName, kind: item.kind)
+                    failed += 1
+                }
+            }
+            if failed > 0 {
+                BackupLogStore.log(category: "房源", action: "媒体上传", result: "部分失败", detail: "\(house.displayRoomNo)：成功\(success) 失败\(failed)（已入队自动补传）", cloud: true)
+            } else if success > 0 {
+                BackupLogStore.log(category: "房源", action: "媒体上传", result: "成功", detail: "\(house.displayRoomNo)：\(success) 个媒体", cloud: true)
+            }
+        }
+    }
 
     /// 保存后把房源推到云端账本（读改写，同房号覆盖）。无云存储配置则跳过（仅本地）。
     private func pushHouseToCloud(_ house: House) {

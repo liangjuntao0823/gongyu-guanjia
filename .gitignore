@@ -21,3 +21,6 @@ xcuserdata/
 # .NET
 **/bin/
 **/obj/
+
+# tool scratch
+.tmp-tool-results/

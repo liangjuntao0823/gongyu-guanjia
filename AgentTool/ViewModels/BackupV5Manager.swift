@@ -463,12 +463,22 @@ final class BackupV5Manager {
                     try ZipStore.extractAll(at: zipURL, to: docsRoot) { $0.hasPrefix("media/") }
                 }.value
                 phaseProgress(0.90)
+            } else {
+                // 3.4 v1.41：快速备份不带媒体本体，恢复后做「媒体对账」——
+                // 磁盘上已有但 houses.json 记录里没有的文件（如之前同步下载过、备份时刻不存在）
+                // 自动补建 MediaItem 记录，避免「视频明明在 media 文件夹里，详情页却打不开」。
+                let extraMedia = await MainActor.run { reconcileLocalMedia(houseContext: houseContext) }
+                if extraMedia > 0 {
+                    stageMessage("已补录 \(extraMedia) 个本地媒体记录…")
+                }
+                phaseProgress(0.90)
             }
 
             // 4. 统计（数据库口径）
             stageMessage("正在核对恢复结果…")
             let stats: RestoreStatsV5 = await MainActor.run {
-                computeStats(mainContext: mainContext, houseContext: houseContext)
+                // v1.41：房源/照片/视频统计仅全量恢复才展示（快速备份不含媒体本体，统计口径不含房源媒体）
+                computeStats(mainContext: mainContext, houseContext: houseContext, includeHouse: kind == .full)
             }
             phaseProgress(0.98)
 
@@ -627,8 +637,10 @@ final class BackupV5Manager {
     // MARK: - 统计
 
     /// 恢复完成分行统计（两个容器都要：主容器经营数据 + 房源容器）
+    /// v1.41：房源/照片/视频统计仅全量恢复才统计（includeHouse=false 时跳过房源媒体），
+    ///        快速备份不含媒体本体、只含记录引用，不应展示「房源N套/照片N张/视频N个」。
     @MainActor
-    static func computeStats(mainContext: ModelContext, houseContext: ModelContext?) -> RestoreStatsV5 {
+    static func computeStats(mainContext: ModelContext, houseContext: ModelContext?, includeHouse: Bool = true) -> RestoreStatsV5 {
         var stats = RestoreStatsV5()
         func count<T: PersistentModel>(_ type: T.Type, in ctx: ModelContext, where predicate: (T) -> Bool = { _ in true }) -> Int {
             guard let all = try? ctx.fetch(FetchDescriptor<T>()) else { return 0 }
@@ -642,13 +654,46 @@ final class BackupV5Manager {
         stats.payouts = count(PayoutRecord.self, in: mainContext)
         stats.todosOpen = count(TodoItem.self, in: mainContext, where: { !$0.isCompleted && !($0.isDeleted) })
         stats.todosDone = count(TodoItem.self, in: mainContext, where: { $0.isCompleted && !($0.isDeleted) })
-        if let houseContext = houseContext {
+        if let houseContext = houseContext, includeHouse {
             stats.houses = count(House.self, in: houseContext, where: { !($0.isDeleted ?? false) })
             let allMedia = (try? houseContext.fetch(FetchDescriptor<MediaItem>())) ?? []
             stats.photos = allMedia.filter { $0.kind == "image" }.count
             stats.videos = allMedia.filter { $0.kind == "video" }.count
         }
         return stats
+    }
+
+    /// v1.41：恢复（快速）后的媒体对账——扫描本地 media/<房号>/ 磁盘文件，
+    /// 与 MediaItem 记录补齐差异，返回补录数量。解决「恢复快速备份后视频打不开」：
+    /// 快速备份只带记录引用不带媒体本体，若磁盘上已有文件（如同步下载过）而记录缺失 → 详情页识别不到。
+    @MainActor
+    static func reconcileLocalMedia(houseContext: ModelContext) -> Int {
+        let mediaDir = MediaStore.mediaDirectory()
+        guard let roomKeys = try? FileManager.default.contentsOfDirectory(atPath: mediaDir.path) else { return 0 }
+        guard let houses = try? houseContext.fetch(FetchDescriptor<House>()) else { return 0 }
+        var added = 0
+        for house in houses {
+            let roomKey = house.mediaRoomKey
+            guard !roomKey.isEmpty else { continue }
+            let houseDir = mediaDir.appendingPathComponent(roomKey, isDirectory: true)
+            var isDir: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: houseDir.path, isDirectory: &isDir), isDir.boolValue else { continue }
+            guard let diskFiles = try? FileManager.default.contentsOfDirectory(atPath: houseDir.path) else { continue }
+            let recorded = Set(house.mediaItems.map { $0.fileName })
+            for name in diskFiles {
+                guard !recorded.contains(name) else { continue }
+                let lower = name.lowercased()
+                let isVideo = lower.hasSuffix(".mp4") || lower.hasSuffix(".mov")
+                let isImage = [".jpg", ".jpeg", ".png", ".heic", ".webp", ".gif"].contains { lower.hasSuffix($0) }
+                guard isVideo || isImage else { continue }
+                let item = MediaItem(fileName: name, kind: isVideo ? "video" : "image")
+                item.house = house
+                houseContext.insert(item)
+                added += 1
+            }
+        }
+        if added > 0 { try? houseContext.save() }
+        return added
     }
 
     // MARK: - 工具

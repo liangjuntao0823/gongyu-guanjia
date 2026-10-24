@@ -688,12 +688,32 @@ struct HouseListView: View {
         }
     }
 
+    /// v1.41：云端账本与本地房源的字段级对比——任一字段（含媒体清单）不同即视为有变化。
+    /// 替代旧的时间戳比较：时间戳只有秒级精度且恢复备份后 lastUpdatedAt 为空，
+    /// 会导致「明明没变化每次同步都判更新」。字段级对比满足「一个标点符号变了都要同步」。
+    private func cloudRecordDiffers(_ rec: CloudHouseRecord, from house: House) -> Bool {
+        if rec.roomNo != house.roomNo { return true }
+        if rec.tower != house.tower { return true }
+        if rec.landlord != house.landlord { return true }
+        if rec.layout != house.layout { return true }
+        if rec.price != house.price { return true }
+        if rec.password != house.password { return true }
+        if rec.remark != house.remark { return true }
+        if rec.status != house.statusRaw { return true }
+        let localMedia = Set(house.mediaItems.map { $0.fileName })
+        if localMedia != Set(rec.mediaNames) { return true }
+        return false
+    }
+
     /// 从云端拉取房源账本并同步到本地（下拉刷新 / 左上角手动同步同效果）。
     /// v1.19 补全「增减逻辑」：
     ///  - 增：云端新增 → 完整下载到本地（文字 + 媒体），标双端、可编辑
     ///  - 改：云端比本地新 → 覆盖文字字段；本地媒体缺失但云端有 → 自动下载媒体
     ///  - 减：本地房源在云端账本已不存在 → 若它来自云端（双端/云端）则跟随删除；纯本地未上传的保留并补传云端
     ///  - 无任何变化 → 提示「已刷新，无变化」，不写入操作日志
+    /// v1.41：
+    ///  - 「更新」判定改为字段级对比（cloudRecordDiffers），不再依赖时间戳（时间戳精度/恢复备份导致误判）
+    ///  - 媒体差异双向识别：云端有本地缺（要下载）与 本地有云端缺（要跟随删除）都算变化并弹确认
     private func syncCloudHouses() async {
         let config = CosConfig.load()
         guard let config else {
@@ -716,15 +736,15 @@ struct HouseListView: View {
                 let cloudKeys = Set(recs.map { $0.roomKey })
                 for rec in recs {
                     if let h = localByKey[rec.roomKey] {
-                        if rec.updatedAt > (h.lastUpdatedAt ?? h.updatedAt) {
+                        if cloudRecordDiffers(rec, from: h) {
                             // v1.40 B1：多人冲突提示——云端由他人更新时展示修改者
                             updated.append((rec.roomNo, rec.updatedBy))
                         }
-                        if !rec.mediaNames.isEmpty {
-                            let localFiles = MediaStore.existingFileNames(roomKey: h.mediaRoomKey)
-                            if !rec.mediaNames.allSatisfy({ localFiles.contains($0) }) {
-                                mediaRoomKeys.append(h.mediaRoomKey)
-                            }
+                        // v1.41：媒体差异双向识别（下载缺失 或 本地多余跟随删）
+                        let localNames = Set(h.mediaItems.map { $0.fileName })
+                        let cloudNames = Set(rec.mediaNames)
+                        if localNames != cloudNames {
+                            mediaRoomKeys.append(h.mediaRoomKey)
                         }
                     } else {
                         added.append((rec.roomNo, rec.roomKey, rec.mediaNames))
@@ -770,11 +790,13 @@ struct HouseListView: View {
     }
 
     /// v1.40 第11点：确认后应用同步（原执行逻辑）
+    /// v1.41：更新判定改字段级对比；新增媒体 reconcile——跟随云端删除本地多余媒体（账本已删、本地残留）
     private func applySyncPreview() async {
         guard let config = CosConfig.load(), let ctx = houseModelContext else { return }
         let recs = pendingSyncRecs
         do {
             var addedCount = 0, updatedCount = 0, deletedCount = 0, pushedCount = 0
+            var removedMediaCount = 0
             var addedRoomNo: [String] = []
             var mediaRoomKeys: [String] = []
             await MainActor.run {
@@ -784,17 +806,29 @@ struct HouseListView: View {
                 let cloudKeys = Set(recs.map { $0.roomKey })
                 for rec in recs {
                     if let h = localByKey[rec.roomKey] {
-                        if rec.updatedAt > (h.lastUpdatedAt ?? h.updatedAt) {
+                        if cloudRecordDiffers(rec, from: h) {
                             h.roomNo = rec.roomNo; h.tower = rec.tower; h.landlord = rec.landlord
                             h.layout = rec.layout; h.price = rec.price; h.password = rec.password
                             h.remark = rec.remark; h.statusRaw = rec.status
                             h.lastUpdatedAt = rec.updatedAt
                             updatedCount += 1
                         }
-                        if !rec.mediaNames.isEmpty {
-                            let localFiles = MediaStore.existingFileNames(roomKey: h.mediaRoomKey)
-                            if !rec.mediaNames.allSatisfy({ localFiles.contains($0) }) {
+                        // v1.41：媒体差异双向 reconcile——
+                        //  ① 云端有本地缺 → 下载（mediaRoomKeys）
+                        //  ② 本地记录有、云端账本已无 → 跟随删除（文件 + 记录；即别的设备删了照片，这里跟着删）
+                        let localNames = Set(h.mediaItems.map { $0.fileName })
+                        let cloudNames = Set(rec.mediaNames)
+                        if localNames != cloudNames {
+                            if !cloudNames.isSubset(of: localNames) {
                                 mediaRoomKeys.append(h.mediaRoomKey)
+                            }
+                            for extra in localNames.subtracting(cloudNames) {
+                                MediaStore.delete(fileName: extra, roomKey: h.mediaRoomKey)
+                                if let item = h.mediaItems.first(where: { $0.fileName == extra }) {
+                                    ctx.delete(item)
+                                }
+                                HouseMediaUploadQueue.remove(roomKey: h.mediaRoomKey, fileName: extra)
+                                removedMediaCount += 1
                             }
                         }
                         h.cloudStatus = .both
@@ -828,20 +862,31 @@ struct HouseListView: View {
             var mediaSaved = 0
             if !mediaRoomKeys.isEmpty {
                 for roomKey in mediaRoomKeys {
-                    if let files = try? await CosUploader.downloadHouseMedia(roomKey: roomKey, config: config),
-                       !files.isEmpty {
-                        mediaSaved += files.count
-                        await MainActor.run {
-                            let all = (try? ctx.fetch(FetchDescriptor<House>())) ?? []
-                            if let h = all.first(where: { $0.mediaRoomKey == roomKey && !$0.isTrashed }) {
-                                for f in files {
-                                    let item = MediaItem(fileName: f.fileName, kind: f.kind)
+                    let files = (try? await CosUploader.downloadHouseMedia(roomKey: roomKey, config: config)) ?? []
+                    mediaSaved += files.count
+                    await MainActor.run {
+                        let all = (try? ctx.fetch(FetchDescriptor<House>())) ?? []
+                        if let h = all.first(where: { $0.mediaRoomKey == roomKey && !$0.isTrashed }) {
+                            for f in files {
+                                let item = MediaItem(fileName: f.fileName, kind: f.kind)
+                                item.house = h
+                                ctx.insert(item)
+                            }
+                            // v1.41：按账本补记录——磁盘已有但记录缺失（如恢复快速备份后，
+                            // 备份只有记录引用没有媒体本体），补建 MediaItem 记录，详情页才能打开视频
+                            if let rec = recs.first(where: { $0.roomKey == roomKey }) {
+                                let recorded = Set(h.mediaItems.map { $0.fileName })
+                                let disk = MediaStore.existingFileNames(roomKey: roomKey)
+                                for name in rec.mediaNames where !recorded.contains(name) && disk.contains(name) {
+                                    let lower = name.lowercased()
+                                    let isVideo = lower.hasSuffix(".mp4") || lower.hasSuffix(".mov")
+                                    let item = MediaItem(fileName: name, kind: isVideo ? "video" : "image")
                                     item.house = h
                                     ctx.insert(item)
                                 }
-                                h.cloudStatus = .both
-                                try? ctx.save()
                             }
+                            h.cloudStatus = .both
+                            try? ctx.save()
                         }
                     }
                 }
@@ -852,6 +897,7 @@ struct HouseListView: View {
             if deletedCount > 0 { parts.append("删除\(deletedCount)套") }
             if pushedCount > 0 { parts.append("补传\(pushedCount)套") }
             if mediaSaved > 0 { parts.append("下载媒体\(mediaSaved)个") }
+            if removedMediaCount > 0 { parts.append("删除媒体\(removedMediaCount)个") }
             var msg = "已同步：\(parts.joined(separator: "，"))"
             if addedCount > 0 {
                 msg += "\n新增房号：\(addedRoomNo.joined(separator: "，"))"

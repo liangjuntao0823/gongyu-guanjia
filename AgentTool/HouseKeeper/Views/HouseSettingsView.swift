@@ -220,20 +220,12 @@ struct CosConfigView: View {
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                     .keyboardType(.URL)
-                // v1.40 第3点：地址独立「保存 / 验证 / 清空」——此前保存按钮依赖桶配置填全，
-                // 只填地址点不动、退出又回默认；现地址单独保存，另加验证与清空
+                // v1.41 第7点：三个按钮合并为两个——「保存并验证」（先存地址再验证连通）+「清空地址」
                 HStack(spacing: 8) {
                     Button {
-                        saveFunctionURL()
+                        saveAndVerifyFunctionURL()
                     } label: {
-                        Label("保存地址", systemImage: "checkmark.circle")
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(isVerifying)
-                    Button {
-                        verifyFunctionURL()
-                    } label: {
-                        Label(isVerifying ? "验证中…" : "验证地址", systemImage: "antenna.radiowaves.left.and.right")
+                        Label(isVerifying ? "验证中…" : "保存并验证", systemImage: isVerifying ? "antenna.radiowaves.left.and.right" : "checkmark.circle")
                     }
                     .buttonStyle(.bordered)
                     .disabled(isVerifying)
@@ -466,21 +458,15 @@ struct CosConfigView: View {
         }
     }
 
-    // v1.40 第3点：云函数地址独立保存（不再依赖桶配置填全）
-    private func saveFunctionURL() {
+    // v1.41 第7点：云函数地址「保存并验证」——先保存地址，再访问后台首页（act=admin 无需口令）验证连通
+    private func saveAndVerifyFunctionURL() {
         functionURL = functionURL.trimmingCharacters(in: .whitespacesAndNewlines)
         CloudConfig.functionURL = functionURL
-        savedTip = functionURL.isEmpty ? "云函数地址已清空" : "云函数地址已保存"
-    }
-
-    // v1.40 第3点：验证云函数地址——访问后台首页（act=admin 无需口令），200 = 部署正常
-    private func verifyFunctionURL() {
-        let urlText = functionURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        let urlText = functionURL
         guard !urlText.isEmpty else {
-            savedTip = "请先填写云函数地址"
+            savedTip = "云函数地址已清空"
             return
         }
-        CloudConfig.functionURL = urlText
         guard let url = URL(string: "\(urlText)?act=admin") else {
             savedTip = "地址格式不正确（应包含 https://）"
             return
@@ -490,13 +476,13 @@ struct CosConfigView: View {
             DispatchQueue.main.async {
                 self.isVerifying = false
                 if let http = resp as? HTTPURLResponse, http.statusCode == 200 {
-                    self.savedTip = "地址正确，后台可连接 ✅"
+                    self.savedTip = "地址已保存并验证：后台可连接 ✅"
                 } else if let http = resp as? HTTPURLResponse {
-                    self.savedTip = "云函数返回 HTTP \(http.statusCode)，请确认函数已部署且地址完整（末尾带 .tencentscf.com）"
+                    self.savedTip = "地址已保存；云函数返回 HTTP \(http.statusCode)，请确认函数已部署且地址完整（末尾带 .tencentscf.com）"
                 } else if let err = err {
-                    self.savedTip = "连接失败：\(err.localizedDescription)"
+                    self.savedTip = "地址已保存；连接失败：\(err.localizedDescription)"
                 } else {
-                    self.savedTip = "连接失败，请检查网络与地址"
+                    self.savedTip = "地址已保存；连接失败，请检查网络与地址"
                 }
             }
         }.resume()
@@ -760,7 +746,9 @@ struct CosConfigView: View {
         }
     }
 
-    /// 清空全部配置：删除钥匙串 5 项并清空表单
+    /// 清空全部配置：删除钥匙串 COS 5 项 + 云函数地址 + 用户名，并清空表单
+    /// v1.41（C2 补全）：此前只删 COS 5 项——云函数地址（UserDefaults）与用户名（UserDefaults）未清，
+    /// 「清空全部配置」后 App 仍带旧地址/旧用户名连接云端，不是真正「断开全部连接」。
     private func clearAllConfig() {
         var allCleared = true
         let keys = [
@@ -775,12 +763,19 @@ struct CosConfigView: View {
                 allCleared = false
             }
         }
+        // v1.41：一并清云函数地址与用户名（都存 UserDefaults，重装后才可能残留，主动清空）
+        CloudConfig.clearFunctionURL()
+        CloudUser.username = ""
         bucket = ""
         region = ""
         secretId = ""
         secretKey = ""
         customDomain = ""
-        savedTip = allCleared ? "已清空全部配置并断开与 COS 的连接 ✅" : "部分配置清除失败，请重启 App 后重试"
+        functionURL = ""
+        username = ""
+        // 置空后复核：钥匙串 5 项删除成功 + 云函数地址与用户名均已清空
+        let cleared = CloudConfig.functionURL.isEmpty && CloudUser.username.isEmpty
+        savedTip = (allCleared && cleared) ? "已清空全部配置并断开与云端的连接 ✅" : "部分配置清除失败，请重启 App 后重试"
     }
 
     private func refreshFormFromKeychain() {

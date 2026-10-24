@@ -1901,11 +1901,19 @@ struct WatermarkSettingsView: View {
     var body: some View {
         Form {
             Section {
-                Toggle("分享页加水印", isOn: $enabled)
-                    .onChange(of: enabled) { _, newValue in
-                        // v1.40 第1点：开关即改即存——拨动立即生效，不再依赖「保存」按钮，避免误以为关不掉
-                        WatermarkSettingsStore.current = draft
+                // v1.41：Toggle 改用显式 Binding——set 时立即用新值写 store，
+                // 不再依赖 onChange 的闭包捕获时序，开关「即拨即生效、返回即显示最新状态」
+                Toggle(isOn: Binding(
+                    get: { enabled },
+                    set: { newValue in
+                        enabled = newValue
+                        var wm = WatermarkSettingsStore.current
+                        wm.enabled = newValue
+                        WatermarkSettingsStore.current = wm
                     }
+                )) {
+                    Text("分享页加水印")
+                }
             } footer: {
                 Text("开启后，新生成的分享 H5 会在每张图片右下角叠加水印；已分享出去的旧链接不受影响。关闭即保存，下次分享不带水印。")
             }
@@ -2328,6 +2336,9 @@ struct AdminDashboardView: View {
 
     // MARK: 分享记录
 
+    /// v1.41：分享记录加载完成标志——云函数返回「空记录」时不再无限转圈（此前的三分支缺空态，永远 ProgressView）
+    @State private var sharesLoaded = false
+
     private var sharesView: some View {
         Group {
             if !shares.isEmpty {
@@ -2357,6 +2368,15 @@ struct AdminDashboardView: View {
                     }
                 }
                 .listStyle(.insetGrouped)
+            } else if sharesLoaded {
+                // v1.41：空记录终态——「还没有分享过」而非一直转圈
+                ContentUnavailableView {
+                    Label("暂无分享记录", systemImage: "square.and.arrow.up")
+                } description: {
+                    Text("分享过房源后，记录会显示在这里。")
+                } actions: {
+                    Button("刷新") { loadShares() }
+                }
             } else if let statsError = statsError {
                 ContentUnavailableView {
                     Label("记录加载失败", systemImage: "exclamationmark.triangle")
@@ -2374,6 +2394,7 @@ struct AdminDashboardView: View {
     private func loadShares() {
         shares = []
         statsError = nil
+        sharesLoaded = false
         // v1.24：按用户名读自己的分享记录（云函数 do_shares 按 u 过滤）
         let u = (CloudUser.username).addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
         guard let url = URL(string: "\(CloudConfig.functionURL)?act=shares&k=\(CloudConfig.passwordHash)&u=\(u)") else {
@@ -2386,7 +2407,10 @@ struct AdminDashboardView: View {
                 DispatchQueue.main.async { statsError = self.cloudFunctionError(resp, fallback: "云函数未返回分享记录（请确认函数已部署）") }
                 return
             }
-            DispatchQueue.main.async { shares = obj.records }
+            DispatchQueue.main.async {
+                shares = obj.records
+                sharesLoaded = true
+            }
         }.resume()
     }
 
@@ -2867,6 +2891,8 @@ extension CosUploader {
     /// 把云端 h/<roomKey>/ 的媒体下载到本地 MediaStore 目录，返回 (本地文件名, kind)。
     /// 跳过非媒体对象（cover、缩略图、分享页、账本等）。视频云端为 mp4、图片保留原扩展。
     /// v1.37：改为幂等回补——本地已存在同名文件直接跳过，缺失的用云端原名写回（不产生重复文件）。
+    /// v1.41：视频名归一化——云端视频统一 .mp4，本地写回 .mov（与账本 mediaNames 的本地原始名一致），
+    ///        彻底消除「账本 .mov ↔ 本地磁盘 .mp4」的同步误判（此前每次同步都误报媒体缺失）。
     static func downloadHouseMedia(roomKey: String, config: CosConfig) async throws -> [(fileName: String, kind: String)] {
         let objs = try await listObjects(prefix: "h/\(roomKey)/", config: config)
         var result: [(fileName: String, kind: String)] = []
@@ -2877,12 +2903,29 @@ extension CosUploader {
             let isVideo = lower.hasSuffix(".mp4") || lower.hasSuffix(".mov")
             let isImage = [".jpg", ".jpeg", ".png", ".heic", ".webp", ".gif"].contains { lower.hasSuffix($0) }
             guard isVideo || isImage else { continue }
-            // 本地已有同名文件 → 跳过（幂等回补，避免重复生成新序号文件）
-            if existing.contains(name) { continue }
+            // v1.41：本地名归一化——视频云端 .mp4 → 本地写 .mov（账本/本地记录均用 .mov）
+            var localName = name
+            if isVideo, lower.hasSuffix(".mp4"), !existing.contains(name) {
+                localName = (name as NSString).deletingPathExtension + ".mov"
+            }
+            // 本地已有（.mov 归一化名或云端原名）→ 跳过（幂等回补）
+            if existing.contains(localName) || existing.contains(name) { continue }
             let data = try await fetchObjectData(path: obj.name, config: config)
-            _ = MediaStore.write(data: data, fileName: name, roomKey: roomKey)
-            result.append((name, isVideo ? "video" : "image"))
+            _ = MediaStore.write(data: data, fileName: localName, roomKey: roomKey)
+            result.append((localName, isVideo ? "video" : "image"))
         }
         return result
+    }
+
+    /// v1.41：删除单条媒体的云端对象——图片删 h/<房号>/<原名>；视频删 h/<房号>/<同名>.mp4，
+    /// 并顺带清用户私有区的视频首帧缩略图。编辑保存删除媒体时调用，保证「删了别人也看不到」。
+    /// 无云端配置或对象不存在时静默跳过（不打断本地删除）。
+    static func deleteRemoteMedia(fileName: String, kind: String, roomKey: String, config: CosConfig?) async throws {
+        guard let config = config ?? CosConfig.load(), config.isValid, !fileName.isEmpty else { return }
+        let remoteName = kind == "video" ? ((fileName as NSString).deletingPathExtension) + ".mp4" : fileName
+        try? await CloudBackupService.deleteRemoteObject(name: "h/\(roomKey)/\(remoteName)", config: config)
+        if kind == "video" {
+            try? await CloudBackupService.deleteRemoteObject(name: "\(CloudUser.sharePagePrefix)\(roomKey)/\(fileName).vthumb.jpg", config: config)
+        }
     }
 }

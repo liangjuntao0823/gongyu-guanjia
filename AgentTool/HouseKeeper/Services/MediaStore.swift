@@ -23,8 +23,9 @@ enum DataRoot {
 /// （v1.40 前为 Documents/备份/Media/<房号>/，升级启动时自动整体迁移，读取兼容旧位置）
 /// 数据库里只保存文件名，文件本体在磁盘，避免 SwiftData 存储膨胀
 /// Documents 已开启文件共享（UIFileSharingEnabled），可在 iOS「文件」App 中查看
-/// 文件命名规则：照片「房号-JPG-1.jpg / 房号-JPG-2.jpg …」，视频「房号-MOV-1.mov / 房号-MOV-2.mov …」
-///   （序号从 1 开始，取当前第一个空缺序号；删除后自动复用；旧版 UUID 命名的文件仍可正常读取）
+/// 文件命名规则：照片「房号-JPG-唯一ID-N.jpg / 房号-JPG-唯一ID-N.jpg …」，视频「房号-MOV-唯一ID-N.mov …」
+///   v1.41：文件名带 8 位唯一 ID（UUID 前缀），删除后重加照片不会复用旧序号文件名——
+///   云端账本 mediaNames 对比能精确感知「新增/删除」；旧版「房号-TAG-N.ext」命名的文件仍正常读取
 enum MediaStore {
     static let mediaDirectoryName = "media"
 
@@ -59,18 +60,25 @@ enum MediaStore {
         return dir
     }
 
-    /// 生成「房号-类型-N.扩展名」序号文件名（N 从 1 开始，取当前第一个空缺序号）
+    /// v1.41：8 位短唯一 ID（UUID 前缀），保证每次新增文件的云端对象名不同，同步时可区分新旧
+    private static func uniqueID() -> String {
+        String(UUID().uuidString.prefix(8)).lowercased()
+    }
+
+    /// 生成「房号-类型-唯一ID-N.扩展名」文件名（v1.41 起带唯一 ID；
+    /// N 从 1 开始防同批内重复；旧版「房号-类型-N.扩展名」不再生成，但可正常读取）
     private static func nextFileName(roomKey: String, tag: String, ext: String) -> String {
         let dir = houseDirectory(roomKey: roomKey)
         let existing = (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []
         var n = 1
-        while existing.contains("\(roomKey)-\(tag)-\(n).\(ext)") {
+        let uid = uniqueID()
+        while existing.contains("\(roomKey)-\(tag)-\(uid)-\(n).\(ext)") {
             n += 1
         }
-        return "\(roomKey)-\(tag)-\(n).\(ext)"
+        return "\(roomKey)-\(tag)-\(uid)-\(n).\(ext)"
     }
 
-    /// 保存二进制数据（照片转 JPEG 后调用），返回文件名（房号-JPG-N.jpg）
+    /// 保存二进制数据（照片转 JPEG 后调用），返回文件名（房号-JPG-唯一ID-N.jpg）
     static func save(data: Data, ext: String, roomKey: String) -> String {
         let cleanExt = ext.lowercased()
         let fileName = nextFileName(roomKey: roomKey, tag: cleanExt.uppercased(), ext: cleanExt)
@@ -79,7 +87,7 @@ enum MediaStore {
         return fileName
     }
 
-    /// 保存临时文件（相册选中的视频等），拷贝到 App 目录，返回文件名（房号-MOV-N.扩展名）
+    /// 保存临时文件（相册选中的视频等），拷贝到 App 目录，返回文件名（房号-MOV-唯一ID-N.扩展名）
     static func saveFile(from source: URL, roomKey: String) -> String {
         let ext = source.pathExtension.isEmpty ? "mov" : source.pathExtension
         let cleanExt = ext.lowercased()
@@ -99,6 +107,20 @@ enum MediaStore {
         let legacyHouseURL = legacyMediaDirectory.appendingPathComponent(roomKey, isDirectory: true).appendingPathComponent(fileName)
         if FileManager.default.fileExists(atPath: legacyHouseURL.path) {
             return legacyHouseURL
+        }
+        // v1.41：视频 .mov/.mp4 互换兜底——历史版本云端下载曾以 .mp4 落盘而账本记录 .mov（或相反），
+        // 直接按原名找不到时用互换扩展名再试，保证「恢复备份后视频打不开」的旧数据仍能打开
+        let ext = (fileName as NSString).pathExtension.lowercased()
+        if ext == "mov" || ext == "mp4" {
+            let swapped = ((fileName as NSString).deletingPathExtension) + (ext == "mov" ? ".mp4" : ".mov")
+            let swappedNew = houseDirectory(roomKey: roomKey).appendingPathComponent(swapped)
+            if FileManager.default.fileExists(atPath: swappedNew.path) {
+                return swappedNew
+            }
+            let swappedLegacy = legacyMediaDirectory.appendingPathComponent(roomKey, isDirectory: true).appendingPathComponent(swapped)
+            if FileManager.default.fileExists(atPath: swappedLegacy.path) {
+                return swappedLegacy
+            }
         }
         // 旧版平铺目录（备份/Media/<文件名>；迁移后平铺文件已随目录一起进入 media/）
         return mediaDirectory().appendingPathComponent(fileName)
@@ -268,7 +290,12 @@ enum ShareCacheStore {
     static func load(roomKey: String, mode: String) -> ShareCacheRecord? {
         let primary = fileURL(roomKey: roomKey, mode: mode)
         if let record = decode(primary) { return record }
-        if mode == "masked", let record = decode(legacyFileURL(roomKey: roomKey)) { return record }
+        if mode == "masked", let record = decode(legacyFileURL(roomKey: roomKey)) {
+            // v1.41（B7 收敛）：旧版单文件缓存命中后立即删除旧文件（迁移为新文件名），
+            // 避免 ShareCache 目录长期残留 <房号>.json 旧缓存；旧数据只迁不删会越积越多
+            try? FileManager.default.removeItem(at: legacyFileURL(roomKey: roomKey))
+            return record
+        }
         return nil
     }
 

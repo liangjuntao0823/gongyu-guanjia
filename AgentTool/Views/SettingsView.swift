@@ -71,6 +71,13 @@ struct SettingsView: View {
     // v1.6：房源分享设置合并进主设置（原房源板块独立设置页取消）
     @State private var showHouseCacheConfirm = false
     @State private var houseCacheTip: String?
+    @State private var watermarkSubtitle = ""   // v1.41：分享水印入口副标题（onAppear 刷新，返回设置页即显示最新开关状态）
+
+    /// v1.41：刷新分享水印入口副标题（返回设置页 / 页面出现时读取最新 store，立即反映开关状态）
+    private func refreshWatermarkSubtitle() {
+        let wm = WatermarkSettingsStore.current
+        watermarkSubtitle = wm.enabled ? "已开启 · \(wm.text)" : "已关闭"
+    }
     @AppStorage("notificationSound_rent") private var rentSound = "system"
     @AppStorage("notificationSound_expiry") private var expirySound = "system"
     @AppStorage("notificationSound_payout") private var payoutSound = "system"
@@ -109,13 +116,14 @@ struct SettingsView: View {
                 Label("名片信息", systemImage: "person.crop.circle")
             }
             // v1.36 需求3：分享水印设置（开关/文本/字号/透明度/位置/预览/保存/清除）
+            // v1.41：入口副标题改为 onAppear 刷新——从水印页返回设置页时立即显示最新开关状态（此前静态文本可能不重算）
             NavigationLink {
                 WatermarkSettingsView()
             } label: {
                 Label {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("分享水印")
-                        Text(WatermarkSettingsStore.current.enabled ? "已开启 · \(WatermarkSettingsStore.current.text)" : "已关闭")
+                        Text(watermarkSubtitle)
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
@@ -123,6 +131,7 @@ struct SettingsView: View {
                     Image(systemName: "camera.aperture")
                 }
             }
+            .onAppear { refreshWatermarkSubtitle() }
             // v1.36 需求7：管理后台口令（网页版登录；App 内免登录）
             NavigationLink {
                 AdminPasswordView()
