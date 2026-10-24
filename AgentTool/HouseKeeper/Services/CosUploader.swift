@@ -2421,7 +2421,7 @@ struct CloudOpsResponse: Codable {
 
 enum CloudOps {
     static var isConfigured: Bool {
-        !CloudConfig.functionURL.isEmpty && !CloudConfig.secretId.isEmpty && !CloudConfig.secretKey.isEmpty
+        !CloudConfig.functionURL.isEmpty && !CloudConfig.passwordHash.isEmpty
     }
     private static var baseURL: URL? { URL(string: CloudConfig.functionURL) }
 
