@@ -4,7 +4,7 @@ import CryptoKit
 import UIKit
 
 // MARK: - v1.12 备份体系 v2：快照 v5（统一快照格式）
-// 一份快照 = 经营 JSON + 媒体指纹清单（schemaVersion 4 → 5，兼容旧版备份导入）。
+// 一份快照 = 经营 JSON + 媒体指纹清单（schemaVersion 4 → 5 → 6，兼容旧版备份导入）。
 // 备份分两类：
 //   · 快速备份（fast）：快照 zip（不含房源、不含媒体文件本体），自动/手动均可用，自动上传云端；
 //     v1.56 起不再写入房源（房源以云端为准，恢复后统一从云端同步，避免快照无云端状态导致同步冲突）
@@ -69,6 +69,10 @@ struct HouseExportDTO: Codable {
     var updatedAt: Date
     var isDeleted: Bool?
     var deletedAt: Date?
+    /// v1.57：补齐云端状态与最后更新时间——缺失会导致全量恢复后所有房源变「仅本地」，
+    /// 再同步时把云端已删房源当作本地新增补传回云端（已删房源复活）
+    var cloudStatusRaw: String?
+    var lastUpdatedAt: Date?
     var mediaItems: [MediaDTO]
 }
 
@@ -76,7 +80,6 @@ struct HouseBundleDTO: Codable {
     var schemaVersion: Int
     var houses: [HouseExportDTO]
 }
-
 /// 恢复完成分行统计（用户锁定口径）
 struct RestoreStatsV5 {
     var deals: Int = 0          // 成交
@@ -215,12 +218,14 @@ final class BackupV5Manager {
                 updatedAt: house.updatedAt,
                 isDeleted: house.isDeleted,
                 deletedAt: house.deletedAt,
+                cloudStatusRaw: house.cloudStatusRaw,
+                lastUpdatedAt: house.lastUpdatedAt,
                 mediaItems: house.mediaItems.map {
                     HouseExportDTO.MediaDTO(id: $0.id, fileName: $0.fileName, kind: $0.kind)
                 }
             )
         }
-        let bundle = HouseBundleDTO(schemaVersion: 5, houses: houses)
+        let bundle = HouseBundleDTO(schemaVersion: 6, houses: houses)
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         return try encoder.encode(bundle)
@@ -390,7 +395,7 @@ final class BackupV5Manager {
         // 1. 校验
         guard ZipStore.isZip(url: zipURL) else { throw BackupV5Error.invalidBackup("不是有效的 zip 文件") }
         guard let manifest = readManifest(from: zipURL) else { throw BackupV5Error.invalidBackup("缺少 manifest.json（可能不是公寓管家备份）") }
-        guard manifest.schemaVersion <= 5 else { throw BackupV5Error.invalidBackup("备份版本 \(manifest.schemaVersion) 高于当前 App 支持的 5，请升级 App 后再恢复") }
+        guard manifest.schemaVersion <= 6 else { throw BackupV5Error.invalidBackup("备份版本 \(manifest.schemaVersion) 高于当前 App 支持的 6，请升级 App 后再恢复") }
         let kind = BackupKindV5(rawValue: manifest.kind) ?? .fast
         guard let businessData = try? ZipStore.extract(at: zipURL, path: "business.json") else {
             throw BackupV5Error.invalidBackup("缺少 business.json")
@@ -603,6 +608,9 @@ final class BackupV5Manager {
             house.updatedAt = dto.updatedAt
             house.isDeleted = dto.isDeleted
             house.deletedAt = dto.deletedAt
+            // v1.57：还原云端状态与最后更新时间（旧备份无此字段 → nil，维持原行为）
+            house.cloudStatusRaw = dto.cloudStatusRaw
+            house.lastUpdatedAt = dto.lastUpdatedAt
             houseContext.insert(house)
             for mediaDTO in dto.mediaItems {
                 let media = MediaItem(fileName: mediaDTO.fileName, kind: mediaDTO.kind)
