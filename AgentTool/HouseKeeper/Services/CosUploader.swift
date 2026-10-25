@@ -980,7 +980,8 @@ enum CosUploader {
         load();
         </script>
         </body>
-        </html>"""
+        </html>
+"""
 
     }
 
