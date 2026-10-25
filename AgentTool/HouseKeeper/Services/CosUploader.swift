@@ -2283,7 +2283,7 @@ struct AdminDashboardView: View {
                             }
                         }
                     }
-                    Section("最近访问") {
+                    Section {
                         ForEach(Array(stats.recent.enumerated()), id: \.offset) { _, item in
                             VStack(alignment: .leading, spacing: 3) {
                                 HStack {
@@ -2297,6 +2297,8 @@ struct AdminDashboardView: View {
                                 }
                             }
                         }
+                    } header: {
+                        Text("最近访问")
                     } footer: {
                         // v1.46 统计隔离：明确提示当前统计归属
                         Text("统计仅包含当前用户名「\(CloudUser.displayName)」名下埋点，各用户互不干扰。")
