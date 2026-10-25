@@ -22,7 +22,6 @@ final class NetworkMonitor {
     var isReachable: Bool {
         startIfNeeded()
         let path = monitor.currentPath
-        guard path.status != .requiresConnection, path.isValid else { return false }
         return path.status == .satisfied
     }
 

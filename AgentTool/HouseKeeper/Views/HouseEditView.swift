@@ -48,7 +48,59 @@ struct HouseEditView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
+            formContent
+                .navigationTitle(isEditing ? "编辑房源" : "登记房源")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button("取消") { dismiss() }
+                    }
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("保存") { save() }
+                            .fontWeight(.semibold)
+                    }
+                }
+                .onChange(of: selectedPhotos) { _, newValue in
+                    guard !newValue.isEmpty else { return }
+                    Task { await loadPhotos(from: newValue) }
+                }
+                .onChange(of: selectedVideos) { _, newValue in
+                    guard !newValue.isEmpty else { return }
+                    Task { await loadVideos(from: newValue) }
+                }
+                .alert("无法保存", isPresented: Binding(
+                    get: { showError },
+                    set: { showError = $0 }
+                )) {
+                    Button("好", role: .cancel) {}
+                } message: {
+                    Text(errorMessage)
+                }
+                // v1.40 第10点：无网络时保存新增/编辑房源 → 先提示「仅存本机」，确认后才落盘（联网后可同步云端）
+                .alert("当前无网络", isPresented: $showOfflineAlert) {
+                    Button("仅存本机", role: .destructive) { performSave() }
+                    Button("取消", role: .cancel) {}
+                } message: {
+                    Text("检测不到网络连接，本次保存只会存在本机，不会同步到云端。联网后可在房源列表刷新同步。")
+                }
+                // v1.42：保存后上传云端失败 → 提示已存本机、待网络恢复自动补传（媒体已入队，账本恢复后刷新同步）
+                .alert("已保存到本机", isPresented: Binding(
+                    get: { pendingUploadTip != nil },
+                    set: { if !$0 { pendingUploadTip = nil } }
+                )) {
+                    Button("好", role: .cancel) {}
+                } message: {
+                    Text(pendingUploadTip ?? "")
+                }
+                .onAppear(perform: loadFromHouse)
+        }
+    }
+
+    /// v1.42：Form 主体拆分为独立计算属性——body 的导航栏/多个 alert 链叠加在超大 Form 类型上
+    /// 触发编译器「unable to type-check this expression in reasonable time」（报错 49:25），
+    /// 拆分后 body 与各链的类型推断负担大幅下降。
+    private var formContent: some View {
+        Form {
                 Section("基本信息") {
                     HStack {
                         Text("房号")
@@ -218,51 +270,6 @@ struct HouseEditView: View {
                     Text("照片和视频保存在本机，分享时随房源信息一起发送。")
                 }
             }
-            .navigationTitle(isEditing ? "编辑房源" : "登记房源")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("取消") { dismiss() }
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("保存") { save() }
-                        .fontWeight(.semibold)
-                }
-            }
-            .onChange(of: selectedPhotos) { _, newValue in
-                guard !newValue.isEmpty else { return }
-                Task { await loadPhotos(from: newValue) }
-            }
-            .onChange(of: selectedVideos) { _, newValue in
-                guard !newValue.isEmpty else { return }
-                Task { await loadVideos(from: newValue) }
-            }
-            .alert("无法保存", isPresented: Binding(
-                get: { showError },
-                set: { showError = $0 }
-            )) {
-                Button("好", role: .cancel) {}
-            } message: {
-                Text(errorMessage)
-            }
-            // v1.40 第10点：无网络时保存新增/编辑房源 → 先提示「仅存本机」，确认后才落盘（联网后可同步云端）
-            .alert("当前无网络", isPresented: $showOfflineAlert) {
-                Button("仅存本机", role: .destructive) { performSave() }
-                Button("取消", role: .cancel) {}
-            } message: {
-                Text("检测不到网络连接，本次保存只会存在本机，不会同步到云端。联网后可在房源列表刷新同步。")
-            }
-            // v1.42：保存后上传云端失败 → 提示已存本机、待网络恢复自动补传（媒体已入队，账本恢复后刷新同步）
-            .alert("已保存到本机", isPresented: Binding(
-                get: { pendingUploadTip != nil },
-                set: { if !$0 { pendingUploadTip = nil } }
-            )) {
-                Button("好", role: .cancel) {}
-            } message: {
-                Text(pendingUploadTip ?? "")
-            }
-            .onAppear(perform: loadFromHouse)
-        }
     }
 
     // MARK: - 载入 / 保存
