@@ -110,6 +110,7 @@ enum CosConfigStore {
 /// 把钥匙串里的 COS 配置导出为 JSON（v1.34 改为生成「桶名_地域_日期.json」文件由用户选择位置保存），
 /// 换机 / 重装 / 误改后可从备份文件一键恢复。配置含密钥，备份文件请妥善保管。
 enum CosConfigBackup {
+    /// v1.44：备份文件补全云函数地址 + 用户名——换机/重装后一键还原应包含完整连接参数与身份
     static func exportJSON() -> String? {
         guard let config = CosConfig.load() else { return nil }
         let dict: [String: String] = [
@@ -117,7 +118,9 @@ enum CosConfigBackup {
             "region": config.region,
             "secretId": config.secretId,
             "secretKey": config.secretKey,
-            "customDomain": config.customDomain
+            "customDomain": config.customDomain,
+            "functionURL": CloudConfig.functionURL,
+            "username": CloudUser.username
         ]
         guard let data = try? JSONSerialization.data(withJSONObject: dict, options: [.prettyPrinted, .sortedKeys]),
               let json = String(data: data, encoding: .utf8) else { return nil }
@@ -144,6 +147,8 @@ enum CosConfigBackup {
         let secretId = (dict["secretId"] as? String ?? "").trimmingCharacters(in: trimSet)
         let secretKey = (dict["secretKey"] as? String ?? "").trimmingCharacters(in: trimSet)
         let customDomain = (dict["customDomain"] as? String ?? "").trimmingCharacters(in: trimSet)
+        let functionURL = (dict["functionURL"] as? String ?? "").trimmingCharacters(in: trimSet)
+        let uname = (dict["username"] as? String ?? "").trimmingCharacters(in: trimSet)
         if bucket.isEmpty || region.isEmpty || secretId.isEmpty || secretKey.isEmpty {
             return (false, "配置缺少必填项（存储桶 / 地域 / SecretId / SecretKey），请检查备份文件")
         }
@@ -163,7 +168,13 @@ enum CosConfigBackup {
         if !allSaved {
             return (false, "写入本机钥匙串失败，请重试；若仍失败请重启 App 后再试")
         }
-        let msg = "配置已恢复：地域 " + region + " / 存储桶 " + bucket + "\n表单已刷新，可点「保存并验证连接」确认可用"
+        // v1.44：备份里的云函数地址 + 用户名一并还原（旧备份无此字段时保持原值，不覆盖）
+        if !functionURL.isEmpty { CloudConfig.functionURL = functionURL }
+        if !uname.isEmpty { CloudUser.username = uname }
+        let msg = "配置已恢复：地域 " + region + " / 存储桶 " + bucket
+            + (functionURL.isEmpty ? "" : "\n云函数地址：\(functionURL)")
+            + (uname.isEmpty ? "" : "\n用户名：\(uname)")
+            + "\n表单已刷新，可点「保存并验证连接」确认可用"
         return (true, msg)
     }
 }
@@ -181,7 +192,6 @@ struct CosConfigView: View {
     @State private var isVerifying = false
     // v1.34：文件备份 / 恢复 + 清空配置（v1.35：备份直写「备份」文件夹；v1.36：恢复改为列表选择）
     @State private var showRestoreList = false
-    @State private var showImporter = false
     @State private var confirmClear = false
     @State private var showBrowseConfig = false   // v1.7：查看 COS 配置备份文件（内部浏览组件，只读）
     // v1.37：多用户「导出给别人用」改 SwiftUI sheet 弹系统分享面板（此前手动 present 被 alert 覆盖弹不出）
@@ -423,28 +433,11 @@ struct CosConfigView: View {
             ConfigRestoreListView(
                 onPick: { url in
                     handleRestoreFile(url)
-                },
-                onImportOther: {
-                    // 先关列表再弹系统选择器（延迟 0.35s 避免 sheet 交替冲突，列表选择式写法）
-                    showRestoreList = false
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-                        showImporter = true
-                    }
                 }
             )
         }
         .sheet(isPresented: $showBrowseConfig) {
             CosBackupBrowseView()
-        }
-        .fileImporter(isPresented: $showImporter, allowedContentTypes: [.json], allowsMultipleSelection: false) { result in
-            switch result {
-            case .success(let urls):
-                if let url = urls.first {
-                    handleRestoreFile(url)
-                }
-            case .failure(let error):
-                savedTip = "无法读取所选文件：\(error.localizedDescription)"
-            }
         }
         // v1.37：导出「给别人用」配置 → 系统分享面板（SwiftUI sheet，保证能弹出）
         .sheet(isPresented: $showProfileShare) {
@@ -897,10 +890,10 @@ struct DeployGuideView: View {
 }
 
 /// 列出「备份」文件夹内的 .json 备份文件，点击直接恢复（与主 App 恢复备份同款列表写法）；
-/// 列表底部提供「从其他位置选择」用系统文件选择器兜底（保留自由选择路径的能力）
+/// 列表底部提供「从其他位置选择」用系统文件选择器兜底（保留自由选择路径的能力）。
+/// v1.44：文件选择器改为本列表视图内自挂（此前跨视图延迟弹 sheet 在 iOS 上偶发被吞，按钮无效）
 struct ConfigRestoreListView: View {
     let onPick: (URL) -> Void
-    let onImportOther: () -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var files: [URL] = []
 
@@ -920,7 +913,7 @@ struct ConfigRestoreListView: View {
                             .multilineTextAlignment(.center)
                             .padding(.horizontal, 24)
                         Button {
-                            onImportOther()
+                            showImporter = true
                         } label: {
                             Label("从其他位置选择…", systemImage: "folder")
                                 .font(.subheadline)
@@ -956,7 +949,7 @@ struct ConfigRestoreListView: View {
                         }
                         Section {
                             Button {
-                                onImportOther()
+                                showImporter = true
                             } label: {
                                 Label("从其他位置选择…", systemImage: "folder")
                             }
@@ -973,6 +966,18 @@ struct ConfigRestoreListView: View {
                 }
             }
             .onAppear(perform: loadFiles)
+            // v1.44：文件选择器直接挂在本视图上（不再经父视图延迟弹），保证点按钮立即弹出系统文件选择器
+            .fileImporter(isPresented: $showImporter, allowedContentTypes: [.json], allowsMultipleSelection: false) { result in
+                switch result {
+                case .success(let urls):
+                    if let url = urls.first {
+                        onPick(url)
+                        dismiss()
+                    }
+                case .failure:
+                    break
+                }
+            }
         }
     }
 

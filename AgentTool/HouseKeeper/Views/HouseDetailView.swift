@@ -47,12 +47,16 @@ struct HouseDetailView: View {
     @State private var isDownloading = false
     @State private var cloudDeleteMessage: String?
     @State private var deleteResultMessage: String?   // v1.19 补全：删除成功提示（区分 本地/本地+云端/云端）
+    // v1.44：媒体区刷新信号——自动补缺/下载完成后 post houseStoreChanged，用 .id() 强制重建媒体区，
+    //        修复「文件已下载但详情页仍显示空白占位，需重进 App 才显示」的问题
+    @State private var mediaRefreshTick = 0
 
     // v1.19：把滚动主体拆为独立子视图，避免 Swift 编译器对整个 body 一次类型检查超时
     private var detailScroll: some View {
         ScrollView {
             VStack(spacing: 14) {
-                mediaSection
+                // v1.44：mediaRefreshTick 变化时强制重建媒体区（自动补缺下载完成后即时显示）
+                mediaSection.id(mediaRefreshTick)
                 infoCard
                 actionCard
             }
@@ -192,6 +196,10 @@ struct HouseDetailView: View {
         dialogLayer
         // v1.43：打开详情自动补缺——记录在但磁盘文件缺失且云端有 → 自动下载回补（用户手删 media 文件夹后重开不再空白）
         .onAppear { repairMissingMediaIfNeeded() }
+        // v1.44：收到房源数据变更通知（下载完成/编辑保存等）→ 触发媒体区重建，下载后立即显示
+        .onReceive(NotificationCenter.default.publisher(for: HouseListView.houseStoreChanged)) { _ in
+            mediaRefreshTick += 1
+        }
         .alert("无法分享", isPresented: Binding(
             get: { shareError != nil },
             set: { if !$0 { shareError = nil } }
@@ -649,6 +657,8 @@ struct HouseDetailView: View {
                     }
                     house.cloudStatus = .both
                     try? modelContext.save()
+                    // v1.44：下载完成立即通知刷新媒体区
+                    NotificationCenter.default.post(name: HouseListView.houseStoreChanged, object: nil)
                     isDownloading = false
                     cloudDeleteMessage = "已下载 \(files.count) 个媒体到本地，现在可以编辑、分享或一键保存了。";
                 }
@@ -691,6 +701,8 @@ struct HouseDetailView: View {
                         modelContext.insert(item)
                     }
                     try? modelContext.save()
+                    // v1.44：下载完成立即通知刷新媒体区（否则详情页仍显示空白占位，需重进 App）
+                    NotificationCenter.default.post(name: HouseListView.houseStoreChanged, object: nil)
                     isDownloading = false
                 }
             } else {
@@ -726,6 +738,8 @@ struct HouseDetailView: View {
                     }
                     house.cloudStatus = .both
                     try? modelContext.save()
+                    // v1.44：下载完成立即通知刷新媒体区
+                    NotificationCenter.default.post(name: HouseListView.houseStoreChanged, object: nil)
                     isDownloading = false
                     cloudDeleteMessage = "云端房源已自动下载到本地，请再点一次刚才的操作。";
                 }
