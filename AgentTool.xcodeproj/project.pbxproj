@@ -45,7 +45,7 @@
 		A10000010000000000000104 /* HouseDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000104 /* HouseDetailView.swift */; };
 		A10000010000000000000105 /* HouseEditView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000105 /* HouseEditView.swift */; };
 		A10000010000000000000106 /* HouseListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000106 /* HouseListView.swift */; };
-		A10000010000000000000107 /* HouseBatchImportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000107 /* HouseBatchImportView.swift */; };
+		A10000010000000000000118 /* HouseBatchImportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000118 /* HouseBatchImportView.swift */; };
 		A10000010000000000000107 /* HouseSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000107 /* HouseSettingsView.swift */; };
 		A10000010000000000000108 /* BackupLogStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000108 /* BackupLogStore.swift */; };
 		A10000010000000000000109 /* BackupV5Manager.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000109 /* BackupV5Manager.swift */; };
@@ -98,7 +98,7 @@
 		B10000010000000000000104 /* HouseDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HouseDetailView.swift; sourceTree = "<group>"; };
 		B10000010000000000000105 /* HouseEditView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HouseEditView.swift; sourceTree = "<group>"; };
 		B10000010000000000000106 /* HouseListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HouseListView.swift; sourceTree = "<group>"; };
-		B10000010000000000000107 /* HouseBatchImportView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HouseBatchImportView.swift; sourceTree = "<group>"; };
+		B10000010000000000000118 /* HouseBatchImportView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HouseBatchImportView.swift; sourceTree = "<group>"; };
 		B10000010000000000000107 /* HouseSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HouseSettingsView.swift; sourceTree = "<group>"; };
 		B10000010000000000000108 /* BackupLogStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupLogStore.swift; sourceTree = "<group>"; };
 		B10000010000000000000109 /* BackupV5Manager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupV5Manager.swift; sourceTree = "<group>"; };
@@ -293,7 +293,7 @@
 				B10000010000000000000104 /* HouseDetailView.swift */,
 				B10000010000000000000105 /* HouseEditView.swift */,
 				B10000010000000000000106 /* HouseListView.swift */,
-				B10000010000000000000107 /* HouseBatchImportView.swift */,
+				B10000010000000000000118 /* HouseBatchImportView.swift */,
 				B10000010000000000000107 /* HouseSettingsView.swift */,
 			);
 			path = Views;
@@ -410,7 +410,7 @@
 				A10000010000000000000104 /* HouseDetailView.swift in Sources */,
 				A10000010000000000000105 /* HouseEditView.swift in Sources */,
 				A10000010000000000000106 /* HouseListView.swift in Sources */,
-				A10000010000000000000107 /* HouseBatchImportView.swift in Sources */,
+				A10000010000000000000118 /* HouseBatchImportView.swift in Sources */,
 				A10000010000000000000107 /* HouseSettingsView.swift in Sources */,
 				A10000010000000000000108 /* BackupLogStore.swift in Sources */,
 				A10000010000000000000109 /* BackupV5Manager.swift in Sources */,
