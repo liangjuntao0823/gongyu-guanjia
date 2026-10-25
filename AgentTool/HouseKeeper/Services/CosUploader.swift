@@ -908,7 +908,7 @@ enum CosUploader {
           var list = document.getElementById("list");
           list.innerHTML = rows.map(function(h,i){
             var cover = h.cover || "";
-            var inner = cover ? '<img class="cv" src="'+cover+'" alt="" loading="lazy" onerror="this.style.display='none'">' : '<div class="ph"></div>';
+            var inner = cover ? '<img class="cv" src="'+cover+'" alt="" loading="lazy" onerror="this.style.display=\'none\'">' : '<div class="ph"></div>';
             return '<div class="card" data-i="'+i+'"><div class="cover">'+inner+'<span class="play"></span><span class="type-tag">'+esc(h.layout)+'</span></div></div>';
           }).join("");
           document.getElementById("empty").style.display = rows.length ? "none" : "block";
