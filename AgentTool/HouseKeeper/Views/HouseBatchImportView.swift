@@ -342,7 +342,7 @@ struct HouseBatchImportView: View {
         isImporting = true
         Task { @MainActor in
             var summary = BatchImportSummary()
-            let all = (try? ctx.fetch(FetchDescriptor<House>())) ?? []
+            var all = (try? ctx.fetch(FetchDescriptor<House>())) ?? []
             for item in items where !item.duplicate {
                 let dup = BatchImporter.findDuplicate(roomNo: item.roomNo, tower: item.tower, in: all)
                 guard dup == nil else { summary.skippedDuplicate += 1; continue }
