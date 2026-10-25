@@ -13,6 +13,13 @@ var shareCompressionEnabled: Bool {
     UserDefaults.standard.object(forKey: "compressOnShare") == nil || UserDefaults.standard.bool(forKey: "compressOnShare")
 }
 
+/// v1.55：公开选房链接有效期（天）。默认 2 天；可在「设置 → 房源分享」里动态调整（1/2/3/7/15/30 天）。
+/// 链接到期后签名失效，租客打开旧链接会提示无法访问，需要重新生成新链接发给租客。
+var roomsLinkExpiryDays: Int {
+    let d = UserDefaults.standard.integer(forKey: "roomsLinkExpiryDays")
+    return d > 0 ? d : 2
+}
+
 enum KeychainKey {
     static let bucket = "cos.bucket"
     static let region = "cos.region"
@@ -798,7 +805,9 @@ enum CosUploader {
         }
         while cd.hasSuffix("/") { cd.removeLast() }
         let cdEsc = cd.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
-        let jsUrl = base + "?act=rooms_json&u=" + uEsc + "&cd=" + cdEsc
+        // v1.55：jsUrlBase 供选房页访问埋点用（track 走同一云函数，按用户名分文件统计）
+        let jsUrlBase = base.trimmingCharacters(in: .whitespacesAndNewlines)
+        let jsUrl = jsUrlBase + "?act=rooms_json&u=" + uEsc + "&cd=" + cdEsc
         let pageUrl = base + "?act=rooms&u=" + uEsc
         // og:image 用本地第一套房封面（与分享 H5 同款，云端必存在）；og:url 用壳自身签名链接（微信按此抓取）
         var og = ""
@@ -960,10 +969,18 @@ enum CosUploader {
             if(d && d.qr){ document.getElementById("qrCol").style.display = "block"; document.getElementById("qrImg").src = d.qr; }
             else { document.getElementById("qrCol").style.display = "none"; }
             showToast("已刷新");
+            TRACK();
           }).catch(function(){
             document.getElementById("loading").style.display = "none";
             showToast("刷新失败，请检查网络");
           });
+        }
+        function TRACK(){
+          try{
+            var b = "\(jsUrlBase)"; if(!b || b.indexOf("http") !== 0) return;
+            var img = new Image();
+            img.src = b + "?act=track&room=rooms&mode=rooms&ref=" + encodeURIComponent((document.referrer||"").slice(0,120)) + "&t=" + Date.now() + "&uname=\(uEsc)";
+          }catch(e){}
         }
         document.getElementById("filters").addEventListener("click", function(e){
           var chip = e.target.closest(".chip");

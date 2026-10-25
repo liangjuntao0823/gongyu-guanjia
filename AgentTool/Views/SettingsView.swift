@@ -71,6 +71,7 @@ struct SettingsView: View {
     // v1.6：房源分享设置合并进主设置（原房源板块独立设置页取消）
     @State private var showHouseCacheConfirm = false
     @State private var houseCacheTip: String?
+    @State private var roomsLinkExpiry = 2   // v1.55：选房链接有效期（天），默认 2，onAppear 从 UserDefaults 读取
     @State private var watermarkSubtitle = ""   // v1.41：分享水印入口副标题（onAppear 刷新，返回设置页即显示最新开关状态）
 
     /// v1.41：刷新分享水印入口副标题（返回设置页 / 页面出现时读取最新 store，立即反映开关状态）
@@ -120,6 +121,35 @@ struct SettingsView: View {
                 RoomsShareView()
             } label: {
                 Label("公开选房链接", systemImage: "globe.asia.australia")
+            }
+            // v1.55：选房链接有效期（默认 2 天，可动态调整）——到期后旧链接失效，需重新生成
+            HStack {
+                Label {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("选房链接有效期")
+                        Text("到期后旧链接失效，需重新生成")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                } icon: {
+                    Image(systemName: "clock.badge.xmark")
+                }
+                Spacer()
+                Picker("", selection: $roomsLinkExpiry) {
+                    Text("1 天").tag(1)
+                    Text("2 天").tag(2)
+                    Text("3 天").tag(3)
+                    Text("7 天").tag(7)
+                    Text("15 天").tag(15)
+                    Text("30 天").tag(30)
+                }
+                .pickerStyle(.menu)
+                .labelsHidden()
+                .onChange(of: roomsLinkExpiry) { _, newValue in
+                    UserDefaults.standard.set(newValue, forKey: "roomsLinkExpiryDays")
+                    showMessage = "已设为 \(newValue) 天：下次「重新生成链接」按新有效期生效"
+                    showAlert = true
+                }
             }
             // v1.36 需求3：分享水印设置（开关/文本/字号/透明度/位置/预览/保存/清除）
             // v1.41：入口副标题改为 onAppear 刷新——从水印页返回设置页时立即显示最新开关状态（此前静态文本可能不重算）
@@ -541,7 +571,12 @@ struct SettingsView: View {
                     }
                 }
             }
-            .onAppear { loadAutoSettings() }
+            .onAppear {
+                loadAutoSettings()
+                // v1.55：读取选房链接有效期设置（默认 2 天）
+                let d = UserDefaults.standard.integer(forKey: "roomsLinkExpiryDays")
+                roomsLinkExpiry = d > 0 ? d : 2
+            }
             .alert("提示", isPresented: $showAlert) {
                 Button("确定", role: .cancel) { }
             } message: {
@@ -945,6 +980,7 @@ struct VersionHistoryView: View {
         ("v1.51", "2026-10-25", ["修复选房页封面不显示：封面从 CSS 背景图改为 <img> 标签加载（微信兼容更好），加载失败自动隐藏占位", "卡片点击有反应：有分享 H5 的房源点击直接打开完整详情页；没有的全屏放大封面预览", "修复微信分享卡片无信息：og:url 改用壳自身自定义域名签名链接，og:image 改用第一套房封面（此前指向不存在的 qrcode.jpg 导致微信只显示纯链接）", "设置压缩开关改名「压缩上传媒体（房源+分享）」：新增/编辑房源媒体上传云端与分享 H5 都会压缩（图片长边≤1600、视频 720p），上传更快", "云函数 rooms_json 新增 share 字段（每套房分享 H5 的自定义域名签名链接）"]),
         ("v1.52", "2026-10-25", ["修复选房页打开一直「加载中」：封面 onerror 单引号未转义导致脚本解析失败，已修复 JS 转义", "微信卡片提示：分享必须用 App「分享给租客」或微信内右上角分享，复制粘贴链接只显示纯链接"]),
         ("v1.53", "2026-10-25", ["选房页 JS 根治：onerror 改为无引号嵌套写法，任何版本生成的壳脚本都不会再坏", "线上壳直接修复为可用版本（脚本正常 + og 签名有效），不再依赖重新生成即可显示房源"]),
+        ("v1.55", "2026-10-25", ["公开选房链接增加有效期（默认 2 天）：可在「设置 → 房源分享 → 选房链接有效期」调整为 1/2/3/7/15/30 天；重新生成链接会先删除旧壳（旧链接立即失效），到期后旧链接自动打不开", "选房页访问计入获客统计：选房页每次打开/刷新埋点（按用户名分文件），网页后台登录自己的用户名即可看到选房页访问数据", "云端部署包：选房壳内嵌云函数地址不再硬编码，改为自动取当前云函数地址或环境变量 FUNC_URL（同一桶多用户/多部署互不串地址）"]),
         ("v1.54", "2026-10-25", ["新增/编辑房源保存后自动生成脱敏版分享 H5（删旧生成新），选房链接里每间房点开即有完整详情页", "「刷新分享缓存」升级为全量重建：云端旧分享页全部删除（旧链接立即失效）+ 每间房重新生成最新 H5", "选房页名片区永远沉底显示（默认梁涛/13288251132，云端名片更新实时刷新），无房源时中间留白名片沉底", "选房壳模板统一为名片沉底新版布局"]),
         ("v1.49", "2026-10-25", ["修复微信打开选房链接变「下载文件」：链接改走 COS 域名（与单房分享 H5 同机制），云函数生成静态壳存桶 users/用户名/rooms/ 并返回 COS 签名链接，微信内直接打开正常显示", "选房页数据仍实时：页面 JS 每次打开/刷新实时拉云端房源/名片/二维码，改房源改名片后租客刷新即最新", "修复云函数中文路径 COS 签名（users/涛/… 此前 403）：原始路径签名+编码路径发送；选房页封面签名改 10 年长效"]),
         ("v1.48", "2026-10-25", ["「公开选房链接」页内新增「编辑名片 / 二维码」直达入口：修改名片/换二维码不用再退回上级菜单，保存后租客刷新选房页即最新", "选房页补微信卡片信息（og 元数据）：微信里分享链接渲染成卡片，浏览器打开为完整网页（修复旧版打开下载数据文件）"]),

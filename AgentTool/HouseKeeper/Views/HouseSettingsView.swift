@@ -1392,7 +1392,7 @@ struct RoomsShareView: View {
 
     var body: some View {
         Form {
-            Section(header: Text("公开选房链接"), footer: Text("把链接发给租客，对方打开即可看到所有待租房源（只显示户型，房东/密码/备注等内部信息已隐藏）。页面每次打开或刷新都实时读取云端最新房源：您新增/下架房源、改租金、改名片、换二维码后，租客刷新一下就是最新内容，无需重新生成链接。")) {
+            Section(header: Text("公开选房链接"), footer: Text("把链接发给租客，对方打开即可看到所有待租房源（只显示户型，房东/密码/备注等内部信息已隐藏）。页面每次打开或刷新都实时读取云端最新房源：您新增/下架房源、改租金、改名片、换二维码后，租客刷新一下就是最新内容，无需重新生成链接。\n\n链接默认 2 天内有效（可在「设置 → 房源分享 → 选房链接有效期」调整）。到期后旧链接失效，需重新生成新链接发给租客。")) {
                 if link.isEmpty {
                     Text(linkTip ?? "正在生成链接…")
                         .font(.footnote)
@@ -1469,11 +1469,15 @@ struct RoomsShareView: View {
         }
         do {
             let remotePath = CloudUser.userRootPrefix + "rooms/index.html"
-            let url = try CosUploader.presignedGetURL(for: remotePath, expires: 3650 * 86400, config: config)
+            // v1.55：重新生成前先删除旧壳对象 → 旧链接立即失效（COS 对已删对象返回 404，不再能打开）
+            try? await CloudBackupService.deleteRemoteObject(name: remotePath, config: config)
+            // v1.55：链接有效期按「设置 → 房源分享 → 选房链接有效期」动态控制（默认 2 天）
+            let days = roomsLinkExpiryDays
+            let url = try CosUploader.presignedGetURL(for: remotePath, expires: days * 86400, config: config)
             let html = CosUploader.buildRoomsShellHTML(config: config, shellURL: url.absoluteString)
             try await CosUploader.upload(data: Data(html.utf8), to: remotePath, contentType: "text/html; charset=utf-8", config: config)
             cosLink = url.absoluteString
-            linkTip = nil
+            linkTip = "当前链接 \(days) 天内有效，到期后请重新生成并发新链接给租客"
         } catch {
             cosLink = ""
             linkTip = "生成失败：\(error.localizedDescription)\n请检查云端配置与网络后重试"
