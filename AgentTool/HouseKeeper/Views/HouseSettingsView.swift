@@ -429,6 +429,17 @@ struct CosConfigView: View {
         }
         .navigationTitle("云端配置")
         .navigationBarTitleDisplayMode(.inline)
+        // v1.45：保存用户名 / 云函数地址等配置后，返回再进本页即时显示最新值
+        //（与分享水印开关、微信二维码同款修法——SwiftUI 导航复用实例时 init 只跑一次，onAppear 重读存储兜底）
+        .onAppear {
+            username = CloudUser.username
+            functionURL = CloudConfig.functionURL
+            bucket = KeychainStore.load(KeychainKey.bucket) ?? ""
+            region = KeychainStore.load(KeychainKey.region) ?? ""
+            secretId = KeychainStore.load(KeychainKey.secretId) ?? ""
+            secretKey = KeychainStore.load(KeychainKey.secretKey) ?? ""
+            customDomain = KeychainStore.load(KeychainKey.customDomain) ?? ""
+        }
         .sheet(isPresented: $showRestoreList) {
             ConfigRestoreListView(
                 onPick: { url in
