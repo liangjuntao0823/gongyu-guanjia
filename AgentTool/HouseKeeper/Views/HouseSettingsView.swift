@@ -1416,6 +1416,13 @@ struct RoomsShareView: View {
                     }
                 }
             }
+            Section(header: Text("名片与二维码"), footer: Text("选房页底部展示的名片（姓名/电话）与微信二维码在这里设置：改完保存后，租客刷新选房页面即显示最新内容（名片同步云端 profile.json、二维码同步 qrcode.jpg，均为实时生效）。")) {
+                NavigationLink {
+                    ShareProfileView()
+                } label: {
+                    Label("编辑名片 / 二维码", systemImage: "person.crop.circle.badge.checkmark")
+                }
+            }
         }
         .navigationTitle("公开选房链接")
         .navigationBarTitleDisplayMode(.inline)
