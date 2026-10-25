@@ -1793,12 +1793,14 @@ extension CosUploader {
         return "<div class=\"wm\" style=\"position:absolute;\(placement)color:rgba(255,255,255,\(wm.opacity));font-size:\(wm.fontSize)px;font-weight:500;line-height:1;text-shadow:0 1px 2px rgba(0,0,0,.35);pointer-events:none;user-select:none;z-index:2;max-width:70%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;\">\(escapeHTML(wm.text))</div>"
     }
 
-    /// H5 埋点脚本（静默收集，不需用户同意）：GET 云函数 ?act=track&room=&mode=&ref=&t=
+    /// H5 埋点脚本（静默收集，不需用户同意）：GET 云函数 ?act=track&room=&mode=&ref=&t=&uname=
+    /// v1.46 统计隔离：埋点带当前用户名，云端按用户分文件统计，互不干扰
     static func cloudTrackScript(room: String, mode: String) -> String {
         let url = CloudConfig.functionURL
         let roomEsc = escapeHTML(room)
         let modeEsc = escapeHTML(mode)
-        return "<script>(function(){try{var u='\(url)';if(!u||u.indexOf('http')!==0)return;var k='gy_tk_'+encodeURIComponent('\(roomEsc)')+'_'+encodeURIComponent('\(modeEsc)');var now=Date.now(),last=0;try{last=parseInt(localStorage.getItem(k)||'0',10)||0;}catch(e){}if(now-last<30000)return;try{localStorage.setItem(k,String(now));}catch(e){}var r=(document.referrer||'').slice(0,120);var img=new Image();img.src=u+'?act=track&room='+encodeURIComponent('\(roomEsc)')+'&mode='+encodeURIComponent('\(modeEsc)')+'&ref='+encodeURIComponent(r)+'&t='+now;}catch(e){}})();</script>"
+        let unameEsc = escapeHTML(CloudUser.username)
+        return "<script>(function(){try{var u='\(url)';if(!u||u.indexOf('http')!==0)return;var k='gy_tk_'+encodeURIComponent('\(roomEsc)')+'_'+encodeURIComponent('\(modeEsc)');var now=Date.now(),last=0;try{last=parseInt(localStorage.getItem(k)||'0',10)||0;}catch(e){}if(now-last<30000)return;try{localStorage.setItem(k,String(now));}catch(e){}var r=(document.referrer||'').slice(0,120);var img=new Image();img.src=u+'?act=track&room='+encodeURIComponent('\(roomEsc)')+'&mode='+encodeURIComponent('\(modeEsc)')+'&ref='+encodeURIComponent(r)+'&t='+now+'&uname='+encodeURIComponent('\(unameEsc)');}catch(e){}})();</script>"
     }
 
     /// 文件名安全化：保留中文/字母/数字/-/_，其余替换为 -（房号 → 分享页文件名）
@@ -2295,6 +2297,9 @@ struct AdminDashboardView: View {
                                 }
                             }
                         }
+                    } footer: {
+                        // v1.46 统计隔离：明确提示当前统计归属
+                        Text("统计仅包含当前用户名「\(CloudUser.displayName)」名下埋点，各用户互不干扰。")
                     }
                 }
                 .listStyle(.insetGrouped)
@@ -2326,7 +2331,9 @@ struct AdminDashboardView: View {
     private func loadStats() {
         stats = nil
         statsError = nil
-        guard let url = URL(string: "\(CloudConfig.functionURL)?act=stats&k=\(CloudConfig.passwordHash)") else {
+        // v1.46 统计隔离：带当前用户名，云端只返回该用户的统计
+        let u = (CloudUser.username).addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+        guard let url = URL(string: "\(CloudConfig.functionURL)?act=stats&k=\(CloudConfig.passwordHash)&u=\(u)") else {
             statsError = "云函数地址无效"
             return
         }
@@ -2370,7 +2377,7 @@ struct AdminDashboardView: View {
                             }
                         }
                     } footer: {
-                        Text("分享记录按用户名隔离存于云端桶（h/_share_records_<用户名>.json），各用户只看自己发的分享。")
+                        Text("分享记录按用户名隔离存于云端桶（users/<用户名>/share_records.json），各用户只看自己发的分享。")
                     }
                 }
                 .listStyle(.insetGrouped)
@@ -2634,9 +2641,11 @@ struct AdminDashboardView: View {
         }.resume()
     }
 
-    /// v1.22 清空访问统计（云函数 clearStats，删除桶 statistics/ 全部埋点）
+    /// v1.22 清空访问统计（云函数 clearStats）
+    /// v1.46 统计隔离：带当前用户名，只清空当前用户的统计
     private func clearStats() {
-        guard let url = URL(string: "\(CloudConfig.functionURL)?act=clearStats&k=\(CloudConfig.passwordHash)") else { return }
+        let u = (CloudUser.username).addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+        guard let url = URL(string: "\(CloudConfig.functionURL)?act=clearStats&k=\(CloudConfig.passwordHash)&u=\(u)") else { return }
         URLSession.shared.dataTask(with: url) { data, _, _ in
             let msg: String
             if let data = data, let obj = try? JSONDecoder().decode(ClearStatsResponse.self, from: data), obj.ok {

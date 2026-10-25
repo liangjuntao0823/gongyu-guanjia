@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>云端配置设置页 · 布局预览</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='6' fill='%232E7D32'/%3E%3Cpath d='M7 12.5l3.2 3.2L17 9' stroke='%23fff' stroke-width='2.4' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<style>
+  :root{
+    --bg:#F2F2F7;
+    --card:#FFFFFF;
+    --sep:rgba(60,60,67,0.12);
+    --label:#000;
+    --sub:#6E6E73;
+    --sub2:#8E8E93;
+    --accent:#007AFF;
+    --navy:#1F3A5F;
+    --danger:#FF3B30;
+    --green:#2E7D32;
+    --radius:12px;
+    --pad:16px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+  html,body{background:var(--bg)}
+  body{
+    font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Helvetica Neue","Microsoft YaHei",sans-serif;
+    color:var(--label);
+    -webkit-font-smoothing:antialiased;
+  }
+  /* ===== 顶栏 ===== */
+  .nav{
+    position:sticky;top:0;z-index:20;
+    background:rgba(242,242,247,0.88);
+    backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+    border-bottom:0.5px solid var(--sep);
+    height:52px;display:flex;align-items:center;justify-content:center;
+  }
+  .nav .back{position:absolute;left:4px;top:0;bottom:0;display:flex;align-items:center;padding:0 10px;color:var(--accent);font-size:16px;background:none;border:none;cursor:pointer}
+  .nav .back svg{width:11px;height:19px;margin-right:2px}
+  .nav .title{font-size:17px;font-weight:600}
+  /* ===== 分组卡片 ===== */
+  .wrap{max-width:420px;margin:0 auto;padding:12px 0 32px}
+  .group{margin:0 12px 18px}
+  .group-hd{
+    padding:2px 16px 6px;color:var(--sub);font-size:13px;line-height:1.4;
+    text-transform:none;letter-spacing:0;
+  }
+  .card{background:var(--card);border-radius:var(--radius);overflow:hidden}
+  .row{
+    display:flex;align-items:center;gap:12px;
+    min-height:46px;padding:7px 16px;
+    border-bottom:0.5px solid var(--sep);
+    position:relative;
+  }
+  .row:last-child{border-bottom:none}
+  .row .ic{width:26px;height:26px;flex:0 0 26px;border-radius:6px;display:flex;align-items:center;justify-content:center;color:#fff}
+  .row .ic svg{width:16px;height:16px}
+  .row .txt{flex:1;min-width:0;font-size:16px;line-height:1.35}
+  .row .val{color:var(--sub2);font-size:16px;max-width:55%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .row .chev{color:#C7C7CC;flex:0 0 auto}
+  .row .chev svg{width:9px;height:15px;display:block}
+  .row.sel{cursor:pointer}
+  .row.sel:active{background:#E5E5EA}
+  .row.sep-field{padding-bottom:4px}
+  /* 输入行 */
+  .field{
+    flex:1;min-width:0;
+    border:none;outline:none;background:transparent;
+    font-size:16px;color:var(--label);line-height:1.3;padding:0;
+    font-family:inherit;
+  }
+  .field::placeholder{color:var(--sub2)}
+  .field.sec{
+    letter-spacing:2px;
+  }
+  .field.right{text-align:right;color:var(--sub2)}
+  .lbl{font-size:16px;color:var(--label);flex:1;min-width:0}
+  .lbl.dim{color:var(--sub2)}
+  /* 按钮对 */
+  .btnpair{display:flex;gap:12px;padding:10px 16px 14px}
+  .btn{
+    flex:1;min-height:40px;border-radius:9px;
+    font-size:15px;font-weight:500;font-family:inherit;
+    display:flex;align-items:center;justify-content:center;gap:6px;
+    cursor:pointer;border:none;
+  }
+  .btn svg{width:15px;height:15px;flex:0 0 15px}
+  .btn.navy{background:var(--navy);color:#fff}
+  .btn.navy:active{filter:brightness(1.15)}
+  .btn.line{background:#fff;color:var(--navy);border:1px solid rgba(31,58,95,0.35)}
+  .btn.line:active{background:#EEF0F4}
+  .btn.ghost{background:#fff;color:var(--accent);border:1px solid rgba(0,122,255,0.35)}
+  .btn.ghost:active{background:#EAF3FF}
+  .btn:disabled{opacity:0.45;cursor:default;pointer-events:none}
+  .btn.solo{margin:7px 0 0}
+  /* 断开红色行 */
+  .row.danger .txt{color:var(--danger)}
+  /* 分组 footer */
+  .group-ft{
+    padding:6px 16px 0;color:var(--sub2);font-size:12px;line-height:1.5;
+  }
+  /* 使用说明折叠 */
+  .acc{padding:0 16px}
+  .acc-item{border-bottom:0.5px solid var(--sep)}
+  .acc-item:last-child{border-bottom:none}
+  .acc-head{
+    min-height:46px;display:flex;align-items:center;gap:10px;cursor:pointer;
+    font-size:16px;background:none;border:none;width:100%;text-align:left;color:var(--label);font-family:inherit;padding:0;
+  }
+  .acc-head svg.chev{margin-left:auto;transition:transform .18s;color:#C7C7CC}
+  .acc-head.open svg.chev{transform:rotate(90deg)}
+  .acc-body{display:none;padding:2px 0 14px}
+  .acc-item.open .acc-body{display:block}
+  .acc-body ul{list-style:none}
+  .acc-body li{
+    font-size:13px;line-height:1.6;color:var(--label);
+    padding:3px 0 3px 14px;position:relative;
+  }
+  .acc-body li::before{content:"";position:absolute;left:0;top:11px;width:4px;height:4px;border-radius:50%;background:var(--sub2)}
+  /* Toast */
+  #toast{
+    position:fixed;left:50%;bottom:96px;transform:translateX(-50%) translateY(12px);
+    background:rgba(28,28,30,0.94);color:#fff;font-size:13px;line-height:1.45;
+    padding:10px 16px;border-radius:10px;max-width:78vw;text-align:center;
+    opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;z-index:99;
+  }
+  #toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+  @media (min-width:768px){
+    .wrap{padding:20px 0 48px}
+  }
+</style>
+</head>
+<body>
+
+<div class="nav">
+  <button class="back" data-toast="演示：返回上一层（App 中返回设置页）">
+    <svg viewBox="0 0 11 19" fill="none"><path d="M9.5 1.5 2 9.5l7.5 8" stroke="#007AFF" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    返回
+  </button>
+  <div class="title">云端配置</div>
+</div>
+
+<main class="wrap">
+
+  <!-- ===== 分享说明 ===== -->
+  <section class="group">
+    <div class="group-hd">分享说明</div>
+    <div class="card">
+      <div class="row"><span class="lbl">有效期</span><span class="val">长期有效（不自动过期）</span></div>
+    </div>
+    <div class="group-ft">分享时 App 会把该房源的图片和视频上传到腾讯云 COS，生成一个链接卡片发给微信好友；好友点开卡片即可查看，链接长期有效。</div>
+  </section>
+
+  <!-- ===== 云函数与 COS 配置（合并） ===== -->
+  <section class="group">
+    <div class="group-hd">云函数与 COS 配置</div>
+    <div class="card">
+      <div class="row sep-field">
+        <input class="field" id="fnURL" type="url" placeholder="云函数地址（后台网址）" inputmode="url" autocomplete="off">
+      </div>
+      <div class="btnpair">
+        <button class="btn navy" data-toast="演示：保存并验证 — 已保存地址，正在访问后台首页验证连通…（验证通过）"><svg viewBox="0 0 24 24" fill="none"><path d="M5 12.5l4.5 4.5L19 7.5" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>保存并验证</button>
+        <button class="btn line" id="clearFn" data-toast="演示：云函数地址已清空"><svg viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>清空地址</button>
+      </div>
+      <div class="row sel" data-toast="演示：后台口令设置（App 中进入独立页面）">
+        <span class="ic" style="background:#8E8E93"><svg viewBox="0 0 24 24" fill="none"><rect x="5" y="11" width="14" height="9" rx="2" stroke="currentColor" stroke-width="1.8"/><path d="M8 11V8a4 4 0 0 1 8 0v3" stroke="currentColor" stroke-width="1.8"/></svg></span>
+        <span class="txt">后台口令</span>
+        <span class="chev"><svg viewBox="0 0 9 15" fill="none"><path d="m1.5 1.5 6 6-6 6" stroke="#C7C7CC" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+      </div>
+      <div class="row sel" data-toast="演示：云端部署图文教程（App 中进入独立页面，内含部署包下载）">
+        <span class="ic" style="background:#5B9BD5"><svg viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></span>
+        <span class="txt">云端部署图文教程</span>
+        <span class="chev"><svg viewBox="0 0 9 15" fill="none"><path d="m1.5 1.5 6 6-6 6" stroke="#C7C7CC" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+      </div>
+      <div class="row sel" data-toast="演示：网页后台缓存已刷新 ✅（下次在「管理后台」打开就是最新版）">
+        <span class="ic" style="background:#4CAF50"><svg viewBox="0 0 24 24" fill="none"><path d="M20 11a8 8 0 1 0-2.3 7M20 4v7h-7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+        <span class="txt">刷新网页后台缓存</span>
+        <span class="chev"><svg viewBox="0 0 9 15" fill="none"><path d="m1.5 1.5 6 6-6 6" stroke="#C7C7CC" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+      </div>
+      <!-- 合并：COS 字段直接续接（同一张卡片） -->
+      <div class="row sep-field"><input class="field" id="bucket" type="text" placeholder="存储桶名称" autocomplete="off"></div>
+      <div class="row sep-field"><input class="field" id="region" type="text" placeholder="地域（如 ap-hongkong）" autocomplete="off"></div>
+      <div class="row sep-field"><input class="field" id="domain" type="url" placeholder="自定义域名（必填，如 share.fangyuan88.site）" inputmode="url" autocomplete="off"></div>
+      <div class="row sep-field"><input class="field" id="secid" type="text" placeholder="SecretId" autocomplete="off"></div>
+      <div class="row"><input class="field sec" id="seckey" type="password" placeholder="SecretKey" autocomplete="off"></div>
+    </div>
+    <div class="group-ft">云函数地址即管理后台网页的网址。地址可独立保存/验证/清空（验证会访问后台首页，不依赖口令）。给别的房东用：点「云端部署图文教程」按步骤部署，再把他的云函数地址填到这里。</div>
+  </section>
+
+  <!-- ===== 使用说明 ===== -->
+  <section class="group">
+    <div class="group-hd">使用说明</div>
+    <div class="card">
+      <div class="acc">
+        <div class="acc-item">
+          <button class="acc-head">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" style="color:#007AFF;flex:0 0 16px"><circle cx="12" cy="8" r="3.2" stroke="currentColor" stroke-width="1.8"/><path d="M5 20c1.2-3.5 3.8-5.2 7-5.2s5.8 1.7 7 5.2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+            单用户（用自己的配置）
+            <svg class="chev" viewBox="0 0 9 15" width="9" height="15" fill="none"><path d="m1.5 1.5 6 6-6 6" stroke="#C7C7CC" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+          <div class="acc-body">
+            <ul>
+              <li>单人用只需 3 步：① 填好 云函数地址 / 桶 / 地域 / 自定义域名 / 密钥；② 点「保存并验证连接」；③ 正常用 App。</li>
+              <li>房源文字、照片视频会自动传到云端桶；分享卡片发好友能直接看；备份会上传到云端留档。</li>
+              <li>网页后台（云函数地址）可看访问统计、管理桶文件、查储存用量。</li>
+              <li>换机 / 重装：填同样配置 + 恢复配置备份，下拉同步就把云端房源拉回本地。</li>
+              <li>本地数据始终保留，云端只是「第二份」，断开配置也不影响本地使用。</li>
+            </ul>
+          </div>
+        </div>
+        <div class="acc-item">
+          <button class="acc-head">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" style="color:#007AFF;flex:0 0 16px"><circle cx="12" cy="8" r="3.2" stroke="currentColor" stroke-width="1.8"/><path d="M5 20c1.2-3.5 3.8-5.2 7-5.2s5.8 1.7 7 5.2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M9 10l6 6M15 10l-6 6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+            多用户（多台共用一套桶）
+            <svg class="chev" viewBox="0 0 9 15" width="9" height="15" fill="none"><path d="m1.5 1.5 6 6-6 6" stroke="#C7C7CC" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+          <div class="acc-body">
+            <ul>
+              <li>前提：几台手机填同一个桶和云函数地址，各自填不同用户名。</li>
+              <li>共享的只有「房源」：一台录入上传，另一台下拉同步就能看到；删房也会同步删云端。</li>
+              <li>不共享：名片、二维码、水印、分享记录、访问统计、云端备份——都按用户名分开，绝不会看到别人（备份各管各的）。</li>
+              <li>用户名的作用：操作日志 / 分享 / 统计带上用户名，网页后台能看到是谁在操作。</li>
+              <li>给别人用不用懂桶和云函数：配好你的后，把「配置」发给对方导入 + 填用户名即可；对方也可以自己整套部署（用下方部署包）用自己的桶。</li>
+            </ul>
+          </div>
+        </div>
+        <div class="row sel" data-toast="演示：三端互通说明（App 中进入独立页面）">
+          <span class="ic" style="background:#FF9500"><svg viewBox="0 0 24 24" fill="none"><path d="M6 8h11a3 3 0 0 1 3 3v4a3 3 0 0 1-3 3h-5M6 8H4a2 2 0 0 0-2 2v3a2 2 0 0 0 2 2h2m0-7V5.5A1.5 1.5 0 0 1 5.5 4H8a3 3 0 0 1 3 3v1m-5 0h5m3 4h.01" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+          <span class="txt">三端互通说明（App ↔ 云函数 ↔ 网页后台）</span>
+          <span class="chev"><svg viewBox="0 0 9 15" fill="none"><path d="m1.5 1.5 6 6-6 6" stroke="#C7C7CC" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== 多用户 ===== -->
+  <section class="group">
+    <div class="group-hd">多用户（共享房源）</div>
+    <div class="card">
+      <div class="row sep-field">
+        <input class="field" id="username" type="text" placeholder="我的用户名（如：涛）" autocomplete="off">
+      </div>
+      <div class="btnpair" style="padding-top:2px">
+        <button class="btn navy" data-toast="演示：用户名已保存"><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8" r="3.2" stroke="currentColor" stroke-width="2"/><path d="M5 20c1.2-3.5 3.8-5.2 7-5.2s5.8 1.7 7 5.2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M16 13.5l2 2 4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>保存用户名</button>
+      </div>
+    </div>
+    <div class="group-ft">多台手机填同一个桶配置、各自填用户名，即可共享房源：一台录入，另一台下拉同步就能看到。操作日志/分享/统计会带上您的用户名，其他私有数据（名片/水印/统计/备份）按用户名分开。</div>
+  </section>
+
+  <!-- ===== 验证连接 ===== -->
+  <section class="group">
+    <div class="card">
+      <div class="btnpair">
+        <button class="btn navy" data-toast="演示：保存并验证连接 — 正在上传测试文件并回读…（配置正确 ✅）">保存并验证连接</button>
+        <button class="btn line" data-toast="演示：访问储存桶 — 打开腾讯云控制台对应桶">
+          <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="8.5" stroke="currentColor" stroke-width="1.8"/><path d="M14 10l-7.5 7.5M13.5 7.5l3-3M15.5 10.5l-4.8-4.8M7.5 13.5l-3.4 3.4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="12" r="2.2" stroke="currentColor" stroke-width="1.6"/></svg>
+          访问储存桶
+        </button>
+      </div>
+    </div>
+    <div class="group-ft">「保存并验证连接」会用当前配置上传测试文件并回读，成功才提示「配置正确」；「访问储存桶」用当前填写的桶名和地域打开腾讯云控制台。</div>
+  </section>
+
+  <!-- ===== 备份 / 恢复配置 ===== -->
+  <section class="group">
+    <div class="group-hd">备份 / 恢复配置</div>
+    <div class="card">
+      <div class="row sel" data-toast="演示：备份配置到文件 — 已生成 桶名_地域_日期.json（含密钥）到「备份/CosConfig」">
+        <span class="ic" style="background:#007AFF"><svg viewBox="0 0 24 24" fill="none"><path d="M12 4v11m0 0 4-4m-4 4-4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 17v2a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></span>
+        <span class="txt">备份配置到文件</span>
+      </div>
+      <div class="row sel" data-toast="演示：从备份文件恢复配置 — App 中弹出「选择备份文件」列表">
+        <span class="ic" style="background:#007AFF"><svg viewBox="0 0 24 24" fill="none"><path d="M12 19V8m0 0 4 4m-4-4-4 4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 7V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></span>
+        <span class="txt">从备份文件恢复配置</span>
+      </div>
+      <div class="row sel" data-toast="演示：查看备份文件 — App 中弹出备份文件浏览列表">
+        <span class="ic" style="background:#8E8E93"><svg viewBox="0 0 24 24" fill="none"><path d="M4 7a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg></span>
+        <span class="txt">查看备份文件</span>
+      </div>
+      <div class="row danger sel" data-toast="演示：确认清空全部配置？此操作不可撤销（App 中先弹确认）">
+        <span class="ic" style="background:#FF3B30"><svg viewBox="0 0 24 24" fill="none"><path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2m2 0v12a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V7h12ZM10 11v5M14 11v5" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+        <span class="txt">清空全部配置并断开连接</span>
+      </div>
+    </div>
+    <div class="group-ft">点「备份配置到文件」后，备份文件（桶名_地域_日期.json，含密钥）会直接生成到 iOS「文件」App → 我的 iPhone → 公寓管家 → 「备份」文件夹，随整个「备份」文件夹一起备份即可。换机 / 重装 / 误改后，点「从备份文件恢复配置」在列表中选择备份文件（或从其他位置导入）即可一键还原。含密钥内容请勿外泄。</div>
+  </section>
+
+  <p style="text-align:center;color:var(--sub2);font-size:12px;padding:4px 24px 0">密钥与名片只存在本机钥匙串，不会上传到任何地方。</p>
+
+</main>
+
+<div id="toast"></div>
+
+<script>
+  (function(){
+    var toastEl = document.getElementById('toast');
+    var timer = null;
+    function toast(msg){
+      toastEl.textContent = msg;
+      toastEl.classList.add('show');
+      clearTimeout(timer);
+      timer = setTimeout(function(){ toastEl.classList.remove('show'); }, 2200);
+    }
+    // 所有带 data-toast 的可点元素
+    document.querySelectorAll('[data-toast]').forEach(function(el){
+      el.addEventListener('click', function(){
+        toast(el.getAttribute('data-toast'));
+      });
+    });
+    // 清空地址：同时清输入框
+    document.getElementById('clearFn').addEventListener('click', function(){
+      document.getElementById('fnURL').value = '';
+    });
+    // 使用说明折叠
+    document.querySelectorAll('.acc-head').forEach(function(head){
+      head.addEventListener('click', function(){
+        head.classList.toggle('open');
+        head.parentElement.classList.toggle('open');
+      });
+    });
+    // 顶部返回
+    document.querySelector('.nav .back').addEventListener('click', function(){
+      toast('演示：返回上一层（App 中返回设置页）');
+    });
+  })();
+</script>
+</body>
+</html>

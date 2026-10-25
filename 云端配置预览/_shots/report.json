@@ -1,0 +1,127 @@
+{
+  "src": "云端配置设置页.html",
+  "url": "file:///home/user/Doubao/chats/38448577444166402/%E4%BA%91%E7%AB%AF%E9%85%8D%E7%BD%AE%E9%A2%84%E8%A7%88/%E4%BA%91%E7%AB%AF%E9%85%8D%E7%BD%AE%E8%AE%BE%E7%BD%AE%E9%A1%B5.html",
+  "outdir": "/home/user/Doubao/chats/38448577444166402/云端配置预览/_shots",
+  "include": [
+    "lint",
+    "screenshots",
+    "structure"
+  ],
+  "shots": {
+    "desktop": {
+      "revealed": 0,
+      "screenshot": "/home/user/Doubao/chats/38448577444166402/云端配置预览/_shots/云端配置设置页_desktop.jpg",
+      "screenshotBytes": 63526,
+      "truncated": false,
+      "structure": {
+        "title": "云端配置设置页 · 布局预览",
+        "firstH1": "",
+        "viewport": {
+          "w": 1440,
+          "h": 900
+        },
+        "fullpage": {
+          "w": 1440,
+          "h": 1723
+        },
+        "counts": {
+          "section": 6,
+          "h1": 0,
+          "h2": 0,
+          "img": 0,
+          "canvas": 0,
+          "svg": 21,
+          "links": 0,
+          "buttons": 8
+        }
+      },
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "horizontalOverflow": [],
+      "resourceErrors": []
+    },
+    "mobile": {
+      "revealed": 0,
+      "screenshot": "/home/user/Doubao/chats/38448577444166402/云端配置预览/_shots/云端配置设置页_mobile.jpg",
+      "screenshotBytes": 96935,
+      "truncated": false,
+      "structure": {
+        "title": "云端配置设置页 · 布局预览",
+        "firstH1": "",
+        "viewport": {
+          "w": 390,
+          "h": 844
+        },
+        "fullpage": {
+          "w": 390,
+          "h": 1771
+        },
+        "counts": {
+          "section": 6,
+          "h1": 0,
+          "h2": 0,
+          "img": 0,
+          "canvas": 0,
+          "svg": 21,
+          "links": 0,
+          "buttons": 8
+        }
+      },
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "horizontalOverflow": [],
+      "resourceErrors": []
+    }
+  },
+  "engine": "playwright",
+  "chromiumExec": "/opt/vm/preinstall/ms-playwright/chromium-1169/chrome-linux/chrome",
+  "elapsedSec": 4.45,
+  "schemaVersion": 2,
+  "status": "pass",
+  "engineInfo": {
+    "name": "playwright",
+    "degraded": false,
+    "degradedReasons": []
+  },
+  "input": {
+    "original": "云端配置设置页.html",
+    "resolvedPath": "/home/user/Doubao/chats/38448577444166402/云端配置预览/云端配置设置页.html",
+    "baseUrl": "file:///home/user/Doubao/chats/38448577444166402/%E4%BA%91%E7%AB%AF%E9%85%8D%E7%BD%AE%E9%A2%84%E8%A7%88/%E4%BA%91%E7%AB%AF%E9%85%8D%E7%BD%AE%E8%AE%BE%E7%BD%AE%E9%A1%B5.html",
+    "protocol": "file",
+    "cwd": "/home/user/Doubao/chats/38448577444166402/云端配置预览",
+    "mediaMode": {
+      "reducedMotion": true
+    }
+  },
+  "artifacts": {
+    "screenshots": [
+      {
+        "viewport": "desktop",
+        "path": "/home/user/Doubao/chats/38448577444166402/云端配置预览/_shots/云端配置设置页_desktop.jpg",
+        "size": 63526,
+        "visualCoverage": {
+          "complete": true,
+          "reason": null
+        }
+      },
+      {
+        "viewport": "mobile",
+        "path": "/home/user/Doubao/chats/38448577444166402/云端配置预览/_shots/云端配置设置页_mobile.jpg",
+        "size": 96935,
+        "visualCoverage": {
+          "complete": true,
+          "reason": null
+        }
+      }
+    ]
+  },
+  "summary": {
+    "blocker": 0,
+    "error": 0,
+    "warning": 0,
+    "info": 0
+  },
+  "findings": [],
+  "prioritizedActions": [],
+  "reportPath": "/home/user/Doubao/chats/38448577444166402/云端配置预览/_shots/report.json"
+}
