@@ -1343,6 +1343,22 @@ struct ShareProfileView: View {
         }
     }
 
+    /// v1.47：把名片姓名/电话同步到云端 users/<用户名>/profile.json——公开选房 H5（?act=rooms）
+    /// 每次打开/刷新实时读取它，改名片后租客刷新页面即显示最新（二维码图已由 syncQRToCloud 上传 qrcode.jpg）。
+    private func syncProfileToCloud(name: String, phone: String) {
+        guard let config = CosConfig.load() else { return }
+        Task {
+            do {
+                let obj: [String: Any] = ["name": name, "phone": phone, "updated": ISO8601DateFormatter().string(from: Date())]
+                if let data = try? JSONSerialization.data(withJSONObject: obj, options: []) {
+                    try await CosUploader.upload(data: data, to: CloudUser.userRootPrefix + "profile.json", contentType: "application/json", config: config)
+                }
+            } catch {
+                // 静默：网络/配置问题不阻塞本地保存，下次分享时仍会照常上传
+            }
+        }
+    }
+
     /// 保存分享名片信息（姓名/电话）到钥匙串
     private func saveShareProfile() {
         let name = shareName.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1353,6 +1369,66 @@ struct ShareProfileView: View {
         }
         var ok = KeychainFix.saveVerified(name, for: KeychainKey.shareName)
         ok = KeychainFix.saveVerified(phone, for: KeychainKey.sharePhone) && ok
-        savedTip = ok ? "名片信息已保存 ✅\n姓名：\(name)\n电话：\(phone.isEmpty ? "（未填，分享时用默认号）" : phone)" : "写入本机钥匙串失败，请重新保存一次"
+        // v1.47：保存后同步云端名片（公开选房页实时生效）
+        syncProfileToCloud(name: name, phone: phone)
+        savedTip = ok ? "名片信息已保存 ✅\n姓名：\(name)\n电话：\(phone.isEmpty ? "（未填，分享时用默认号）" : phone)\n公开选房链接刷新后同步更新" : "写入本机钥匙串失败，请重新保存一次"
+    }
+}
+
+// MARK: - v1.47 公开选房链接（发给租客的实时选房 H5）
+
+/// 选房链接页：生成「公开选房 H5」链接（云函数 ?act=rooms&u=<用户名>），
+/// 复制/分享给租客即可实时查看所有待租房源；改房源、改名片、换二维码后租客刷新即最新。
+struct RoomsShareView: View {
+    @State private var copiedTip: String?
+    @State private var showShareSheet = false
+
+    /// 公开选房链接：云函数地址 + act=rooms + 当前用户名（页面服务端实时渲染）
+    private var link: String {
+        let base = CloudConfig.functionURL
+        guard !base.isEmpty else { return "" }
+        let u = (CloudUser.username.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "")
+        return base + "?act=rooms&u=" + u
+    }
+
+    var body: some View {
+        Form {
+            Section(header: Text("公开选房链接"), footer: Text("把链接发给租客，对方打开即可看到所有待租房源（只显示户型，房东/密码/备注等内部信息已隐藏）。页面每次打开或刷新都实时读取云端最新房源：您新增/下架房源、改租金、改名片、换二维码后，租客刷新一下就是最新内容，无需重新生成链接。")) {
+                if link.isEmpty {
+                    Text("尚未配置云函数地址\n请先到「设置 → 房源分享 → 云端配置」填写云函数地址并保存验证")
+                        .font(.footnote)
+                        .foregroundColor(.secondary)
+                } else {
+                    Text(link)
+                        .font(.caption)
+                        .textSelection(.enabled)
+                        .foregroundColor(.secondary)
+                    Button {
+                        UIPasteboard.general.string = link
+                        copiedTip = "链接已复制 ✅\n直接发给租客即可"
+                    } label: {
+                        Label("复制链接", systemImage: "doc.on.doc")
+                    }
+                    Button {
+                        showShareSheet = true
+                    } label: {
+                        Label("分享给租客", systemImage: "square.and.arrow.up")
+                    }
+                }
+            }
+        }
+        .navigationTitle("公开选房链接")
+        .navigationBarTitleDisplayMode(.inline)
+        .sheet(isPresented: $showShareSheet) {
+            HouseShareSheet(items: [link])
+        }
+        .alert("已复制", isPresented: Binding(
+            get: { copiedTip != nil },
+            set: { if !$0 { copiedTip = nil } }
+        )) {
+            Button("好", role: .cancel) {}
+        } message: {
+            Text(copiedTip ?? "")
+        }
     }
 }

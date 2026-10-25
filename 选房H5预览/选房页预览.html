@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>米兰公馆 · 在租房源</title>
+<style>
+  :root{
+    --bg:#f4f5f7;
+    --card:#ffffff;
+    --ink:#1a1c20;
+    --sub:#8e8e93;
+    --line:#eceef1;
+    --brand:#1f7a4d;
+    --price:#e34d2b;
+    --chip:#eef0f3;
+    --radius:16px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
+  html,body{background:var(--bg);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",system-ui,sans-serif;}
+  /* 防保存机制：禁右键 / 禁长按选择 / 禁长按菜单（与单房源分享 H5 一致） */
+  body{max-width:560px;margin:0 auto;padding:0 16px 24px;
+    -webkit-touch-callout:none;-webkit-user-select:none;user-select:none;
+    -webkit-user-drag:none;}
+  body *{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none;-webkit-user-drag:none;}
+
+  /* ===== 顶栏 ===== */
+  .topbar{
+    position:sticky;top:0;z-index:10;background:rgba(244,245,247,.94);
+    backdrop-filter:saturate(180%) blur(10px);-webkit-backdrop-filter:saturate(180%) blur(10px);
+    border-bottom:1px solid var(--line);padding:14px 0 8px;
+  }
+  .title-row{display:flex;align-items:center;justify-content:space-between;gap:10px;}
+  .title{font-size:19px;font-weight:700;letter-spacing:.5px;}
+  .title .dot{color:var(--brand);}
+  .refresh{
+    flex:0 0 auto;border:none;background:var(--brand);color:#fff;font-size:13px;font-weight:600;
+    padding:7px 16px;border-radius:999px;cursor:pointer;
+  }
+  .refresh:active{opacity:.85;}
+  .filters{display:flex;gap:8px;overflow-x:auto;padding:10px 0 2px;scrollbar-width:none;}
+  .filters::-webkit-scrollbar{display:none;}
+  .chip{
+    flex:0 0 auto;padding:7px 16px;border-radius:999px;background:var(--chip);
+    font-size:13px;color:#45494f;cursor:pointer;border:1px solid transparent;
+  }
+  .chip.on{background:var(--brand);color:#fff;font-weight:600;}
+  .count{font-size:12px;color:var(--sub);padding:4px 2px 0;}
+
+  /* ===== 房源卡片：正方形 · 左右各一个（2 列网格） ===== */
+  .list{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px;}
+  .card{
+    background:var(--card);border-radius:var(--radius);overflow:hidden;
+    box-shadow:0 1px 3px rgba(0,0,0,.05);border:1px solid var(--line);
+  }
+  .cover{
+    position:relative;width:100%;aspect-ratio:1/1;
+    display:flex;align-items:center;justify-content:center;background:#2a3b33;
+  }
+  .cover .bg{position:absolute;inset:0;}
+  /* 占位封面配色组（正式版 = 视频预览图，即视频首帧；无视频则实拍图） */
+  .cover.c1 .bg{background:linear-gradient(135deg,#2f6f4f 0%,#1f4d36 55%,#173a29 100%);}
+  .cover.c2 .bg{background:linear-gradient(135deg,#3d7a63 0%,#2a5c47 55%,#1c4233 100%);}
+  .cover.c3 .bg{background:linear-gradient(135deg,#55826b 0%,#3a6650 55%,#26493a 100%);}
+  .cover.c4 .bg{background:linear-gradient(135deg,#2c5d4e 0%,#1e4a3d 55%,#14352c 100%);}
+  .cover.c5 .bg{background:linear-gradient(135deg,#6f8f7d 0%,#4e725f 55%,#355344 100%);}
+  .cover .bg::after{
+    content:"";position:absolute;inset:0;
+    background:radial-gradient(120% 90% at 78% 8%,rgba(255,255,255,.18) 0%,transparent 45%);
+  }
+  /* 视频预览图样式：中央播放键（预览稿示意，正式版为真实视频首帧图） */
+  .play{
+    position:relative;z-index:2;width:44px;height:44px;border-radius:50%;
+    background:rgba(0,0,0,.5);border:2px solid rgba(255,255,255,.85);
+    display:flex;align-items:center;justify-content:center;
+  }
+  .play::after{
+    content:"";display:block;width:0;height:0;margin-left:3px;
+    border-top:8px solid transparent;border-bottom:8px solid transparent;
+    border-left:13px solid #fff;
+  }
+  .type-tag{
+    position:absolute;z-index:3;left:8px;right:8px;bottom:8px;text-align:center;
+    color:#fff;font-size:15px;font-weight:600;letter-spacing:1px;
+    background:rgba(0,0,0,.45);padding:6px 0;border-radius:8px;
+  }
+
+  /* ===== 名片板块（与单房源分享 H5 一致） ===== */
+  .card-share{
+    background:linear-gradient(180deg,#f7fafd,#e9f1f9);border:1px solid #dfe9f3;
+    border-radius:16px;padding:14px;margin-top:14px;
+  }
+  .qr-wrap{display:flex;align-items:center;gap:14px;}
+  .qr-col{display:flex;flex-direction:column;align-items:center;gap:3px;flex-shrink:0;}
+  .qr-tip{font-size:10px;color:#8e8e93;text-align:center;max-width:108px;white-space:nowrap;line-height:1.3;}
+  .qr{width:108px;height:108px;border-radius:10px;object-fit:cover;flex-shrink:0;background:#fff;border:1px solid #e3e3e8;
+    /* 二维码允许长按（微信识别加好友），与分享页一致 */
+    -webkit-touch-callout:default;-webkit-user-select:text;user-select:text;-webkit-user-drag:auto;}
+  .card-info{flex:1;min-width:0;text-align:center;}
+  .tag{color:#8e8e93;font-size:12px;margin-bottom:10px;}
+  .row{display:flex;align-items:center;justify-content:center;gap:8px;flex-wrap:wrap;}
+  .name{font-size:17px;font-weight:600;}
+  .num{font-size:16px;font-weight:600;color:#b8860b;}
+  .note{color:#8e8e93;font-size:12px;margin:10px 0 14px;}
+  .btns{display:flex;gap:10px;justify-content:center;}
+  .btn{flex:1;max-width:220px;padding:12px 0;border-radius:999px;font-size:15px;font-weight:600;text-align:center;text-decoration:none;display:block;}
+  .btn.call{background:#1f3a5f;color:#fff;}
+  .btn.copy{background:#f0f0f2;color:#1c1c1e;border:none;cursor:pointer;}
+  .foot{text-align:center;color:#8e8e93;font-size:12px;padding:16px 0 4px;}
+
+  /* ===== Toast ===== */
+  .toast{
+    position:fixed;left:50%;bottom:72px;transform:translateX(-50%) translateY(8px);
+    background:rgba(20,22,26,.92);color:#fff;font-size:13px;padding:10px 16px;border-radius:10px;
+    opacity:0;pointer-events:none;transition:opacity .25s,transform .25s;z-index:20;max-width:86%;text-align:center;
+  }
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
+</style>
+</head>
+<body oncontextmenu="return false">
+
+<!-- ===== 视图：顶栏 ===== -->
+<header class="topbar">
+  <div class="title-row">
+    <div class="title">米兰公馆<span class="dot"> · </span>在租房源</div>
+    <button class="refresh" id="refreshBtn">刷新</button>
+  </div>
+  <div class="filters" id="filters"></div>
+  <div class="count" id="count"></div>
+</header>
+
+<!-- ===== 视图：房源列表（只显示户型，2 列正方形） ===== -->
+<main class="list" id="list"></main>
+
+<!-- ===== 视图：名片 + 二维码（与单房源分享 H5 一致） ===== -->
+<section class="card-share">
+  <div class="qr-wrap">
+    <div class="qr-col">
+      <img class="qr" id="qrImg" alt="微信二维码">
+      <div class="qr-tip">长按二维码加我好友</div>
+    </div>
+    <div class="card-info">
+      <div class="tag">米兰租赁管家 · 专业省心租好房</div>
+      <div class="row"><span class="name" id="shareName">梁涛</span><span class="num" id="sharePhone">13288251132</span></div>
+      <div class="note">微信同号 · 24小时可约看房</div>
+      <div class="btns">
+        <a class="btn call" href="tel:13288251132">拨打电话</a>
+        <button class="btn copy" type="button" id="copyBtn">复制电话</button>
+      </div>
+    </div>
+  </div>
+</section>
+<div class="foot">更多优质房源请与我联系-<span id="footPhone">13288251132</span></div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* =========================================================
+   预览稿：模拟云端实时数据源
+   —— 正式版：页面由云函数动态生成，JS 改为 fetch ?act=rooms
+      拉取 h/_houses.json 过滤后的待租房源，每次打开/刷新即最新；
+      名片姓名/电话/微信二维码读取 App 设置（分享页同款字段）。
+   ========================================================= */
+var MOCK = [
+  { layout:"单间",     cover:"c1" },
+  { layout:"中空复式", cover:"c2" },
+  { layout:"单间",     cover:"c3" },
+  { layout:"户型复式", cover:"c4" },
+  { layout:"一房一厅", cover:"c5" },
+  { layout:"单间",     cover:"c1" },
+  { layout:"中空复式", cover:"c3" },
+  { layout:"户型复式", cover:"c2" }
+];
+var curFilter = "全部";
+
+/* 占位二维码（预览稿示意）：正式版显示 App 设置里上传的真实微信二维码 */
+(function(){
+  var c = document.createElement("canvas");
+  c.width = c.height = 108;
+  var g = c.getContext("2d");
+  g.fillStyle = "#fff"; g.fillRect(0,0,108,108);
+  g.fillStyle = "#1c1c1e";
+  var cells = 21, size = 4;
+  for(var x=0;x<cells;x++) for(var y=0;y<cells;y++){
+    var inFinder = (x<7&&y<7)||(x>=cells-7&&y<7)||(x<7&&y>=cells-7);
+    if(inFinder){ g.fillRect(x*size,y*size,size,size); continue; }
+    if(Math.random()>.52) g.fillRect(x*size,y*size,size,size);
+  }
+  document.getElementById("qrImg").src = c.toDataURL();
+})();
+
+/* 卡片只渲染「户型」——房号/租金/座号/状态等信息全部隐藏（隐藏版规则）；
+   封面为视频预览图（预览稿以深色占位+播放键示意，正式版为视频首帧/实拍图） */
+function cardHtml(h){
+  return '<article class="card">'
+    +'<div class="cover '+h.cover+'">'
+    +'  <span class="bg"></span>'
+    +'  <span class="play"></span>'
+    +'  <span class="type-tag">'+h.layout+'</span>'
+    +'</div>'
+    +'</article>';
+}
+
+function render(){
+  var rows = MOCK.filter(function(h){
+    return curFilter === "全部" || h.layout === curFilter;
+  });
+  document.getElementById("list").innerHTML = rows.map(cardHtml).join("");
+  document.getElementById("count").textContent =
+    "共 " + rows.length + " 套待租房源" + (curFilter !== "全部" ? "（"+curFilter+"）" : "");
+}
+
+function buildFilters(){
+  var kinds = ["全部"];
+  MOCK.forEach(function(h){ if(kinds.indexOf(h.layout) < 0) kinds.push(h.layout); });
+  document.getElementById("filters").innerHTML = kinds.map(function(k){
+    return '<span class="chip'+(curFilter===k?" on":"")+'" data-k="'+k+'">'+k+'</span>';
+  }).join("");
+}
+
+/* 演示「刷新」：正式版为重新拉取云端账本；预览稿仅提示已刷新 */
+function fakeCloudChange(){
+  showToast("已刷新");
+}
+
+var toastTimer;
+function showToast(html){
+  var t = document.getElementById("toast");
+  t.innerHTML = html;
+  t.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(function(){ t.classList.remove("show"); }, 2600);
+}
+
+function copyPhone(){
+  var p = document.getElementById("sharePhone").textContent;
+  function done(){ showToast("已复制 "+p); }
+  function fb(){
+    var i = document.createElement("input");
+    i.value = p; document.body.appendChild(i); i.select();
+    i.setSelectionRange(0,999); document.execCommand("copy"); i.remove(); done();
+  }
+  if(navigator.clipboard && window.isSecureContext){ navigator.clipboard.writeText(p).then(done,fb); }
+  else { fb(); }
+}
+
+document.getElementById("filters").addEventListener("click", function(e){
+  var chip = e.target.closest(".chip");
+  if(!chip) return;
+  curFilter = chip.getAttribute("data-k");
+  buildFilters(); render();
+});
+document.getElementById("refreshBtn").addEventListener("click", fakeCloudChange);
+document.getElementById("copyBtn").addEventListener("click", copyPhone);
+
+buildFilters(); render();
+</script>
+</body>
+</html>
