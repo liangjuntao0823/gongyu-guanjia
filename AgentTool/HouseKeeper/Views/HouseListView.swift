@@ -14,6 +14,7 @@ struct HouseListView: View {
     @State private var statusFilter: HouseStatus? = .available   // 首页默认显示待租房源
     @State private var layoutFilters: Set<String> = []   // v1.3：户型筛选支持多选，空 = 全部户型
     @State private var showAdd = false
+    @State private var showBatchImport = false   // v1.58：批量录入（清单/zip/扫描）
 
     // 卡片左滑菜单（编辑 / 已租 / 删除）
     @State private var showEditHouse: House?
@@ -151,6 +152,12 @@ struct HouseListView: View {
                             } label: {
                                 Image(systemName: "checkmark.circle")
                             }
+                            // v1.58：批量录入入口（清单导入 / 媒体包导入 / 扫描补录）
+                            Button {
+                                showBatchImport = true
+                            } label: {
+                                Image(systemName: "square.and.arrow.down.on.square")
+                            }
                             // v1.7：+ 按钮样式与其他板块一致（plus.circle.fill + 主题绿）
                             Button {
                                 showAdd = true
@@ -164,6 +171,9 @@ struct HouseListView: View {
             }
             .sheet(isPresented: $showAdd) {
                 HouseEditView(house: nil)
+            }
+            .sheet(isPresented: $showBatchImport) {
+                HouseBatchImportView()
             }
             .sheet(item: $showEditHouse) { house in
                 HouseEditView(house: house)

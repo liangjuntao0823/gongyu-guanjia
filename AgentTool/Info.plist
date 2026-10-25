@@ -8,6 +8,10 @@
 	<!-- v1.45：允许「文件」App 定位到具体子文件夹（打开 media 文件夹时直达该目录，不再只落根目录） -->
 	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<true/>
+	<!-- v1.58：开启文件共享——电脑（访达/iTunes）可看到「公寓管家」的 Documents 目录，
+	     把按房号分好的照片视频文件夹整体拖入 Documents/media/ 下，再回 App 用「批量导入 → 扫描补录」一键录入 -->
+	<key>UIFileSharingEnabled</key>
+	<true/>
 	<!-- v1.13 需求17：声明可打开 zip 备份文件，系统「用其他 App 打开」表单中出现「公寓管家」 -->
 	<key>CFBundleDocumentTypes</key>
 	<array>

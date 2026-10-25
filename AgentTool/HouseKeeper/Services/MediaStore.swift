@@ -209,6 +209,70 @@ enum MediaStore {
         }
         try? FileManager.default.removeItem(at: oldDir)
     }
+
+    // MARK: - v1.58 批量录入支持
+
+    /// 扫描 Documents/media/ 下所有房号子目录名（即 mediaRoomKey；跳过隐藏/非目录项）
+    static func scanMediaDirectoryKeys() -> [String] {
+        let dir = mediaDirectory()
+        guard let names = try? FileManager.default.contentsOfDirectory(atPath: dir.path) else { return [] }
+        return names.filter { name in
+            guard !name.hasPrefix(".") else { return false }
+            var isDir: ObjCBool = false
+            FileManager.default.fileExists(atPath: dir.appendingPathComponent(name).path, isDirectory: &isDir)
+            return isDir.boolValue
+        }
+    }
+
+    /// 把「媒体包 zip」解压到系统临时目录，识别出房号目录 key 列表。
+    /// 兼容两种结构：zip 根 = 多个房号目录；zip 根 = 单个包裹目录（里面才是房号目录），自动下钻一层。
+    static func extractMediaZipToTemp(url: URL) -> (tempRoot: URL, roomKeys: [String])? {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("BatchMedia_\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
+        guard (try? ZipStore.extractAll(at: url, to: tempRoot)) != nil else { return nil }
+        func subdirs(of dir: URL) -> [String] {
+            guard let names = try? FileManager.default.contentsOfDirectory(atPath: dir.path) else { return [] }
+            return names.filter { n in
+                var isDir: ObjCBool = false
+                FileManager.default.fileExists(atPath: dir.appendingPathComponent(n).path, isDirectory: &isDir)
+                return isDir.boolValue && !n.hasPrefix("__MACOSX") && !n.hasPrefix(".")
+            }
+        }
+        var keys = subdirs(of: tempRoot)
+        // 单层包裹：根下只有 1 个目录且没有散落文件 → 下钻
+        if keys.count == 1 {
+            let single = tempRoot.appendingPathComponent(keys[0], isDirectory: true)
+            let inner = subdirs(of: single)
+            let looseFiles = ((try? FileManager.default.contentsOfDirectory(atPath: tempRoot.path)) ?? [])
+                .filter { !$0.hasPrefix(".") }
+            let innerAll = inner.filter { $0 != "__MACOSX" }
+            if !innerAll.isEmpty && looseFiles.count == 1 {
+                keys = innerAll
+            }
+        }
+        return (tempRoot, keys)
+    }
+
+    /// 把 zip 内某个房号目录的全部媒体文件复制到 Documents/media/<roomKey>/（zip 临时目录 → 正式目录），返回复制的文件名
+    static func importMediaFiles(fromTempDir: URL, toRoomKey: String) -> [String] {
+        let target = houseDirectory(roomKey: toRoomKey)
+        try? FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: fromTempDir.path)) ?? []
+        var copied: [String] = []
+        for name in names {
+            let lower = name.lowercased()
+            let isMedia = lower.hasSuffix(".jpg") || lower.hasSuffix(".jpeg") || lower.hasSuffix(".png")
+                || lower.hasSuffix(".heic") || lower.hasSuffix(".mov") || lower.hasSuffix(".mp4")
+            guard isMedia, !name.hasPrefix(".") else { continue }
+            let dest = target.appendingPathComponent(name)
+            if !FileManager.default.fileExists(atPath: dest.path),
+               let _ = try? FileManager.default.copyItem(at: fromTempDir.appendingPathComponent(name), to: dest) {
+                copied.append(name)
+            }
+        }
+        return copied
+    }
 }
 
 // MARK: - v1.30 数据备份说明（微信式文件夹备份）
