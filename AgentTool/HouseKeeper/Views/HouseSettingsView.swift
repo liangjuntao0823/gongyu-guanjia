@@ -1448,33 +1448,35 @@ struct RoomsShareView: View {
         }
     }
 
-    /// 调云函数 roomsSeed（带口令）生成 COS 壳并返回签名链接
+    /// v1.50：App 本地生成选房静态壳并上传 COS，用 presignedGetURL 生成链接——
+    /// 与单房分享 H5 完全同机制：链接走自定义域名（微信按网页打开+抓卡片），
+    /// 页面 JS 每次打开/刷新实时拉 rooms_json，房源/名片/二维码变化刷新即最新。
     private func refreshLink() async {
-        let base = CloudConfig.functionURL
-        guard !base.isEmpty else {
+        guard let config = CosConfig.load() else {
             cosLink = ""
-            linkTip = "尚未配置云函数地址\n请先到「设置 → 房源分享 → 云端配置」填写云函数地址并保存验证"
+            linkTip = "尚未配置云端\n请先到「设置 → 房源分享 → 云端配置」填写 COS 密钥并保存验证"
             return
         }
-        guard let esc = (CloudUser.username.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed)),
-              let url = URL(string: "\(base)?act=roomsSeed&k=\(CloudConfig.passwordHash)&u=\(esc)") else {
+        guard !config.customDomain.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             cosLink = ""
-            linkTip = "链接生成失败，请返回后重试"
+            linkTip = "请先在云端配置填写「自定义域名」\n（与单房分享 H5 相同，否则微信会把链接当文件下载）"
+            return
+        }
+        guard !CloudConfig.functionURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            cosLink = ""
+            linkTip = "请先在云端配置填写「云函数地址」\n（选房页数据靠云函数实时提供）"
             return
         }
         do {
-            let (data, _) = try await URLSession.shared.data(from: url)
-            if let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-               let u2 = obj["url"] as? String, !u2.isEmpty {
-                cosLink = u2
-                linkTip = nil
-            } else {
-                cosLink = ""
-                linkTip = "云端未返回链接：请确认云函数已部署最新版（部署包）且口令正确"
-            }
+            let html = CosUploader.buildRoomsShellHTML(config: config)
+            let remotePath = CloudUser.userRootPrefix + "rooms/index.html"
+            try await CosUploader.upload(data: Data(html.utf8), to: remotePath, contentType: "text/html; charset=utf-8", config: config)
+            let url = try CosUploader.presignedGetURL(for: remotePath, expires: 3650 * 86400, config: config)
+            cosLink = url.absoluteString
+            linkTip = nil
         } catch {
             cosLink = ""
-            linkTip = "生成失败：网络异常，请检查网络后返回重试"
+            linkTip = "生成失败：\(error.localizedDescription)\n请检查云端配置与网络后重试"
         }
     }
 }
