@@ -722,6 +722,7 @@ enum CosUploader {
         </section>
         <div class="foot">更多优质房源请与我联系-\(escapeHTML(phone))</div>
         </div>
+        <div class="mask" id="mask" style="display:none" onclick="hideModal()"><img id="modalImg" src="" alt=""></div>
         <div id="toast"></div>
         <div id="lb"><div id="lbImg"></div><div id="lbPrev" onclick="lbPrev()">‹</div><div id="lbNext" onclick="lbNext()">›</div><div id="lbClose" onclick="lbClose()">✕</div><div id="lbCnt"></div></div>
         <script>
@@ -734,6 +735,19 @@ enum CosUploader {
         function lbClose(){document.getElementById('lb').style.display='none';}
         var _sx=0;(function(){var d=document.getElementById('lb');d.addEventListener('touchstart',function(e){_sx=e.touches[0].clientX},{passive:true});d.addEventListener('touchend',function(e){var dx=e.changedTouches[0].clientX-_sx;if(Math.abs(dx)>50){dx<0?lbNext():lbPrev();}},{passive:true});})();
         function toast(msg){var t=document.getElementById('toast');t.textContent=msg;t.style.display='block';clearTimeout(t._h);t._h=setTimeout(function(){t.style.display='none'},1600);}
+        function showModal(src){
+          document.getElementById("modalImg").src = src;
+          document.getElementById("mask").style.display = "flex";
+        }
+        function hideModal(){ document.getElementById("mask").style.display = "none"; }
+        document.getElementById("list").addEventListener("click", function(e){
+          var card = e.target.closest(".card");
+          if(!card) return;
+          var h = ROOMS[parseInt(card.getAttribute("data-i"))];
+          if(!h) return;
+          if(h.share){ location.href = h.share; return; }
+          if(h.cover){ showModal(h.cover, h.layout); }
+        });
         function copyPhone(){var p='\(phone)';function done(){toast('已复制 '+p)}function fb(){var i=document.createElement('input');i.value=p;document.body.appendChild(i);i.select();i.setSelectionRange(0,999);document.execCommand('copy');i.remove();done()}if(navigator.clipboard&&window.isSecureContext){navigator.clipboard.writeText(p).then(done,fb)}else{fb()}}
         </script>
         \(trackScript)
@@ -744,8 +758,9 @@ enum CosUploader {
 
     // MARK: - v1.50 公开选房页静态壳（与单房分享 H5 同机制：存 COS、链接走自定义域名，微信正常打开+卡片）
 
-    /// 取本地第一套房的封面媒体路径（用于选房页 og:image；无则空）
-    private static func firstRoomCoverMediaPath() -> String {
+    /// 取本地第一套房的封面云端路径（用于选房页 og:image，与分享 H5 同款封面）：
+    /// 优先视频首帧图 users/<用户名>/shares/<房号>/<视频名>.vthumb.jpg；无视频则第一张图 h/<房号>/<文件名>
+    private static func firstRoomCoverRemotePath() -> String {
         let dir = MediaStore.mediaDirectory()
         guard let houseDirs = try? FileManager.default.contentsOfDirectory(atPath: dir.path) else { return "" }
         for hd in houseDirs.sorted() {
@@ -753,6 +768,12 @@ enum CosUploader {
             let hpath = dir.appendingPathComponent(hd)
             guard FileManager.default.fileExists(atPath: hpath.path, isDirectory: &isDir), isDir.boolValue else { continue }
             let mediaNames = (try? FileManager.default.contentsOfDirectory(atPath: hpath.path)) ?? []
+            for mn in mediaNames.sorted() {
+                let lower = mn.lowercased()
+                if lower.hasSuffix(".mp4") || lower.hasSuffix(".mov") || lower.hasSuffix(".m4v") {
+                    return "users/\(CloudUser.safeName)/shares/\(hd)/\(mn).vthumb.jpg"
+                }
+            }
             for mn in mediaNames.sorted() {
                 let lower = mn.lowercased()
                 if lower.hasSuffix(".jpg") || lower.hasSuffix(".jpeg") || lower.hasSuffix(".png") || lower.hasSuffix(".heic") || lower.hasSuffix(".webp") {
@@ -767,7 +788,7 @@ enum CosUploader {
     /// - 存桶 users/<用户名>/rooms/index.html，链接用 presignedGetURL（自动走自定义域名——微信按网页渲染并抓卡片）
     /// - 页面 JS 每次打开/刷新实时 fetch 云函数 ?act=rooms_json&u=<用户名> 渲染最新房源/名片/二维码，改完刷新即最新
     /// - og:image 优先微信二维码（10 年签名），其次本地第一套封面；og:title/description 供微信卡片
-    static func buildRoomsShellHTML(config: CosConfig) -> String {
+    static func buildRoomsShellHTML(config: CosConfig, shellURL: String) -> String {
         let u = CloudUser.safeName
         let uEsc = u.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
         let base = CloudConfig.functionURL
@@ -779,16 +800,15 @@ enum CosUploader {
         let cdEsc = cd.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
         let jsUrl = base + "?act=rooms_json&u=" + uEsc + "&cd=" + cdEsc
         let pageUrl = base + "?act=rooms&u=" + uEsc
+        // og:image 用本地第一套房封面（与分享 H5 同款，云端必存在）；og:url 用壳自身签名链接（微信按此抓取）
         var og = ""
-        if let qr = try? presignedGetURL(for: CloudUser.qrPath, expires: 3650 * 86400, config: config).absoluteString {
-            og = qr
-        }
-        let coverPath = firstRoomCoverMediaPath()
-        if og.isEmpty, !coverPath.isEmpty,
+        let coverPath = firstRoomCoverRemotePath()
+        if !coverPath.isEmpty,
            let cv = try? presignedGetURL(for: coverPath, expires: 3650 * 86400, config: config).absoluteString {
             og = cv
         }
         let ogMeta = og.isEmpty ? "" : "<meta property=\"og:image\" content=\"\(og)\">"
+        let urlMeta = "<meta property=\"og:url\" content=\"\(shellURL)\">"
         return """
         <!DOCTYPE html>
         <html lang="zh-CN">
@@ -801,7 +821,7 @@ enum CosUploader {
         <meta property="og:title" content="米兰公馆 · 在租房源">
         <meta property="og:description" content="实时更新的在租房源列表，点击查看户型。更多优质房源请与我联系。">
         \(ogMeta)
-        <meta property="og:url" content="\(pageUrl)">
+        \(urlMeta)
         <style>
         *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
         html,body{background:#f4f5f7;color:#1a1c20;font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",system-ui,sans-serif;}
@@ -823,6 +843,9 @@ enum CosUploader {
         .cover{position:relative;width:100%;aspect-ratio:1/1;display:flex;align-items:center;justify-content:center;background-color:#2a3b33;background-size:cover;background-position:center;overflow:hidden;}
         .cover .ph{position:absolute;inset:0;background:linear-gradient(135deg,#2f6f4f,#1f4d36 55%,#173a29);}
         .cover .ph::after{content:"";position:absolute;inset:0;background:radial-gradient(120% 90% at 78% 8%,rgba(255,255,255,.18) 0%,transparent 45%);}
+        .cv{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block;pointer-events:none;-webkit-user-drag:none;-webkit-touch-callout:none;}
+        .mask{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:100;display:flex;align-items:center;justify-content:center;}
+        .mask img{max-width:96vw;max-height:96vh;object-fit:contain;border-radius:4px;pointer-events:none;-webkit-user-drag:none;-webkit-touch-callout:none;}
         .play{position:absolute;width:44px;height:44px;border-radius:50%;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:2;}
         .play::before{content:"";width:0;height:0;border-left:16px solid #fff;border-top:10px solid transparent;border-bottom:10px solid transparent;margin-left:3px;}
         .type-tag{position:absolute;left:0;right:0;bottom:0;padding:26px 12px 10px;background:linear-gradient(180deg,transparent,rgba(0,0,0,.62));color:#fff;font-size:16px;font-weight:700;z-index:2;}
@@ -871,6 +894,7 @@ enum CosUploader {
             <div class="qr-tip">长按二维码加我好友</div>
           </div>
         </div>
+        <div class="mask" id="mask" style="display:none" onclick="hideModal()"><img id="modalImg" src="" alt=""></div>
         <div id="toast"></div>
         <script>
         var FETCH_URL = "\(jsUrl)";
@@ -884,8 +908,8 @@ enum CosUploader {
           var list = document.getElementById("list");
           list.innerHTML = rows.map(function(h,i){
             var cover = h.cover || "";
-            var style = cover ? 'background-image:url("'+cover+'")' : '';
-            return '<div class="card"><div class="cover" style="'+style+'">'+(cover?'':'<div class="ph"></div>')+'<span class="play"></span><span class="type-tag">'+esc(h.layout)+'</span></div></div>';
+            var inner = cover ? '<img class="cv" src="'+cover+'" alt="" loading="lazy" onerror="this.style.display='none'">' : '<div class="ph"></div>';
+            return '<div class="card" data-i="'+i+'"><div class="cover">'+inner+'<span class="play"></span><span class="type-tag">'+esc(h.layout)+'</span></div></div>';
           }).join("");
           document.getElementById("empty").style.display = rows.length ? "none" : "block";
           document.getElementById("loading").style.display = "none";
@@ -904,6 +928,19 @@ enum CosUploader {
           clearTimeout(toastTimer);
           toastTimer = setTimeout(function(){ t.classList.remove("show"); }, 1600);
         }
+        function showModal(src){
+          document.getElementById("modalImg").src = src;
+          document.getElementById("mask").style.display = "flex";
+        }
+        function hideModal(){ document.getElementById("mask").style.display = "none"; }
+        document.getElementById("list").addEventListener("click", function(e){
+          var card = e.target.closest(".card");
+          if(!card) return;
+          var h = ROOMS[parseInt(card.getAttribute("data-i"))];
+          if(!h) return;
+          if(h.share){ location.href = h.share; return; }
+          if(h.cover){ showModal(h.cover, h.layout); }
+        });
         function copyPhone(){
           var p = document.getElementById("phoneText").textContent;
           function done(){ showToast("已复制 "+p); }
@@ -1053,6 +1090,7 @@ enum CosUploader {
         </section>
         <div class="foot">更多优质房源请与我联系-\(escapeHTML(phone))</div>
         </div>
+        <div class="mask" id="mask" style="display:none" onclick="hideModal()"><img id="modalImg" src="" alt=""></div>
         <div id="toast"></div>
         <div id="lb"><div id="lbImg"></div><div id="lbPrev" onclick="lbPrev()">‹</div><div id="lbNext" onclick="lbNext()">›</div><div id="lbClose" onclick="lbClose()">✕</div><div id="lbCnt"></div></div>
         <script>
@@ -1065,6 +1103,19 @@ enum CosUploader {
         function lbClose(){document.getElementById('lb').style.display='none';}
         var _sx=0;(function(){var d=document.getElementById('lb');d.addEventListener('touchstart',function(e){_sx=e.touches[0].clientX},{passive:true});d.addEventListener('touchend',function(e){var dx=e.changedTouches[0].clientX-_sx;if(Math.abs(dx)>50){dx<0?lbNext():lbPrev();}},{passive:true});})();
         function toast(msg){var t=document.getElementById('toast');t.textContent=msg;t.style.display='block';clearTimeout(t._h);t._h=setTimeout(function(){t.style.display='none'},1600);}
+        function showModal(src){
+          document.getElementById("modalImg").src = src;
+          document.getElementById("mask").style.display = "flex";
+        }
+        function hideModal(){ document.getElementById("mask").style.display = "none"; }
+        document.getElementById("list").addEventListener("click", function(e){
+          var card = e.target.closest(".card");
+          if(!card) return;
+          var h = ROOMS[parseInt(card.getAttribute("data-i"))];
+          if(!h) return;
+          if(h.share){ location.href = h.share; return; }
+          if(h.cover){ showModal(h.cover, h.layout); }
+        });
         function copyPhone(){var p='\(phone)';function done(){toast('已复制 '+p)}function fb(){var i=document.createElement('input');i.value=p;document.body.appendChild(i);i.select();i.setSelectionRange(0,999);document.execCommand('copy');i.remove();done()}if(navigator.clipboard&&window.isSecureContext){navigator.clipboard.writeText(p).then(done,fb)}else{fb()}}
         </script>
         \(trackScript)
@@ -1254,6 +1305,7 @@ enum CosUploader {
           <button class="back" type="button" onclick="showList()">返回房源列表</button>
         </div>
         </div>
+        <div class="mask" id="mask" style="display:none" onclick="hideModal()"><img id="modalImg" src="" alt=""></div>
         <div id="toast"></div>
         <div id="lb"><div id="lbImg"></div><div id="lbPrev" onclick="lbPrev()">‹</div><div id="lbNext" onclick="lbNext()">›</div><div id="lbClose" onclick="lbClose()">✕</div><div id="lbCnt"></div></div>
         <script>
@@ -1269,6 +1321,19 @@ enum CosUploader {
         function lbClose(){document.getElementById('lb').style.display='none';}
         var _sx=0;(function(){var d=document.getElementById('lb');d.addEventListener('touchstart',function(e){_sx=e.touches[0].clientX},{passive:true});d.addEventListener('touchend',function(e){var dx=e.changedTouches[0].clientX-_sx;if(Math.abs(dx)>50){dx<0?lbNext():lbPrev();}},{passive:true});})();
         function toast(msg){var t=document.getElementById('toast');t.textContent=msg;t.style.display='block';clearTimeout(t._h);t._h=setTimeout(function(){t.style.display='none'},1600);}
+        function showModal(src){
+          document.getElementById("modalImg").src = src;
+          document.getElementById("mask").style.display = "flex";
+        }
+        function hideModal(){ document.getElementById("mask").style.display = "none"; }
+        document.getElementById("list").addEventListener("click", function(e){
+          var card = e.target.closest(".card");
+          if(!card) return;
+          var h = ROOMS[parseInt(card.getAttribute("data-i"))];
+          if(!h) return;
+          if(h.share){ location.href = h.share; return; }
+          if(h.cover){ showModal(h.cover, h.layout); }
+        });
         function copyPhone(){var p='\(phone)';function done(){toast('已复制 '+p)}function fb(){var i=document.createElement('input');i.value=p;document.body.appendChild(i);i.select();i.setSelectionRange(0,999);document.execCommand('copy');i.remove();done()}if(navigator.clipboard&&window.isSecureContext){navigator.clipboard.writeText(p).then(done,fb)}else{fb()}}
         </script>
         \(trackScript)

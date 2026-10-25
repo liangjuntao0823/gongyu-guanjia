@@ -1468,10 +1468,10 @@ struct RoomsShareView: View {
             return
         }
         do {
-            let html = CosUploader.buildRoomsShellHTML(config: config)
             let remotePath = CloudUser.userRootPrefix + "rooms/index.html"
-            try await CosUploader.upload(data: Data(html.utf8), to: remotePath, contentType: "text/html; charset=utf-8", config: config)
             let url = try CosUploader.presignedGetURL(for: remotePath, expires: 3650 * 86400, config: config)
+            let html = CosUploader.buildRoomsShellHTML(config: config, shellURL: url.absoluteString)
+            try await CosUploader.upload(data: Data(html.utf8), to: remotePath, contentType: "text/html; charset=utf-8", config: config)
             cosLink = url.absoluteString
             linkTip = nil
         } catch {
