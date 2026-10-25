@@ -88,7 +88,7 @@ struct BackupFileBrowseViewV5: View {
                     Text("查看备份")
                 } footer: {
                     Text(selectedSection == 0
-                         ? "快速备份：账本 + 房源信息 + 媒体清单（不含照片视频文件），备份后自动上传云端。"
+                         ? "快速备份：账本 + 媒体清单（不含房源与照片视频文件），备份后自动上传云端；房源从云端同步恢复。"
                          : "全量备份：账本 + 房源 + 全部照片视频，备份后可在下方手动上传云端。")
                 }
 
@@ -103,7 +103,7 @@ struct BackupFileBrowseViewV5: View {
                                 Label("新建快速备份", systemImage: "bolt.circle")
                             }
                         } footer: {
-                            Text("快速备份：账本 + 房源信息 + 媒体清单（不含照片视频文件），备份后自动上传云端。")
+                            Text("快速备份：账本 + 媒体清单（不含房源与照片视频文件），备份后自动上传云端；房源从云端同步恢复。")
                         }
                     }
 

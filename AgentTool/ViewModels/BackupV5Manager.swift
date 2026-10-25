@@ -4,10 +4,11 @@ import CryptoKit
 import UIKit
 
 // MARK: - v1.12 备份体系 v2：快照 v5（统一快照格式）
-// 一份快照 = 经营 JSON + 房源 JSON + 媒体指纹清单（schemaVersion 4 → 5，兼容旧版备份导入）。
+// 一份快照 = 经营 JSON + 媒体指纹清单（schemaVersion 4 → 5，兼容旧版备份导入）。
 // 备份分两类：
-//   · 快速备份（fast）：快照 zip（不含媒体文件本体），自动/手动均可用，自动上传云端
-//   · 全量备份（full）：快照 zip + media/ 全部原文件，手动上传云端（可增量）
+//   · 快速备份（fast）：快照 zip（不含房源、不含媒体文件本体），自动/手动均可用，自动上传云端；
+//     v1.56 起不再写入房源（房源以云端为准，恢复后统一从云端同步，避免快照无云端状态导致同步冲突）
+//   · 全量备份（full）：快照 zip（含房源 JSON）+ media/ 全部原文件，手动上传云端（可增量）
 // 命名：快速_2026年10月22日15时30分.zip / 全量_xxx.zip（自动备份后缀 _自动；同分钟冲突追加 -2）
 // 恢复：校验 → 安全快照（现有数据打包到 PreRestore/）→ 导入 → 分行统计 → 成功删安全快照；失败用安全快照回滚。
 
@@ -248,13 +249,14 @@ final class BackupV5Manager {
         return list
     }
 
-    /// 创建快速备份（快照 zip：manifest + business + houses + media_manifest + 操作日志 + 崩溃日志；不含媒体文件）
+    /// 创建快速备份（快照 zip：manifest + business + media_manifest + 操作日志 + 崩溃日志；不含房源、不含媒体文件）
+    /// v1.56：快速备份不再写 houses.json——房源以云端为准，恢复后统一从云端同步，
+    /// 避免「快照不带云端状态、恢复后变仅本地、再同步把已删房源复活/覆盖」的冲突。
     @MainActor
     @discardableResult
     static func createFastBackup(mainContext: ModelContext, houseContext: ModelContext, isAuto: Bool = false, date: Date = Date()) -> URL? {
         do {
             let business = try exportBusinessJSON(mainContext: mainContext)
-            let houses = try exportHousesJSON(houseContext: houseContext)
             let fingerprints = collectMediaFingerprints()
             let manifest = BackupManifestV5(
                 kind: BackupKindV5.fast.rawValue,
@@ -272,7 +274,6 @@ final class BackupV5Manager {
             var entries: [(path: String, data: Data)] = [
                 ("manifest.json", manifestData),
                 ("business.json", business),
-                ("houses.json", houses),
                 ("media_manifest.json", fingerprintData)
             ]
             entries.append(contentsOf: logEntriesForBackup())
@@ -394,8 +395,10 @@ final class BackupV5Manager {
         guard let businessData = try? ZipStore.extract(at: zipURL, path: "business.json") else {
             throw BackupV5Error.invalidBackup("缺少 business.json")
         }
-        guard let housesData = try? ZipStore.extract(at: zipURL, path: "houses.json") else {
-            throw BackupV5Error.invalidBackup("缺少 houses.json")
+        // v1.56：houses.json 仅全量备份必需；快速备份不含房源（房源统一从云端同步恢复）
+        let housesData: Data? = try? ZipStore.extract(at: zipURL, path: "houses.json")
+        if kind == .full && housesData == nil {
+            throw BackupV5Error.invalidBackup("全量备份缺少 houses.json")
         }
 
         stageMessage("校验通过，正在打包当前数据做安全快照…")
@@ -440,13 +443,20 @@ final class BackupV5Manager {
             guard importOK else { throw BackupV5Error.restoreFailed("账本数据导入失败") }
             phaseProgress(0.55)
 
-            // 3.2 房源数据：清空 → 重建（含媒体引用）
-            stageMessage("正在导入房源数据…")
-            try await MainActor.run {
-                try clearAllHouses(houseContext: houseContext)
-                try importHousesJSON(data: housesData, houseContext: houseContext)
+            // 3.2 房源数据：仅全量备份恢复（清空 → 重建，含媒体引用）
+            // v1.56：快速备份不恢复房源——房源以云端为准，恢复后从云端同步拉回，
+            // 避免「快照不带云端状态、恢复后变仅本地、再同步把已删房源复活/覆盖」的冲突。
+            if kind == .full, let housesData = housesData {
+                stageMessage("正在导入房源数据…")
+                try await MainActor.run {
+                    try clearAllHouses(houseContext: houseContext)
+                    try importHousesJSON(data: housesData, houseContext: houseContext)
+                }
+                phaseProgress(0.70)
+            } else {
+                stageMessage("房源数据将从云端同步恢复（快速备份不含房源）…")
+                phaseProgress(0.70)
             }
-            phaseProgress(0.70)
 
             // 3.3 媒体文件：仅全量备份覆盖 media 目录
             if kind == .full {
