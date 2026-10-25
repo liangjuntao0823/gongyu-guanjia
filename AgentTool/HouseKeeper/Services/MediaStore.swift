@@ -305,6 +305,11 @@ enum ShareCacheStore {
         }
     }
 
+    /// v1.54：删除单个房源的分享缓存（强制重新生成新链接用）
+    static func remove(roomKey: String, mode: String) {
+        try? FileManager.default.removeItem(at: fileURL(roomKey: roomKey, mode: mode))
+    }
+
     /// v1.25：清空全部分享缓存（设置页「刷新分享缓存」按钮调用）——
     /// 改了页面样式、名片或想强制重新上传时手动触发；正常情况不需要，模板版本变化会自动失效
     static func clearAll() {

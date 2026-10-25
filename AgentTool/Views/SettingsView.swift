@@ -621,14 +621,15 @@ struct SettingsView: View {
                 }
             }
             // v1.6：房源分享缓存刷新（二级确认，防止误触导致全部链接失效）
+            // v1.54：升级为「全量重建」——云端旧分享页全部删除（旧链接立即失效），并给每间房重新生成最新 H5
             .confirmationDialog("刷新分享缓存", isPresented: $showHouseCacheConfirm, titleVisibility: .visible) {
-                Button("清空并刷新", role: .destructive) {
+                Button("清空并重建全部", role: .destructive) {
                     ShareCacheStore.clearAll()
-                    houseCacheTip = "分享缓存已清空 ✅\n下次分享会重新上传并生成新链接（所有房源）"
+                    rebuildAllShareH5()
                 }
                 Button("取消", role: .cancel) {}
             } message: {
-                Text("将清空全部房源的分享缓存，下次分享时重新上传并生成新链接。确定继续吗？")
+                Text("将重建全部房源的分享链接：云端旧分享页全部删除（旧链接立即失效），并为每间房重新生成最新 H5。确定继续吗？")
             }
             .alert("刷新分享缓存", isPresented: Binding(
                 get: { houseCacheTip != nil },
@@ -641,6 +642,53 @@ struct SettingsView: View {
     }
 
     // MARK: - 逻辑
+
+    // v1.54：全量重建全部房源的脱敏版分享 H5——
+    // 云端旧分享页全部删除（旧链接立即失效）+ 每间房重新生成最新 H5（无媒体房源只删旧页不生成）
+    private func rebuildAllShareH5() {
+        guard let ctx = houseModelContext,
+              let config = CosConfig.load(), config.isValid else {
+            houseCacheTip = "请先到「云端配置」填写 COS 配置并验证通过"
+            return
+        }
+        let houses = (try? ctx.fetch(FetchDescriptor<House>())) ?? []
+        let active = houses.filter { !($0.isDeleted ?? false) }
+        let profile = CosUploader.loadShareProfile()
+        // 主线程先拷贝全部值类型，Task 内不再触碰 SwiftData 模型
+        let items = active.map { h -> (files: [ShareMediaFile], roomKey: String, info: ShareHouseInfo) in
+            (
+                h.mediaItems.map { ShareMediaFile(name: $0.fileName, kind: $0.kind) },
+                h.mediaRoomKey,
+                ShareHouseInfo(
+                    displayRoomNo: h.displayRoomNo,
+                    towerLabel: h.towerLabel,
+                    layout: h.layout,
+                    statusLabel: h.status.label,
+                    priceText: h.priceText,
+                    landlord: h.landlord,
+                    password: h.password,
+                    remark: h.remark,
+                    name: profile.name,
+                    phone: profile.phone
+                )
+            )
+        }
+        houseCacheTip = "正在重建 \(active.count) 套房源的分享链接…"
+        Task {
+            var ok = 0, fail = 0
+            for it in items {
+                do {
+                    _ = try await CosUploader.autoRegenerateMaskedShare(mediaFiles: it.files, roomKey: it.roomKey, info: it.info, config: config)
+                    ok += 1
+                } catch {
+                    fail += 1
+                }
+            }
+            await MainActor.run {
+                houseCacheTip = "分享链接已全部重建：\(ok) 间成功" + (fail > 0 ? "，\(fail) 间失败（可再次刷新重试）" : "") + "\n旧分享链接已全部失效"
+            }
+        }
+    }
 
     // v1.12：统一备份（快速/全量），复用备份中心逻辑
     private func performNewBackup(kind: BackupKindV5) {

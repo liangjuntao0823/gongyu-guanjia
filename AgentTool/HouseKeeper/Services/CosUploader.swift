@@ -825,76 +825,71 @@ enum CosUploader {
         <style>
         *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
         html,body{background:#f4f5f7;color:#1a1c20;font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",system-ui,sans-serif;}
-        body{max-width:560px;margin:0 auto;padding:0 16px 30px;-webkit-touch-callout:none;-webkit-user-select:none;user-select:none;-webkit-user-drag:none;}
+        html,body{height:100%;}
+        body{max-width:560px;margin:0 auto;padding:0 16px 24px;display:flex;flex-direction:column;min-height:100%;-webkit-touch-callout:none;-webkit-user-select:none;user-select:none;-webkit-user-drag:none;}
         body *{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none;-webkit-user-drag:none;}
-        .topbar{position:sticky;top:0;z-index:10;background:rgba(244,245,247,.94);-webkit-backdrop-filter:saturate(180%) blur(10px);backdrop-filter:saturate(180%) blur(10px);border-bottom:1px solid #eceef1;padding:14px 0 8px;}
-        .title-row{display:flex;align-items:center;justify-content:space-between;gap:10px;}
-        .title{font-size:19px;font-weight:700;letter-spacing:.5px;}
-        .title .dot{color:#1f7a4d;}
-        .refresh{flex:0 0 auto;border:none;background:#1f7a4d;color:#fff;font-size:13px;font-weight:600;padding:7px 16px;border-radius:999px;cursor:pointer;}
-        .refresh:active{opacity:.85;}
-        .filters{display:flex;gap:8px;overflow-x:auto;padding:10px 0 2px;scrollbar-width:none;}
-        .filters::-webkit-scrollbar{display:none;}
-        .chip{flex:0 0 auto;padding:7px 16px;border-radius:999px;background:#eef0f3;font-size:13px;color:#45494f;cursor:pointer;border:1px solid transparent;}
+        .main{flex:1 0 auto;width:100%;}
+        .head{display:flex;align-items:center;justify-content:space-between;padding:16px 2px 6px;}
+        h1{font-size:19px;font-weight:700;color:#1a1c20;letter-spacing:.5px;}
+        .refresh{color:#1f7a4d;font-size:14px;font-weight:600;background:none;border:none;padding:6px 8px;}
+        .filters{display:flex;gap:8px;flex-wrap:wrap;padding:10px 2px 4px;}
+        .chip{padding:5px 13px;border-radius:15px;background:#eef0f2;color:#5b616e;font-size:13px;border:none;}
         .chip.on{background:#1f7a4d;color:#fff;font-weight:600;}
-        .count{font-size:12px;color:#8e8e93;padding:4px 2px 0;}
-        .list{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px;}
-        .card{background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.05);border:1px solid #eceef1;}
-        .cover{position:relative;width:100%;aspect-ratio:1/1;display:flex;align-items:center;justify-content:center;background-color:#2a3b33;background-size:cover;background-position:center;overflow:hidden;}
-        .cover .ph{position:absolute;inset:0;background:linear-gradient(135deg,#2f6f4f,#1f4d36 55%,#173a29);}
-        .cover .ph::after{content:"";position:absolute;inset:0;background:radial-gradient(120% 90% at 78% 8%,rgba(255,255,255,.18) 0%,transparent 45%);}
-        .cv{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block;pointer-events:none;-webkit-user-drag:none;-webkit-touch-callout:none;}
-        .mask{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:100;display:flex;align-items:center;justify-content:center;}
-        .mask img{max-width:96vw;max-height:96vh;object-fit:contain;border-radius:4px;pointer-events:none;-webkit-user-drag:none;-webkit-touch-callout:none;}
-        .play{position:absolute;width:44px;height:44px;border-radius:50%;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:2;}
-        .play::before{content:"";width:0;height:0;border-left:16px solid #fff;border-top:10px solid transparent;border-bottom:10px solid transparent;margin-left:3px;}
-        .type-tag{position:absolute;left:0;right:0;bottom:0;padding:26px 12px 10px;background:linear-gradient(180deg,transparent,rgba(0,0,0,.62));color:#fff;font-size:16px;font-weight:700;z-index:2;}
-        .card-share{margin-top:20px;border-radius:18px;background:linear-gradient(180deg,#f7fafd,#e9f1f9);border:1px solid #e3ebf3;padding:18px 16px 16px;display:flex;gap:14px;align-items:flex-start;}
-        .card-share .tag{font-size:12px;color:#7a8494;margin-bottom:6px;}
-        .card-share .nm{font-size:20px;font-weight:700;color:#1a1c20;line-height:1.25;}
-        .card-share .nm .phone{color:#b8860b;font-weight:700;}
-        .card-share .note{font-size:12px;color:#8a94a3;margin-top:6px;}
-        .card-share .acts{display:flex;gap:10px;margin-top:10px;}
-        .card-share .acts .btn{padding:7px 14px;border-radius:999px;font-size:13px;font-weight:600;}
-        .card-share .acts .call{background:#1f3a5f;color:#fff;}
-        .card-share .acts .copy{background:#fff;color:#1a1c20;border:1px solid #dfe6ee;}
-        .qr-col{flex:0 0 108px;text-align:center;margin-left:auto;}
-        .qr-col img{width:108px;height:108px;border-radius:10px;background:#fff;padding:4px;-webkit-touch-callout:default;-webkit-user-select:text;-webkit-user-drag:auto;user-select:text;}
-        .qr-tip{font-size:11px;color:#7a8494;margin-top:6px;}
-        #toast{position:fixed;left:50%;bottom:70px;transform:translateX(-50%);background:rgba(20,22,26,.86);color:#fff;font-size:13px;padding:9px 18px;border-radius:999px;opacity:0;pointer-events:none;transition:opacity .18s;z-index:99;white-space:nowrap;}
+        #count{font-size:13px;color:#8a919e;padding:4px 2px 2px;}
+        #loading{text-align:center;color:#8a919e;padding:50px 0;font-size:14px;}
+        .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:12px 0;}
+        .card{position:relative;border-radius:12px;overflow:hidden;background:#fff;aspect-ratio:1/1;box-shadow:0 1px 4px rgba(0,0,0,.06);}
+        .cover{position:absolute;inset:0;}
+        .cover img{width:100%;height:100%;object-fit:cover;display:block;}
+        .ph{width:100%;height:100%;background:linear-gradient(135deg,#dfe3e8,#c6cdd6);}
+        .play{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:46px;height:46px;border-radius:50%;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;}
+        .play::after{content:"";border-left:14px solid #fff;border-top:9px solid transparent;border-bottom:9px solid transparent;margin-left:3px;}
+        .type-tag{position:absolute;left:8px;bottom:8px;background:rgba(0,0,0,.55);color:#fff;font-size:12px;padding:3px 9px;border-radius:10px;}
+        #empty{display:none;text-align:center;color:#8a919e;padding:60px 0;font-size:14px;}
+        #mask{display:none;position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:50;align-items:center;justify-content:center;}
+        #mask img{max-width:92%;max-height:88%;border-radius:8px;}
+        #mask .x{position:absolute;top:44px;right:18px;color:#fff;font-size:30px;line-height:1;padding:8px;}
+        #toast{position:fixed;left:50%;bottom:90px;transform:translateX(-50%);background:rgba(0,0,0,.8);color:#fff;padding:9px 16px;border-radius:8px;font-size:13px;opacity:0;pointer-events:none;transition:opacity .2s;z-index:60;}
         #toast.show{opacity:1;}
-        .empty{text-align:center;padding:70px 0 40px;color:#8e8e93;font-size:15px;}
-        .loading{text-align:center;padding:70px 0 40px;color:#8e8e93;font-size:14px;}
+        .person{margin-top:auto;background:#fff;border-radius:12px;padding:14px 14px 12px;box-shadow:0 1px 4px rgba(0,0,0,.06);}
+        .person .top{display:flex;gap:12px;align-items:flex-start;}
+        .person .avatar{width:48px;height:48px;border-radius:50%;background:#1f7a4d;color:#fff;display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:700;flex-shrink:0;}
+        .person .nm{font-size:16px;font-weight:700;}
+        .person .ph-t{font-size:14px;color:#5b616e;margin-top:2px;}
+        .person .btns{display:flex;gap:10px;margin-top:12px;}
+        .person .btn{flex:1;text-align:center;padding:10px 0;border-radius:10px;font-size:14px;}
+        .person .call{background:#1f7a4d;color:#fff;font-weight:600;}
+        .person .copy{background:#f0f2f4;color:#1a1c20;}
+        .qr-row{display:none;margin-top:10px;background:#fff;border-radius:12px;padding:12px;text-align:center;}
+        .qr-row img{width:110px;height:110px;border-radius:6px;}
+        .qr-row p{font-size:12px;color:#8a919e;margin-top:6px;}
         </style>
         </head>
-        <body oncontextmenu="return false">
-        <div class="topbar">
-          <div class="title-row">
-            <div class="title">米兰公馆 · <span class="dot">在租房源</span></div>
-            <button class="refresh" id="refreshBtn">刷新</button>
-          </div>
+        <body>
+        <div class="main">
+          <div class="head"><h1>米兰公馆 · 在租房源</h1><button class="refresh" id="refreshBtn">刷新</button></div>
+          <div class="filters" id="filters"></div>
+          <div id="count"></div>
+          <div id="loading">加载中...</div>
+          <div class="grid" id="list"></div>
+          <div id="empty">暂无待租房源</div>
         </div>
-        <div class="filters" id="filters"></div>
-        <div class="count" id="count"></div>
-        <div class="loading" id="loading">加载中…</div>
-        <div class="list" id="list"></div>
-        <div class="empty" id="empty" style="display:none">暂无可选房源</div>
-        <div class="card-share" id="cardShare" style="display:none">
-          <div>
-            <div class="tag">米兰租赁管家 · 专业省心租好房</div>
-            <div class="nm"><span id="nameText"></span> <span class="phone" id="phoneText"></span></div>
-            <div class="note">微信同号 · 24小时可约看房</div>
-            <div class="acts">
-              <span class="btn call" id="callBtn">拨打电话</span>
-              <span class="btn copy" id="copyBtn">复制电话</span>
+        <div class="person" id="cardShare">
+          <div class="top">
+            <div class="avatar" id="avatar">梁</div>
+            <div>
+              <div class="nm" id="nameText">梁涛</div>
+              <div class="ph-t" id="phoneText">13288251132</div>
+              <div style="font-size:12px;color:#8a919e;margin-top:2px;">微信同号 · 24小时可约看房</div>
             </div>
           </div>
-          <div class="qr-col" id="qrCol">
-            <img id="qrImg" src="" alt="微信二维码">
-            <div class="qr-tip">长按二维码加我好友</div>
+          <div class="btns">
+            <div class="btn call" id="callBtn">拨打电话</div>
+            <div class="btn copy" id="copyBtn">复制电话</div>
           </div>
         </div>
-        <div class="mask" id="mask" style="display:none" onclick="hideModal()"><img id="modalImg" src="" alt=""></div>
+        <div class="qr-row" id="qrCol"><img id="qrImg" alt="二维码"><p>扫码加微信 直接看房</p></div>
+        <div id="mask" onclick="this.style.display='none'"><span class="x">×</span><img id="modalImg" alt=""></div>
         <div id="toast"></div>
         <script>
         var FETCH_URL = "\(jsUrl)";
@@ -932,14 +927,13 @@ enum CosUploader {
           document.getElementById("modalImg").src = src;
           document.getElementById("mask").style.display = "flex";
         }
-        function hideModal(){ document.getElementById("mask").style.display = "none"; }
         document.getElementById("list").addEventListener("click", function(e){
           var card = e.target.closest(".card");
           if(!card) return;
           var h = ROOMS[parseInt(card.getAttribute("data-i"))];
           if(!h) return;
           if(h.share){ location.href = h.share; return; }
-          if(h.cover){ showModal(h.cover, h.layout); }
+          if(h.cover){ showModal(h.cover); }
         });
         function copyPhone(){
           var p = document.getElementById("phoneText").textContent;
@@ -962,8 +956,8 @@ enum CosUploader {
             var name = (d && d.name) || "梁涛"; var phone = (d && d.phone) || "13288251132";
             document.getElementById("nameText").textContent = name;
             document.getElementById("phoneText").textContent = phone;
-            document.getElementById("cardShare").style.display = "flex";
-            if(d && d.qr){ document.getElementById("qrCol").style.display = ""; document.getElementById("qrImg").src = d.qr; }
+            var a = document.getElementById("avatar"); a.textContent = name.length ? name[0] : "梁";
+            if(d && d.qr){ document.getElementById("qrCol").style.display = "block"; document.getElementById("qrImg").src = d.qr; }
             else { document.getElementById("qrCol").style.display = "none"; }
             showToast("已刷新");
           }).catch(function(){
@@ -986,8 +980,8 @@ enum CosUploader {
         load();
         </script>
         </body>
-        </html>
-        """
+        </html>"""
+
     }
 
     // MARK: - HTML 模板（v1.21 设计稿定稿：完整版）
@@ -3246,6 +3240,25 @@ extension CosUploader {
         }
         progress?(1.0)
         return result
+    }
+
+    /// v1.54：自动生成/更新某房源的脱敏版 H5（新增/编辑保存后自动调用；设置页「刷新分享缓存」全量重建也用它）
+    /// 1) 清本地缓存 → 强制生成新链接（不命中缓存复用）
+    /// 2) 删除云端该房旧脱敏版 H5（users/<用户名>/shares/<房号>/ 下 _脱敏版_ html），旧链接立即失效
+    /// 3) 有媒体则调 shareCard 生成新脱敏版 H5；无媒体只删旧页不生成（选房页点击该房时放大图）
+    static func autoRegenerateMaskedShare(mediaFiles: [ShareMediaFile], roomKey: String, info: ShareHouseInfo, config: CosConfig) async throws -> URL? {
+        ShareCacheStore.remove(roomKey: roomKey, mode: ShareMode.masked.rawValue)
+        let prefix = "\(CloudUser.sharePagePrefix)\(roomKey)/"
+        if let objs = try? await listObjects(prefix: prefix, config: config) {
+            for obj in objs {
+                let name = (obj.name as NSString).lastPathComponent
+                if name.contains("_脱敏版_") && name.hasSuffix(".html") {
+                    try? await CloudBackupService.deleteRemoteObject(name: obj.name, config: config)
+                }
+            }
+        }
+        guard !mediaFiles.isEmpty else { return nil }
+        return try await shareCard(mediaFiles: mediaFiles, roomKey: roomKey, info: info, mode: .masked, config: config)
     }
 
     /// v1.41：删除单条媒体的云端对象——图片删 h/<房号>/<原名>；视频删 h/<房号>/<同名>.mp4，

@@ -437,6 +437,29 @@ struct HouseEditView: View {
         // v1.41：保存后把该房全部媒体即时上传到桶（新增/替换照片视频立即云端可见，
         //        别的设备同步就能看到最新照片视频）；上传失败自动入队，启动/回前台自动补传
         pushHouseMediaToCloud(target)
+        // v1.54：保存后自动生成/更新该房源的脱敏版 H5（删旧生成新）——
+        //        保证「新增了房源就自动有分享页」，选房链接里点卡片即可打开完整详情；
+        //        编辑保存时旧 H5 立即失效、生成新 H5（内容与最新房源信息一致）
+        if let config = CosConfig.load(), config.isValid {
+            let files = target.mediaItems.map { ShareMediaFile(name: $0.fileName, kind: $0.kind) }
+            let profile = CosUploader.loadShareProfile()
+            let info = ShareHouseInfo(
+                displayRoomNo: target.displayRoomNo,
+                towerLabel: target.towerLabel,
+                layout: target.layout,
+                statusLabel: target.status.label,
+                priceText: target.priceText,
+                landlord: target.landlord,
+                password: target.password,
+                remark: target.remark,
+                name: profile.name,
+                phone: profile.phone
+            )
+            let roomKey = target.mediaRoomKey
+            Task {
+                _ = try? await CosUploader.autoRegenerateMaskedShare(mediaFiles: files, roomKey: roomKey, info: info, config: config)
+            }
+        }
         // v1.19：新增 / 编辑保存后同步到云端账本（共享房源）
         pushHouseToCloud(target)
         NotificationCenter.default.post(name: HouseListView.houseStoreChanged, object: nil)
