@@ -1380,22 +1380,21 @@ struct ShareProfileView: View {
 /// 选房链接页：生成「公开选房 H5」链接（云函数 ?act=rooms&u=<用户名>），
 /// 复制/分享给租客即可实时查看所有待租房源；改房源、改名片、换二维码后租客刷新即最新。
 struct RoomsShareView: View {
+    @State private var cosLink = ""
+    @State private var linkTip: String?
     @State private var copiedTip: String?
     @State private var showShareSheet = false
 
-    /// 公开选房链接：云函数地址 + act=rooms + 当前用户名（页面服务端实时渲染）
-    private var link: String {
-        let base = CloudConfig.functionURL
-        guard !base.isEmpty else { return "" }
-        let u = (CloudUser.username.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "")
-        return base + "?act=rooms&u=" + u
-    }
+    /// v1.49：公开选房链接改为 COS 签名链接（与单房分享 H5 同域名同机制，微信内可正常打开）。
+    /// 由云函数 roomsSeed 生成静态壳并上传桶 users/<用户名>/rooms/index.html 后返回；
+    /// 壳页面每次打开/刷新 JS 实时拉 rooms_json 数据，房源/名片/二维码变化刷新即最新，无需重建。
+    private var link: String { cosLink }
 
     var body: some View {
         Form {
             Section(header: Text("公开选房链接"), footer: Text("把链接发给租客，对方打开即可看到所有待租房源（只显示户型，房东/密码/备注等内部信息已隐藏）。页面每次打开或刷新都实时读取云端最新房源：您新增/下架房源、改租金、改名片、换二维码后，租客刷新一下就是最新内容，无需重新生成链接。")) {
                 if link.isEmpty {
-                    Text("尚未配置云函数地址\n请先到「设置 → 房源分享 → 云端配置」填写云函数地址并保存验证")
+                    Text(linkTip ?? "正在生成链接…")
                         .font(.footnote)
                         .foregroundColor(.secondary)
                 } else {
@@ -1405,7 +1404,7 @@ struct RoomsShareView: View {
                         .foregroundColor(.secondary)
                     Button {
                         UIPasteboard.general.string = link
-                        copiedTip = "链接已复制 ✅\n直接发给租客即可"
+                        copiedTip = "链接已复制 ✅\n直接发给租客即可（微信内可直接打开）"
                     } label: {
                         Label("复制链接", systemImage: "doc.on.doc")
                     }
@@ -1413,6 +1412,11 @@ struct RoomsShareView: View {
                         showShareSheet = true
                     } label: {
                         Label("分享给租客", systemImage: "square.and.arrow.up")
+                    }
+                    Button {
+                        Task { await refreshLink() }
+                    } label: {
+                        Label("重新生成链接", systemImage: "arrow.clockwise")
                     }
                 }
             }
@@ -1426,6 +1430,11 @@ struct RoomsShareView: View {
         }
         .navigationTitle("公开选房链接")
         .navigationBarTitleDisplayMode(.inline)
+        .onAppear {
+            if cosLink.isEmpty {
+                Task { await refreshLink() }
+            }
+        }
         .sheet(isPresented: $showShareSheet) {
             HouseShareSheet(items: [link])
         }
@@ -1436,6 +1445,36 @@ struct RoomsShareView: View {
             Button("好", role: .cancel) {}
         } message: {
             Text(copiedTip ?? "")
+        }
+    }
+
+    /// 调云函数 roomsSeed（带口令）生成 COS 壳并返回签名链接
+    private func refreshLink() async {
+        let base = CloudConfig.functionURL
+        guard !base.isEmpty else {
+            cosLink = ""
+            linkTip = "尚未配置云函数地址\n请先到「设置 → 房源分享 → 云端配置」填写云函数地址并保存验证"
+            return
+        }
+        guard let esc = (CloudUser.username.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed)),
+              let url = URL(string: "\(base)?act=roomsSeed&k=\(CloudConfig.passwordHash)&u=\(esc)") else {
+            cosLink = ""
+            linkTip = "链接生成失败，请返回后重试"
+            return
+        }
+        do {
+            let (data, _) = try await URLSession.shared.data(from: url)
+            if let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let u2 = obj["url"] as? String, !u2.isEmpty {
+                cosLink = u2
+                linkTip = nil
+            } else {
+                cosLink = ""
+                linkTip = "云端未返回链接：请确认云函数已部署最新版（部署包）且口令正确"
+            }
+        } catch {
+            cosLink = ""
+            linkTip = "生成失败：网络异常，请检查网络后返回重试"
         }
     }
 }
