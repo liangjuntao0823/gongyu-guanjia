@@ -896,6 +896,7 @@ struct ConfigRestoreListView: View {
     let onPick: (URL) -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var files: [URL] = []
+    @State private var showImporter = false
 
     var body: some View {
         NavigationStack {
