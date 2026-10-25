@@ -2,7 +2,7 @@ import SwiftUI
 import SwiftData
 import UniformTypeIdentifiers
 
-// MARK: - v1.58 批量录入：房源清单导入 / 媒体包导入 / 扫描补录
+// MARK: - v1.58/v1.59 批量录入：房源清单导入 / 媒体包导入 / 扫描补录
 
 /// 批量导入的单个房源项（预览用）
 struct BatchImportItem: Identifiable {
@@ -17,6 +17,9 @@ struct BatchImportItem: Identifiable {
     var statusRaw = HouseStatus.available.rawValue
     var mediaDirKey: String?    // 媒体来源目录（zip 解压临时目录 或 media/ 下已有目录）
     var duplicate = false       // 已收录（同座同房号且未进回收站）
+    var diskFileCount = 0       // 目录内媒体文件数
+    var existingRecordCount = 0 // 已收录房已有的 MediaItem 记录数
+    var missingRecordCount = 0  // 待补记录数（磁盘有、记录没有）
 }
 
 /// 批量导入结果汇总
@@ -28,11 +31,13 @@ struct BatchImportSummary {
     var errors: [String] = []
 }
 
-/// v1.58：批量录入页（房源列表右上角「批量导入」进入）
+/// v1.59：批量录入页（房源列表右上角「批量导入」进入）
 /// 三个模式：
-///  1. 清单导入：粘贴 CSV（房号,座号,房东,户型,租金,密码,备注,状态）或从文件 App 选 .csv/.txt
+///  1. 清单导入：粘贴 CSV（房号,座号,房东,户型,租金,密码,备注,状态）或从文件 App 选 .csv/.txt；可导出模板
 ///  2. 媒体包导入：选 zip（根 = 房号目录，每目录放照片视频）
 ///  3. 扫描补录：扫描 Documents/media/ 下已存在的房号目录，自动建房源/补媒体
+/// v1.59 修复：文件选择改用 UIKit 文档选择器（SwiftUI fileImporter 在 sheet 内无反应）；
+///            扫描补录只补缺失记录（不再复制文件，根治重复提示补媒体）；解析预览每行写清动作
 struct HouseBatchImportView: View {
     @Environment(\.houseModelContext) private var houseModelContext
     @Environment(\.dismiss) private var dismiss
@@ -60,14 +65,26 @@ struct HouseBatchImportView: View {
     @State private var scanItems: [BatchImportItem] = []
     @State private var scanInfo = ""
 
+    // —— 文件选择（v1.59：UIKit 文档选择器，替代无反应的 fileImporter） ——
+    enum PickerTarget: String, Identifiable {
+        case csv, zip
+        var id: String { rawValue }
+        var types: [UTType] {
+            switch self {
+            case .csv: return [.commaSeparatedText, .plainText, .text, .data]
+            case .zip: return [.zip, .archive, .data]
+            }
+        }
+    }
+    @State private var activePicker: PickerTarget?
+    @State private var templateURL: URL?
+
     // —— 通用 ——
     @State private var isImporting = false
     @State private var summary: BatchImportSummary?
     @State private var showSummary = false
     @State private var showError = false
     @State private var errorMessage = ""
-    @State private var showCsvPicker = false
-    @State private var showZipPicker = false
 
     var body: some View {
         NavigationStack {
@@ -97,15 +114,14 @@ struct HouseBatchImportView: View {
                 }
             }
         }
-        .fileImporter(isPresented: $showCsvPicker, allowedContentTypes: [.commaSeparatedText, .plainText], allowsMultipleSelection: false) { result in
-            if case .success(let urls) = result, let url = urls.first {
-                loadCsvFile(url)
+        .sheet(item: $activePicker) { target in
+            DocPicker(types: target.types) { url in
+                switch target {
+                case .csv: loadCsvFile(url)
+                case .zip: parseZip(url)
+                }
             }
-        }
-        .fileImporter(isPresented: $showZipPicker, allowedContentTypes: [.zip, .archive], allowsMultipleSelection: false) { result in
-            if case .success(let urls) = result, let url = urls.first {
-                parseZip(url)
-            }
+            .ignoresSafeArea()
         }
         .alert("导入结果", isPresented: $showSummary) {
             Button("好", role: .cancel) {
@@ -126,6 +142,14 @@ struct HouseBatchImportView: View {
                 ProgressView("正在导入…").padding(24).background(.ultraThickMaterial, in: RoundedRectangle(cornerRadius: 12))
             }
         }
+        .onAppear {
+            if templateURL == nil {
+                let url = FileManager.default.temporaryDirectory.appendingPathComponent("房源导入模板.csv")
+                let text = "房号,座号,房东,户型,租金,密码,备注,状态\n2334上,1,康,单间,1100,,,待租\n2-1418下,2,业主,单间,900,,,已租\n"
+                try? text.write(to: url, atomically: true, encoding: .utf8)
+                templateURL = url
+            }
+        }
     }
 
     // MARK: - 清单导入
@@ -140,15 +164,22 @@ struct HouseBatchImportView: View {
                 .font(.system(.callout, design: .monospaced))
                 .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color(.systemGray4)))
             HStack(spacing: 12) {
-                Button("从文件选择 CSV") { showCsvPicker = true }
+                if let templateURL = templateURL {
+                    ShareLink(item: templateURL) {
+                        Label("导出模板", systemImage: "square.and.arrow.up")
+                    }
+                    .font(.subheadline)
+                }
                 Spacer()
+                Button("从文件选择 CSV") { activePicker = .csv }
+                    .font(.subheadline)
                 Button("解析预览") { parseCsv() }
                     .buttonStyle(.borderedProminent)
             }
             if !parseInfo.isEmpty {
                 Text(parseInfo).font(.footnote).foregroundColor(.secondary)
             }
-            if !previewItems.isEmpty { previewList(items: previewItems) }
+            if !previewItems.isEmpty { previewList(items: previewItems, mode: .list) }
             if !previewItems.isEmpty {
                 Button("确认导入 \(previewItems.filter { !$0.duplicate }.count) 间") {
                     runImport(items: previewItems)
@@ -213,24 +244,25 @@ struct HouseBatchImportView: View {
 
     private var zipModeView: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("选择一个 zip 媒体包：\nzip 根目录下按房号建文件夹（如 2334上/、2-1418下/），文件夹内放照片视频（jpg/png/heic/mov/mp4）。\n没有对应房号的文件夹会自动新建房源（字段留空待补），也可关闭该开关仅挂媒体到已有房。")
+            Text("选择一个 zip 媒体包：\nzip 根目录下按房号建文件夹（如 2334上/、2-1418下/），文件夹内放照片视频（jpg/png/heic/mov/mp4）。\n已收录房号 → 自动补挂媒体；未收录房号 → 自动新建房源（字段留空待补）。")
                 .font(.footnote)
                 .foregroundColor(.secondary)
             HStack(spacing: 12) {
-                Button("选择 zip 媒体包") { showZipPicker = true }
+                Button("选择 zip 媒体包") { activePicker = .zip }
+                    .font(.subheadline)
                 Spacer()
-                if zipParseInfo.isEmpty && pickedZip == nil {
-                    Text("未选择").foregroundColor(.secondary)
+                if let name = pickedZip?.lastPathComponent {
+                    Text(name).font(.footnote).foregroundColor(.secondary)
                 } else {
-                    Text(pickedZip?.lastPathComponent ?? "").font(.footnote).foregroundColor(.secondary)
+                    Text("未选择").foregroundColor(.secondary)
                 }
             }
             if !zipParseInfo.isEmpty {
                 Text(zipParseInfo).font(.footnote).foregroundColor(.secondary)
             }
+            if !zipItems.isEmpty { previewList(items: zipItems, mode: .zip) }
             if !zipItems.isEmpty {
-                previewList(items: zipItems)
-                Button("确认导入（新建 \(zipItems.filter { !$0.duplicate }.count) 间，补媒体 \(zipItems.count) 间）") {
+                Button("确认导入（新建 \(zipItems.filter { !$0.duplicate }.count) 间，补媒体 \(zipItems.filter { $0.duplicate && $0.missingRecordCount > 0 }.count) 间）") {
                     runImport(items: zipItems)
                 }
                 .buttonStyle(.borderedProminent)
@@ -257,18 +289,26 @@ struct HouseBatchImportView: View {
             guard !roomNo.isEmpty else { continue }
             var item = BatchImportItem(roomNo: roomNo, tower: tower)
             item.mediaDirKey = key
-            item.duplicate = BatchImporter.findDuplicate(roomNo: roomNo, tower: tower, in: all) != nil
+            let src = extracted.tempRoot.appendingPathComponent(key, isDirectory: true)
+            item.diskFileCount = MediaStore.mediaFileNames(in: src).count
+            if let house = BatchImporter.findDuplicate(roomNo: roomNo, tower: tower, in: all) {
+                item.duplicate = true
+                item.existingRecordCount = house.mediaItems.count
+                let disk = Set(MediaStore.mediaFileNames(in: src))
+                let exist = Set(house.mediaItems.map { $0.fileName })
+                item.missingRecordCount = disk.subtracting(exist).count
+            }
             items.append(item)
         }
         zipItems = items
-        zipParseInfo = "识别到 \(items.count) 个房号目录：已有 \(items.filter { $0.duplicate }.count) 间将补挂媒体，未收录 \(items.filter { !$0.duplicate }.count) 间将自动新建"
+        zipParseInfo = "识别到 \(items.count) 个房号目录：新建 \(items.filter { !$0.duplicate }.count) 间，补媒体 \(items.filter { $0.duplicate && $0.missingRecordCount > 0 }.count) 间，媒体齐全 \(items.filter { $0.duplicate && $0.missingRecordCount == 0 }.count) 间"
     }
 
     // MARK: - 扫描补录
 
     private var scanModeView: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("扫描 Documents/media/ 下已按房号建好的文件夹：\n已收录的房号 → 补挂照片视频记录；未收录的房号 → 自动新建房源（字段留空待补）。\n电脑导入方法：连接电脑后在「访达/文件」里找到「公寓管家」App 的 Documents/media/，把按房号的文件夹整体拖进去，再回这里点扫描。")
+            Text("扫描 Documents/media/ 下已按房号建好的文件夹：\n已收录房号 → 比对磁盘与记录，缺失的补建媒体记录；未收录房号 → 自动新建房源（字段留空待补）。\n电脑导入方法：连接电脑后在「访达/文件」里找到「公寓管家」App 的 Documents/media/，把按房号的文件夹整体拖进去，再回这里点扫描。")
                 .font(.footnote)
                 .foregroundColor(.secondary)
             Button("扫描 media 目录") { runScan() }
@@ -276,9 +316,9 @@ struct HouseBatchImportView: View {
             if !scanInfo.isEmpty {
                 Text(scanInfo).font(.footnote).foregroundColor(.secondary)
             }
+            if !scanItems.isEmpty { previewList(items: scanItems, mode: .scan) }
             if !scanItems.isEmpty {
-                previewList(items: scanItems)
-                Button("确认导入（新建 \(scanItems.filter { !$0.duplicate }.count) 间，补媒体 \(scanItems.count) 间）") {
+                Button("确认导入（新建 \(scanItems.filter { !$0.duplicate }.count) 间，补媒体 \(scanItems.filter { $0.duplicate && $0.missingRecordCount > 0 }.count) 间）") {
                     runImport(items: scanItems)
                 }
                 .buttonStyle(.borderedProminent)
@@ -303,36 +343,71 @@ struct HouseBatchImportView: View {
             guard !roomNo.isEmpty else { continue }
             var item = BatchImportItem(roomNo: roomNo, tower: tower)
             item.mediaDirKey = key
-            item.duplicate = BatchImporter.findDuplicate(roomNo: roomNo, tower: tower, in: all) != nil
+            item.diskFileCount = MediaStore.mediaFileNames(in: MediaStore.houseDirectory(roomKey: key)).count
+            if let house = BatchImporter.findDuplicate(roomNo: roomNo, tower: tower, in: all) {
+                item.duplicate = true
+                item.existingRecordCount = house.mediaItems.count
+                let disk = Set(MediaStore.mediaFileNames(in: MediaStore.houseDirectory(roomKey: key)))
+                let exist = Set(house.mediaItems.map { $0.fileName })
+                item.missingRecordCount = disk.subtracting(exist).count
+            }
             items.append(item)
         }
         scanItems = items
-        scanInfo = "发现 \(keys.count) 个房号目录：已有 \(items.filter { $0.duplicate }.count) 间将补挂媒体，未收录 \(items.filter { !$0.duplicate }.count) 间将自动新建"
+        scanInfo = "发现 \(keys.count) 个房号目录：新建 \(items.filter { !$0.duplicate }.count) 间，补媒体 \(items.filter { $0.duplicate && $0.missingRecordCount > 0 }.count) 间，媒体齐全 \(items.filter { $0.duplicate && $0.missingRecordCount == 0 }.count) 间"
     }
 
-    // MARK: - 预览列表
+    // MARK: - 预览列表（每行写清动作）
 
-    private func previewList(items: [BatchImportItem]) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
+    private func previewList(items: [BatchImportItem], mode: Mode) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
             ForEach(items) { item in
-                HStack {
-                    Text(item.duplicate ? "\(item.tower == 2 ? "2-" : "")\(item.roomNo)（已收录）" : "\(item.tower == 2 ? "2-" : "")\(item.roomNo)")
-                        .foregroundColor(item.duplicate ? .secondary : .primary)
-                    Spacer()
-                    if !item.layout.isEmpty { Text(item.layout).font(.footnote).foregroundColor(.secondary) }
-                    if item.price > 0 { Text("\(item.price)元").font(.footnote).foregroundColor(.secondary) }
-                    Text(item.statusRaw == HouseStatus.rented.rawValue ? "已租" : "待租")
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack {
+                        Text(item.tower == 2 ? "2-\(item.roomNo)" : item.roomNo)
+                            .font(.subheadline).fontWeight(.medium)
+                        Spacer()
+                        if !item.layout.isEmpty { Text(item.layout).font(.footnote).foregroundColor(.secondary) }
+                        if item.price > 0 { Text("\(item.price)元").font(.footnote).foregroundColor(.secondary) }
+                        Text(item.statusRaw == HouseStatus.rented.rawValue ? "已租" : "待租")
+                            .font(.caption2)
+                            .padding(.horizontal, 6).padding(.vertical, 2)
+                            .background(item.statusRaw == HouseStatus.rented.rawValue ? Color.orange.opacity(0.15) : Color.green.opacity(0.15))
+                            .cornerRadius(4)
+                    }
+                    Text(actionText(for: item, mode: mode))
                         .font(.caption)
-                        .padding(.horizontal, 6).padding(.vertical, 2)
-                        .background(item.statusRaw == HouseStatus.rented.rawValue ? Color.orange.opacity(0.15) : Color.green.opacity(0.15))
-                        .cornerRadius(4)
+                        .foregroundColor(actionColor(for: item))
                 }
-                .padding(.vertical, 3)
+                .padding(.vertical, 4)
                 Divider().opacity(0.4)
             }
         }
         .padding(10)
         .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    /// 每行的动作说明：新建 / 补挂 K 个 / 已齐全 / 重复跳过
+    private func actionText(for item: BatchImportItem, mode: Mode) -> String {
+        if !item.duplicate {
+            if item.diskFileCount > 0 {
+                return "未收录 · 将新建房源（目录含 \(item.diskFileCount) 个媒体文件）"
+            }
+            return "未收录 · 将新建房源（无媒体）"
+        }
+        if mode == .list {
+            return "已收录 · 重复房号，将跳过"
+        }
+        if item.missingRecordCount > 0 {
+            return "已收录 · 磁盘 \(item.diskFileCount) 个媒体 · 已有记录 \(item.existingRecordCount) 条 · 将补挂 \(item.missingRecordCount) 个"
+        }
+        return "已收录 · 媒体记录齐全（\(item.diskFileCount) 个）"
+    }
+
+    private func actionColor(for item: BatchImportItem) -> Color {
+        if !item.duplicate { return Color.accentColor }
+        if item.missingRecordCount > 0 { return Color.orange }
+        return Color(.systemGreen)
     }
 
     // MARK: - 执行导入
@@ -359,9 +434,9 @@ struct HouseBatchImportView: View {
                 ctx.insert(house)
                 all.append(house)
                 summary.created += 1
-                // 挂媒体（媒体包/扫描模式）
+                // 挂媒体（媒体包/扫描模式）：zip=复制文件+建记录；scan=文件已在正式目录，只建记录
                 if let key = item.mediaDirKey {
-                    let files = MediaStore.importMediaFiles(fromTempDir: mediaSourceDir(for: item), toRoomKey: house.mediaRoomKey)
+                    let files = mediaFilesToAttach(for: item)
                     for f in files {
                         let lower = f.lowercased()
                         let media = MediaItem(fileName: f, kind: (lower.hasSuffix(".mp4") || lower.hasSuffix(".mov")) ? "video" : "image")
@@ -372,14 +447,14 @@ struct HouseBatchImportView: View {
                     if !files.isEmpty { summary.mediaAttached += 1 }
                 }
             }
-            // 已有房号：补挂媒体（zip/扫描模式）
+            // 已收录房号：补挂缺失媒体（zip=复制+补记录；scan=只补记录）
             for item in items where item.duplicate {
                 guard let key = item.mediaDirKey,
                       let house = BatchImporter.findDuplicate(roomNo: item.roomNo, tower: item.tower, in: all) else { continue }
-                let files = MediaStore.importMediaFiles(fromTempDir: mediaSourceDir(for: item), toRoomKey: house.mediaRoomKey)
+                let files = mediaFilesToAttach(for: item)
+                    .filter { f in !house.mediaItems.contains(where: { $0.fileName == f }) }
                 var added = 0
                 for f in files {
-                    guard !house.mediaItems.contains(where: { $0.fileName == f }) else { continue }
                     let lower = f.lowercased()
                     let media = MediaItem(fileName: f, kind: (lower.hasSuffix(".mp4") || lower.hasSuffix(".mov")) ? "video" : "image")
                     media.house = house
@@ -418,15 +493,17 @@ struct HouseBatchImportView: View {
         }
     }
 
-    /// 媒体来源目录：zip 模式 = 临时解压目录/<房号key>；扫描模式 = media/<房号key>
-    private func mediaSourceDir(for item: BatchImportItem) -> URL {
-        if let root = zipTempRoot, let key = item.mediaDirKey {
-            return root.appendingPathComponent(key, isDirectory: true)
+    /// 该房源要挂的媒体文件列表：
+    /// zip 模式 = 从临时目录复制进正式目录（返回实际复制的文件名）；
+    /// scan 模式 = 磁盘已在正式目录，返回磁盘里全部媒体文件名（由调用方按已有记录去重）
+    private func mediaFilesToAttach(for item: BatchImportItem) -> [String] {
+        guard let key = item.mediaDirKey else { return [] }
+        if let zipRoot = zipTempRoot {
+            let src = zipRoot.appendingPathComponent(key, isDirectory: true)
+            // 解压目录名（如 2334上 / 2-1418下）即 mediaRoomKey，直接作为正式目录名
+            return MediaStore.importMediaFiles(fromTempDir: src, toRoomKey: key)
         }
-        if let key = item.mediaDirKey {
-            return MediaStore.houseDirectory(roomKey: key)
-        }
-        return MediaStore.mediaDirectory()
+        return MediaStore.mediaFileNames(in: MediaStore.houseDirectory(roomKey: key))
     }
 
     private func resultText(_ s: BatchImportSummary) -> String {
@@ -435,6 +512,32 @@ struct HouseBatchImportView: View {
         if s.skippedDuplicate > 0 { lines.append("跳过重复 \(s.skippedDuplicate) 间") }
         lines.append("已触发云端上传与分享页生成")
         return lines.joined(separator: "\n")
+    }
+}
+
+// MARK: - v1.59 UIKit 文档选择器桥接（修复 SwiftUI fileImporter 在 sheet 内无反应）
+
+struct DocPicker: UIViewControllerRepresentable {
+    let types: [UTType]
+    let onPick: (URL) -> Void
+
+    func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
+        let vc = UIDocumentPickerViewController(forOpeningContentTypes: types)
+        vc.allowsMultipleSelection = false
+        vc.delegate = context.coordinator
+        return vc
+    }
+
+    func updateUIViewController(_ uiViewController: UIDocumentPickerViewController, context: Context) {}
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    class Coordinator: NSObject, UIDocumentPickerDelegate {
+        let parent: DocPicker
+        init(_ parent: DocPicker) { self.parent = parent }
+        func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
+            if let url = urls.first { parent.onPick(url) }
+        }
     }
 }
 

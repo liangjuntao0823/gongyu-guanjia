@@ -131,12 +131,21 @@ struct HouseListView: View {
             .navigationTitle("房源管理")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                // v1.19：左上角手动同步（与下拉刷新同效果——拉取云端房源）
+                // v1.59：左上角 = 手动同步 + 多选入口（多选从右上角移到刷新旁边）
                 ToolbarItem(placement: .topBarLeading) {
-                    Button {
-                        Task { await syncCloudHouses() }
-                    } label: {
-                        Image(systemName: "arrow.triangle.2.circlepath")
+                    HStack(spacing: 14) {
+                        // v1.19：左上角手动同步（与下拉刷新同效果——拉取云端房源）
+                        Button {
+                            Task { await syncCloudHouses() }
+                        } label: {
+                            Image(systemName: "arrow.triangle.2.circlepath")
+                        }
+                        // v1.21：多选分享入口（v1.59 移到左上角）
+                        Button {
+                            isSelecting = true
+                        } label: {
+                            Image(systemName: "checkmark.circle")
+                        }
                     }
                     .disabled(isSelecting)
                 }
@@ -146,12 +155,6 @@ struct HouseListView: View {
                         Button("取消") { exitMultiSelect() }
                     } else {
                         HStack(spacing: 14) {
-                            // v1.21：多选分享入口
-                            Button {
-                                isSelecting = true
-                            } label: {
-                                Image(systemName: "checkmark.circle")
-                            }
                             // v1.58：批量录入入口（清单导入 / 媒体包导入 / 扫描补录）
                             Button {
                                 showBatchImport = true

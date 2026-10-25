@@ -273,6 +273,17 @@ enum MediaStore {
         }
         return copied
     }
+
+    /// 列出某目录下全部媒体文件名（jpg/jpeg/png/heic/mov/mp4），批量录入预览/补记录用
+    static func mediaFileNames(in dir: URL) -> [String] {
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []
+        return names.filter { n in
+            guard !n.hasPrefix(".") else { return false }
+            let lower = n.lowercased()
+            return lower.hasSuffix(".jpg") || lower.hasSuffix(".jpeg") || lower.hasSuffix(".png")
+                || lower.hasSuffix(".heic") || lower.hasSuffix(".mov") || lower.hasSuffix(".mp4")
+        }
+    }
 }
 
 // MARK: - v1.30 数据备份说明（微信式文件夹备份）
