@@ -3,24 +3,27 @@ import Network
 
 /// v1.39：网络可达性监测（NWPathMonitor 单例，App 启动时首次调用自动启动）。
 /// 用途：新增/编辑房源保存前判断是否断网，断网时提示「将仅存本机，联网后可同步云端」。
-/// 首次访问 isReachable 时惰性启动监测；路径变化实时刷新，供所有界面读取。
+/// v1.42：修复「完全断网仍判在线」——此前 reachable 初始值 true 且依赖异步回调，
+///        保存瞬间回调未完成时读到初始 true，导致断网保存没有任何提示。
+///        现改为直接读 NWPathMonitor.currentPath（同步拿到当前真实状态），
+///        监测未就绪时一律按「离线」处理（宁可多提示，不可漏提示）。
 final class NetworkMonitor {
     static let shared = NetworkMonitor()
 
     private let monitor = NWPathMonitor()
     private let queue = DispatchQueue(label: "net.monitor.queue")
-    private var reachable = true
     private var started = false
     private let lock = NSLock()
 
     private init() {}
 
-    /// 当前网络是否可达（未启动时自动启动；返回最近一次路径状态）
+    /// 当前网络是否可达：直接读 currentPath 当前状态（无需等异步回调）。
+    /// 监测未启动或路径未生效时返回 false（按离线处理）。
     var isReachable: Bool {
         startIfNeeded()
-        lock.lock()
-        defer { lock.unlock() }
-        return reachable
+        let path = monitor.currentPath
+        guard path.status != .requiresConnection, path.isValid else { return false }
+        return path.status == .satisfied
     }
 
     func startIfNeeded() {
@@ -29,11 +32,8 @@ final class NetworkMonitor {
         if need { started = true }
         lock.unlock()
         guard need else { return }
-        monitor.pathUpdateHandler = { [weak self] path in
-            let ok = (path.status == .satisfied)
-            self?.lock.lock()
-            self?.reachable = ok
-            self?.lock.unlock()
+        monitor.pathUpdateHandler = { _ in
+            // 状态由 currentPath 实时读取，回调仅用于保持监测活跃；无需缓存旧值
         }
         monitor.start(queue: queue)
     }

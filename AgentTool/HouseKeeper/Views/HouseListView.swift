@@ -38,8 +38,8 @@ struct HouseListView: View {
     @State private var pendingSyncRecs: [CloudHouseRecord] = []
     @State private var pendingSyncAdded: [(roomNo: String, roomKey: String, mediaNames: [String])] = []
     @State private var pendingSyncUpdated: [(roomNo: String, byUser: String)] = []
-    @State private var pendingSyncDeleted: [String] = []
-    @State private var pendingSyncPushed: [String] = []
+    @State private var pendingSyncDeleted: [(roomKey: String, roomNo: String)] = []   // v1.42：带房号
+    @State private var pendingSyncPushed: [(roomKey: String, roomNo: String)] = []     // v1.42：带房号
     @State private var activeDialog: HouseListDialog?
 
     // v1.22：首页多选分享——一次选多套，生成【一个合集分享卡片】（好友点开链接即可查看全部 N 套），
@@ -643,16 +643,16 @@ struct HouseListView: View {
                     try await CloudBackupService.deleteHouseRemoteFolder(roomKey: roomKey, config: config)
                     // v1.19：同时从云端房源账本移除该房
                     try? await CloudHouseSync.delete(roomKey: roomKey, config: config)
-                    BackupLogStore.log(category: "删除房源", action: "云端删除", result: "成功", detail: roomKey, cloud: true)
+                    BackupLogStore.log(category: "删除", action: "删除云端房源", result: "成功", detail: roomKey, cloud: true)
                 } catch {
-                    BackupLogStore.log(category: "删除房源", action: "云端删除", result: "失败", detail: "\(roomKey) \(error.localizedDescription)", cloud: true)
+                    BackupLogStore.log(category: "删除", action: "删除云端房源", result: "失败", detail: "\(roomKey) \(error.localizedDescription)", cloud: true)
                     await MainActor.run {
                         infoMessage = "云端删除失败：\(error.localizedDescription)。可在「管理后台 → 桶管理」手动清理 h/\(roomKey)/"; showInfoAlert = true
                     }
                 }
             }
         } else {
-            BackupLogStore.log(category: "删除房源", action: "云端删除", result: "跳过", detail: "未配置云存储 \(roomKey)", cloud: true)
+            BackupLogStore.log(category: "删除", action: "删除云端房源", result: "跳过", detail: "未配置云存储 \(roomKey)", cloud: true)
         }
     }
 
@@ -681,9 +681,9 @@ struct HouseListView: View {
                     house.cloudStatus = .both
                     try? houseModelContext?.save()
                 }
-                BackupLogStore.log(category: "房源", action: "同步云端", result: "成功", detail: house.displayRoomNo, cloud: true)
+                BackupLogStore.log(category: "房源", action: "同步房源", result: "成功", detail: house.displayRoomNo, cloud: true)
             } catch {
-                BackupLogStore.log(category: "房源", action: "同步云端", result: "失败", detail: "\(house.displayRoomNo)：\(error.localizedDescription)", cloud: true)
+                BackupLogStore.log(category: "房源", action: "同步房源", result: "失败", detail: "\(house.displayRoomNo)：\(error.localizedDescription)", cloud: true)
             }
         }
     }
@@ -724,11 +724,12 @@ struct HouseListView: View {
         do {
             let recs = try await CloudHouseSync.fetchAll(config: config)
             // v1.40 第11点：先算 diff 弹确认，确认后才应用（此前直接执行后才弹结果，用户无法拦截误覆盖）
+            // v1.42：新增/更新/删除/补传/媒体差异全部带具体房号（用户要求：只要对比有差别就列出房号）
             var added: [(roomNo: String, roomKey: String, mediaNames: [String])] = []
             var updated: [(roomNo: String, byUser: String)] = []
-            var deleted: [String] = []
-            var pushed: [String] = []
-            var mediaRoomKeys: [String] = []
+            var deleted: [(roomKey: String, roomNo: String)] = []
+            var pushed: [(roomKey: String, roomNo: String)] = []
+            var mediaRoomKeys: [(roomKey: String, roomNo: String)] = []
             await MainActor.run {
                 let local = (try? ctx.fetch(FetchDescriptor<House>())) ?? []
                 var localByKey: [String: House] = [:]
@@ -744,18 +745,18 @@ struct HouseListView: View {
                         let localNames = Set(h.mediaItems.map { $0.fileName })
                         let cloudNames = Set(rec.mediaNames)
                         if localNames != cloudNames {
-                            mediaRoomKeys.append(h.mediaRoomKey)
+                            mediaRoomKeys.append((h.mediaRoomKey, h.displayRoomNo))
                         }
                     } else {
                         added.append((rec.roomNo, rec.roomKey, rec.mediaNames))
-                        if !rec.mediaNames.isEmpty { mediaRoomKeys.append(rec.roomKey) }
+                        if !rec.mediaNames.isEmpty { mediaRoomKeys.append((rec.roomKey, rec.roomNo)) }
                     }
                 }
                 for (key, h) in localByKey where !cloudKeys.contains(key) {
                     if h.cloudStatus == .both || h.cloudStatus == .cloud {
-                        deleted.append(key)
+                        deleted.append((key, h.displayRoomNo))
                     } else {
-                        pushed.append(key)
+                        pushed.append((key, h.displayRoomNo))
                     }
                 }
             }
@@ -772,11 +773,12 @@ struct HouseListView: View {
             showSyncConfirm = true
         } catch {
             infoMessage = "同步失败：\(error.localizedDescription)"; showInfoAlert = true
-            BackupLogStore.log(category: "同步", action: "同步云端房源", result: "失败", detail: error.localizedDescription, cloud: true)
+            BackupLogStore.log(category: "同步", action: "同步房源", result: "失败", detail: error.localizedDescription, cloud: true)
         }
     }
 
     /// v1.40 第11点：确认弹窗里的变化详情
+    /// v1.42：所有差异（新增/更新/云端已删/本地补传/媒体差异）一律列出具体房号
     private func syncChangeSummary() -> String {
         var parts: [String] = []
         if !pendingSyncAdded.isEmpty { parts.append("新增\(pendingSyncAdded.count)套：\(pendingSyncAdded.map { $0.roomNo }.prefix(8).joined(separator: "，"))") }
@@ -784,8 +786,10 @@ struct HouseListView: View {
             let upd = pendingSyncUpdated.prefix(8).map { "\($0.roomNo)（\($0.byUser.isEmpty ? "他人" : $0.byUser)改）" }.joined(separator: "，")
             parts.append("更新\(pendingSyncUpdated.count)套：\(upd)")
         }
-        if !pendingSyncDeleted.isEmpty { parts.append("云端已删\(pendingSyncDeleted.count)套，本地跟随删除") }
-        if !pendingSyncPushed.isEmpty { parts.append("本地新增\(pendingSyncPushed.count)套将补传云端") }
+        if !pendingSyncDeleted.isEmpty { parts.append("云端已删\(pendingSyncDeleted.count)套：\(pendingSyncDeleted.map { $0.roomNo }.prefix(8).joined(separator: "，"))，本地跟随删除") }
+        if !pendingSyncPushed.isEmpty { parts.append("本地新增\(pendingSyncPushed.count)套将补传云端：\(pendingSyncPushed.map { $0.roomNo }.prefix(8).joined(separator: "，"))") }
+        let mediaRooms = Set((pendingSyncAdded.flatMap { $0.mediaNames.isEmpty ? [] : [$0.roomNo] }) + pendingSyncUpdated.map { $0.roomNo })
+        if !mediaRooms.isEmpty { parts.append("媒体有差异（将下载/跟随删除）：\(mediaRooms.prefix(8).joined(separator: "，"))") }
         return parts.joined(separator: "\n") + "\n\n确认后才会同步；取消则本次不动任何数据。"
     }
 
@@ -798,7 +802,11 @@ struct HouseListView: View {
             var addedCount = 0, updatedCount = 0, deletedCount = 0, pushedCount = 0
             var removedMediaCount = 0
             var addedRoomNo: [String] = []
-            var mediaRoomKeys: [String] = []
+            var updatedRoomNo: [String] = []
+            var deletedRoomNo: [String] = []
+            var pushedRoomNo: [String] = []
+            var mediaDiffRoomNo: [String] = []
+            var mediaRoomKeys: [(roomKey: String, roomNo: String)] = []   // v1.42：带房号
             await MainActor.run {
                 let local = (try? ctx.fetch(FetchDescriptor<House>())) ?? []
                 var localByKey: [String: House] = [:]
@@ -812,6 +820,7 @@ struct HouseListView: View {
                             h.remark = rec.remark; h.statusRaw = rec.status
                             h.lastUpdatedAt = rec.updatedAt
                             updatedCount += 1
+                            updatedRoomNo.append(rec.roomNo)
                         }
                         // v1.41：媒体差异双向 reconcile——
                         //  ① 云端有本地缺 → 下载（mediaRoomKeys）
@@ -820,7 +829,8 @@ struct HouseListView: View {
                         let cloudNames = Set(rec.mediaNames)
                         if localNames != cloudNames {
                             if !cloudNames.isSubset(of: localNames) {
-                                mediaRoomKeys.append(h.mediaRoomKey)
+                                mediaRoomKeys.append((h.mediaRoomKey, h.displayRoomNo))
+                                mediaDiffRoomNo.append(h.displayRoomNo)
                             }
                             for extra in localNames.subtracting(cloudNames) {
                                 MediaStore.delete(fileName: extra, roomKey: h.mediaRoomKey)
@@ -843,7 +853,10 @@ struct HouseListView: View {
                         ctx.insert(h)
                         addedCount += 1
                         addedRoomNo.append(rec.roomNo)
-                        if !rec.mediaNames.isEmpty { mediaRoomKeys.append(h.mediaRoomKey) }
+                        if !rec.mediaNames.isEmpty {
+                            mediaRoomKeys.append((h.mediaRoomKey, rec.roomNo))
+                            mediaDiffRoomNo.append(rec.roomNo)
+                        }
                     }
                 }
                 for (key, h) in localByKey where !cloudKeys.contains(key) {
@@ -851,9 +864,11 @@ struct HouseListView: View {
                         MediaStore.deleteHouseDirectory(roomKey: key)
                         ctx.delete(h)
                         deletedCount += 1
+                        deletedRoomNo.append(h.displayRoomNo)
                     } else {
                         pushHouseToCloud(h)
                         pushedCount += 1
+                        pushedRoomNo.append(h.displayRoomNo)
                     }
                 }
                 try? ctx.save()
@@ -861,8 +876,13 @@ struct HouseListView: View {
             }
             var mediaSaved = 0
             if !mediaRoomKeys.isEmpty {
-                for roomKey in mediaRoomKeys {
-                    let files = (try? await CosUploader.downloadHouseMedia(roomKey: roomKey, config: config)) ?? []
+                for (roomKey, _) in mediaRoomKeys {
+                    // v1.42：同步下载进度 → 卡片底部进度条（云端 → 本机）
+                    HouseSyncProgress.shared.update(roomKey: roomKey, direction: .download, progress: 0)
+                    let files = (try? await CosUploader.downloadHouseMedia(roomKey: roomKey, config: config, progress: { p in
+                        HouseSyncProgress.shared.update(roomKey: roomKey, direction: .download, progress: p)
+                    })) ?? []
+                    HouseSyncProgress.shared.update(roomKey: roomKey, direction: .download, progress: 1)
                     mediaSaved += files.count
                     await MainActor.run {
                         let all = (try? ctx.fetch(FetchDescriptor<House>())) ?? []
@@ -891,22 +911,23 @@ struct HouseListView: View {
                     }
                 }
             }
+            // v1.42：完成提示一律列出具体房号（用户要求：只要对比有差别就列出房号）
             var parts: [String] = []
-            if addedCount > 0 { parts.append("新增\(addedCount)套") }
-            if updatedCount > 0 { parts.append("更新\(updatedCount)套") }
-            if deletedCount > 0 { parts.append("删除\(deletedCount)套") }
-            if pushedCount > 0 { parts.append("补传\(pushedCount)套") }
+            if addedCount > 0 { parts.append("新增\(addedCount)套：\(addedRoomNo.joined(separator: "，"))") }
+            if updatedCount > 0 { parts.append("更新\(updatedCount)套：\(updatedRoomNo.joined(separator: "，"))") }
+            if deletedCount > 0 { parts.append("云端已删\(deletedCount)套：\(deletedRoomNo.joined(separator: "，"))") }
+            if pushedCount > 0 { parts.append("补传\(pushedCount)套：\(pushedRoomNo.joined(separator: "，"))") }
             if mediaSaved > 0 { parts.append("下载媒体\(mediaSaved)个") }
             if removedMediaCount > 0 { parts.append("删除媒体\(removedMediaCount)个") }
-            var msg = "已同步：\(parts.joined(separator: "，"))"
-            if addedCount > 0 {
-                msg += "\n新增房号：\(addedRoomNo.joined(separator: "，"))"
-            }
+            if !mediaDiffRoomNo.isEmpty { parts.append("媒体同步：\(Array(Set(mediaDiffRoomNo)).joined(separator: "，"))") }
+            let msg = "已同步：\(parts.joined(separator: "，"))"
             infoMessage = msg; showInfoAlert = true
-            BackupLogStore.log(category: "同步", action: "同步云端房源", result: "成功", detail: msg, cloud: true)
+            BackupLogStore.log(category: "同步", action: "同步房源", result: "成功", detail: msg, cloud: true)
+            HouseSyncProgress.shared.clear()
         } catch {
             infoMessage = "同步失败：\(error.localizedDescription)"; showInfoAlert = true
-            BackupLogStore.log(category: "同步", action: "同步云端房源", result: "失败", detail: error.localizedDescription, cloud: true)
+            BackupLogStore.log(category: "同步", action: "同步房源", result: "失败", detail: error.localizedDescription, cloud: true)
+            HouseSyncProgress.shared.clear()
         }
     }
 
@@ -957,14 +978,14 @@ struct HouseListView: View {
                         try await CloudBackupService.deleteHouseRemoteFolder(roomKey: roomKey, config: config)
                         // v1.19：同时从云端房源账本移除该房
                         try? await CloudHouseSync.delete(roomKey: roomKey, config: config)
-                        BackupLogStore.log(category: "删除房源", action: "云端删除", result: "成功", detail: roomKey, cloud: true)
+                        BackupLogStore.log(category: "删除", action: "删除云端房源", result: "成功", detail: roomKey, cloud: true)
                     } catch {
-                        BackupLogStore.log(category: "删除房源", action: "云端删除", result: "失败", detail: "\(roomKey) \(error.localizedDescription)", cloud: true)
+                        BackupLogStore.log(category: "删除", action: "删除云端房源", result: "失败", detail: "\(roomKey) \(error.localizedDescription)", cloud: true)
                     }
                 }
             }
         } else {
-            BackupLogStore.log(category: "删除房源", action: "云端删除", result: "跳过", detail: "未配置云存储 共\(deletedKeys.count)套", cloud: true)
+            BackupLogStore.log(category: "删除", action: "删除云端房源", result: "跳过", detail: "未配置云存储 共\(deletedKeys.count)套", cloud: true)
         }
         let total = selectedHouseIDs.count
         exitMultiSelect()

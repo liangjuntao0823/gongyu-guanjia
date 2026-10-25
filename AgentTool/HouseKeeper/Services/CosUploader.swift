@@ -1823,8 +1823,14 @@ extension CosUploader {
     static func fetchObjectData(path: String, config: CosConfig) async throws -> Data {
         let url = try presignedGetURL(for: path, expires: 300, config: config)
         let (data, resp) = try await URLSession.shared.data(from: url)
-        guard let http = resp as? HTTPURLResponse, http.statusCode == 200 else {
+        guard let http = resp as? HTTPURLResponse else {
             throw NSError(domain: "CosUploader", code: -1, userInfo: [NSLocalizedDescriptionKey: "读取云端对象失败: \(path)"])
+        }
+        // v1.42：区分「对象不存在(404)」与「其他读取失败」——404 供 fetchAll 判空，
+        //         网络/HTTP 错误必须上抛，绝不能再被当作「云端没有数据」（此前 try? 吞错导致断网误删本地房源）
+        if http.statusCode == 404 { throw CosObjectNotFoundError(path: path) }
+        guard http.statusCode == 200 else {
+            throw NSError(domain: "CosUploader", code: -1, userInfo: [NSLocalizedDescriptionKey: "读取云端对象失败: \(path)（HTTP \(http.statusCode)）"])
         }
         return data
     }
@@ -2831,6 +2837,14 @@ struct CloudHouseRecord: Codable, Identifiable {
 }
 
 /// 云端房源账本读写：桶内 h/_houses.json（覆盖写，读改写）。任何失败由调用方 try? 静默处理。
+/// v1.42：云端对象不存在（HTTP 404）——供账本等读取方区分「真没有」与「读失败（网络/服务异常）」。
+/// 断网误删本地房源事故的根因修复：此前 fetchAll 用 try? 吞掉所有错误、把读失败当空账本，
+/// 导致无网络时把本地全部房源误判为「云端已删」并被硬删。
+struct CosObjectNotFoundError: Error, LocalizedError {
+    let path: String
+    var errorDescription: String? { "云端对象不存在: \(path)" }
+}
+
 enum CloudHouseSync {
     static let accountPath = "h/_houses.json"
 
@@ -2851,10 +2865,19 @@ enum CloudHouseSync {
         )
     }
 
-    /// 拉取云端账本（不存在或读失败 → 空数组）
+    /// 拉取云端账本。
+    /// v1.42：仅「对象确实不存在(404)」返回空数组（首次使用/从未上传）；网络、HTTP 非 404、
+    /// 解析失败一律 throw——读失败必须报「同步失败」，绝不能再被当成「云端没有房源」而误删本地。
     static func fetchAll(config: CosConfig) async throws -> [CloudHouseRecord] {
-        guard let data = try? await CosUploader.fetchObjectData(path: accountPath, config: config),
-              let arr = try? JSONDecoder().decode([CloudHouseRecord].self, from: data) else { return [] }
+        let data: Data
+        do {
+            data = try await CosUploader.fetchObjectData(path: accountPath, config: config)
+        } catch let e as CosObjectNotFoundError {
+            return []
+        }
+        guard let arr = try? JSONDecoder().decode([CloudHouseRecord].self, from: data) else {
+            throw NSError(domain: "CloudHouseSync", code: -1, userInfo: [NSLocalizedDescriptionKey: "云端房源账本解析失败（格式异常）"])
+        }
         return arr
     }
 
@@ -2893,11 +2916,14 @@ extension CosUploader {
     /// v1.37：改为幂等回补——本地已存在同名文件直接跳过，缺失的用云端原名写回（不产生重复文件）。
     /// v1.41：视频名归一化——云端视频统一 .mp4，本地写回 .mov（与账本 mediaNames 的本地原始名一致），
     ///        彻底消除「账本 .mov ↔ 本地磁盘 .mp4」的同步误判（此前每次同步都误报媒体缺失）。
-    static func downloadHouseMedia(roomKey: String, config: CosConfig) async throws -> [(fileName: String, kind: String)] {
+    static func downloadHouseMedia(roomKey: String, config: CosConfig, progress: ((Double) -> Void)? = nil) async throws -> [(fileName: String, kind: String)] {
         let objs = try await listObjects(prefix: "h/\(roomKey)/", config: config)
         var result: [(fileName: String, kind: String)] = []
         let existing = MediaStore.existingFileNames(roomKey: roomKey)
-        for obj in objs {
+        let total = max(1, objs.count)
+        for (idx, obj) in objs.enumerated() {
+            // v1.42：按对象推进同步进度（卡片底部进度条，云端 → 本机）
+            progress?(Double(idx) / Double(total))
             let name = (obj.name as NSString).lastPathComponent
             let lower = name.lowercased()
             let isVideo = lower.hasSuffix(".mp4") || lower.hasSuffix(".mov")
@@ -2914,6 +2940,7 @@ extension CosUploader {
             _ = MediaStore.write(data: data, fileName: localName, roomKey: roomKey)
             result.append((localName, isVideo ? "video" : "image"))
         }
+        progress?(1.0)
         return result
     }
 

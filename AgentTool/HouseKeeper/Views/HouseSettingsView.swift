@@ -1161,6 +1161,28 @@ struct ShareProfileView: View {
         return p.isEmpty ? "13288251132" : p
     }
 
+    /// v1.42：把本地二维码立即同步到云端桶 users/<用户名>/qrcode.jpg（已发出的 H5 链接动态引用桶 URL，
+    /// 保存/清除后无需重新分享即生效）。未配置云存储或上传失败时静默跳过（下次分享时仍会照常上传）。
+    private func syncQRToCloud(clear: Bool) {
+        guard let config = CosConfig.load() else { return }
+        Task {
+            do {
+                if clear {
+                    if let url = try? CosUploader.presignedURL(for: CloudUser.qrPath, method: "DELETE", expires: 600, headers: [], config: config) {
+                        var req = URLRequest(url: url)
+                        req.httpMethod = "DELETE"
+                        _ = try? await URLSession.shared.data(for: req)
+                    }
+                } else if let data = QrcodeStore.loadData(),
+                          let jpeg = UIImage(data: data)?.jpegData(compressionQuality: 0.9) {
+                    try await CosUploader.upload(data: jpeg, to: CloudUser.qrPath, contentType: "image/jpeg", config: config)
+                }
+            } catch {
+                // 静默：网络/配置问题不阻塞本地保存，分享时会再次上传
+            }
+        }
+    }
+
     var body: some View {
         Form {
             // v1.26：实时名片预览——输入即变，所见即所得
@@ -1248,7 +1270,10 @@ struct ShareProfileView: View {
                            let jpeg = image.jpegData(compressionQuality: 0.9) {
                             let ok = QrcodeStore.save(jpeg)
                             qrImage = UIImage(data: jpeg)
-                            savedTip = ok ? "微信二维码已更新 ✅\n下次分享起所有 H5 名片板块都会显示新二维码" : "保存二维码失败，请重试"
+                            // v1.42：保存后立即同步云端桶 users/<用户名>/qrcode.jpg——
+                            //        已发出的 H5 链接动态引用桶 URL，无需重新分享即显示新二维码（此前只写本地，要等下次分享才上传）
+                            syncQRToCloud(clear: false)
+                            savedTip = ok ? "微信二维码已更新 ✅\n已发出的分享链接也会立即显示新二维码" : "保存二维码失败，请重试"
                         } else {
                             savedTip = "无法读取所选图片，请换一张清晰的二维码图片"
                         }
@@ -1259,13 +1284,23 @@ struct ShareProfileView: View {
                     Button("清除二维码", role: .destructive) {
                         QrcodeStore.clear()
                         qrImage = nil
-                        savedTip = "二维码已清除，下次分享的页面将不再显示二维码"
+                        // v1.42：清除后立即删除云端桶二维码，已发出链接不再显示（此前只清本地）
+                        syncQRToCloud(clear: true)
+                        savedTip = "二维码已清除，已发出的分享链接不再显示二维码"
                     }
                 }
             }
         }
         .navigationTitle("名片信息")
         .navigationBarTitleDisplayMode(.inline)
+        // v1.42：返回本页时重新读本地二维码（与分享水印开关同款修法——init 缓存可能陈旧，onAppear 刷新即显示最新）
+        .onAppear {
+            if let data = QrcodeStore.loadData() {
+                qrImage = UIImage(data: data)
+            } else {
+                qrImage = nil
+            }
+        }
         .alert("保存结果", isPresented: Binding(
             get: { savedTip != nil },
             set: { if !$0 { savedTip = nil } }

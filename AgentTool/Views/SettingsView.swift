@@ -266,10 +266,17 @@ struct SettingsView: View {
             HStack {
                 Label("启用自动备份", systemImage: "clock")
                 Spacer()
-                Toggle("", isOn: $autoBackupEnabled)
-                    .labelsHidden()
+                // v1.42：显式 Binding——set 时立即更新 @State 并落盘（不依赖 onChange 闭包捕获时序），
+                //        与分享水印开关同款修法，拨动即保存、返回再进入即显示最新状态
+                Toggle("", isOn: Binding(
+                    get: { autoBackupEnabled },
+                    set: { newValue in
+                        autoBackupEnabled = newValue
+                        saveAutoSettings()
+                    }
+                ))
+                .labelsHidden()
             }
-            .onChange(of: autoBackupEnabled) { _, _ in saveAutoSettings() }
             if autoBackupEnabled {
                 HStack {
                     Label("备份频率", systemImage: "calendar")

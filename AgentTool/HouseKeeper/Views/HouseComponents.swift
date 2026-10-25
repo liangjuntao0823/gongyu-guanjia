@@ -113,6 +113,40 @@ struct MediaThumbView: View {
     }
 }
 
+// MARK: - v1.42 房源上传/同步动态进度（卡片底部细进度条）
+// 单例发布器：保存上传媒体、云端同步下载/补传时写入进度，房源卡片按房号匹配后显示细进度条。
+@MainActor
+final class HouseSyncProgress: ObservableObject {
+    static let shared = HouseSyncProgress()
+    @Published var roomKey: String?
+    @Published var direction: Direction = .upload
+    @Published var progress: Double = 0     // 0...1
+    @Published var label: String = ""
+
+    enum Direction {
+        case upload      // 本机 → 云端（上传）
+        case download    // 云端 → 本机（同步下载）
+        var text: String { self == .upload ? "上传中" : "同步中" }
+    }
+
+    /// 开始/推进：线程安全（内部切主线程）
+    func update(roomKey: String?, direction: Direction, progress: Double, label: String = "") {
+        Task { @MainActor in
+            self.roomKey = roomKey
+            self.direction = direction
+            self.progress = max(0, min(1, progress))
+            self.label = label
+        }
+    }
+
+    func clear() {
+        Task { @MainActor in
+            roomKey = nil
+            label = ""
+        }
+    }
+}
+
 // MARK: - 房源卡片
 // 布局：左上封面 + 右侧信息
 //  第一行：房号（加大加粗）+ 价格（加大加粗），状态徽章在右上角
@@ -123,11 +157,20 @@ struct MediaThumbView: View {
 struct HouseCardView: View {
     let house: House
 
+    // v1.42：卡片底部上传/同步进度条——订阅全局进度发布器，仅当正在操作本房源时显示
+    @ObservedObject private var sync = HouseSyncProgress.shared
+
     @State private var previewRoute: PhotoPreviewRoute? = nil
     @State private var playingVideo: MediaItem? = nil
 
+    /// 本房源是否正在上传/同步（匹配房号）
+    private var isSyncingThis: Bool {
+        sync.roomKey == house.mediaRoomKey
+    }
+
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .top, spacing: 12) {
             // 封面：有视频 → 视频缩略图 + 播放；无视频 → 首图，点击放大左右滑动浏览全部照片
             Button {
                 openCover()
@@ -190,6 +233,24 @@ struct HouseCardView: View {
                 }
             }
             .padding(.vertical, 2)
+            }
+            // v1.42：卡片最底部动态进度条——上传到云端 / 云端同步到本地，细条从左到右跑进度
+            if isSyncingThis {
+                VStack(spacing: 3) {
+                    ProgressView(value: sync.progress)
+                        .progressViewStyle(.linear)
+                        .frame(height: 4)
+                        .tint(AppTheme.accent)
+                        .scaleEffect(x: 1, y: 0.55, anchor: .center)   // 压细
+                    HStack {
+                        Text("\(sync.direction.text) \(Int(sync.progress * 100))%\(sync.label.isEmpty ? "" : " · \(sync.label)")")
+                            .font(.system(size: 9))
+                            .foregroundColor(.secondary)
+                        Spacer()
+                    }
+                }
+                .padding(.top, 6)
+            }
         }
         .padding(10)
         .background(Color.white)
