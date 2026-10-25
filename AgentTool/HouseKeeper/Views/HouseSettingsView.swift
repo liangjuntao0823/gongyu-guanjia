@@ -221,20 +221,35 @@ struct CosConfigView: View {
                     .autocorrectionDisabled()
                     .keyboardType(.URL)
                 // v1.41 第7点：三个按钮合并为两个——「保存并验证」（先存地址再验证连通）+「清空地址」
-                HStack(spacing: 8) {
+                // v1.43：样式对齐 COS 配置按钮（保存=深蓝实心底白字 + 验证中转圈；清空=浅色描边）
+                HStack(spacing: 12) {
                     Button {
                         saveAndVerifyFunctionURL()
                     } label: {
-                        Label(isVerifying ? "验证中…" : "保存并验证", systemImage: isVerifying ? "antenna.radiowaves.left.and.right" : "checkmark.circle")
+                        if isVerifying {
+                            ProgressView()
+                                .tint(.white)
+                                .frame(maxWidth: .infinity)
+                        } else {
+                            Label("保存并验证", systemImage: "checkmark.circle")
+                                .font(.subheadline)
+                                .fontWeight(.medium)
+                                .frame(maxWidth: .infinity)
+                        }
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(.borderedProminent)
+                    .tint(Color(red: 31/255, green: 58/255, blue: 95/255))
                     .disabled(isVerifying)
                     Button {
                         clearFunctionURL()
                     } label: {
                         Label("清空地址", systemImage: "xmark.circle")
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+                            .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.bordered)
+                    .disabled(isVerifying || functionURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
                 NavigationLink {
                     AdminPasswordView()

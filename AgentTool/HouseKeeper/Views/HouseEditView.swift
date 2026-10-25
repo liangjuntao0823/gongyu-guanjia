@@ -397,9 +397,9 @@ struct HouseEditView: View {
                     Task {
                         do {
                             try await CosUploader.deleteRemoteMedia(fileName: old.fileName, kind: kind, roomKey: rk, config: config)
-                            BackupLogStore.log(category: "房源", action: "删除媒体", result: "成功", detail: "\(rk)/\(old.fileName)", cloud: true)
+                            BackupLogStore.log(category: "房源", action: "删除媒体（本地→云端）", result: "成功", detail: "\(rk)/\(old.fileName)", cloud: true)
                         } catch {
-                            BackupLogStore.log(category: "房源", action: "删除媒体", result: "失败", detail: "\(rk)/\(old.fileName) \(error.localizedDescription)", cloud: true)
+                            BackupLogStore.log(category: "房源", action: "删除媒体（本地→云端）", result: "失败", detail: "\(rk)/\(old.fileName) \(error.localizedDescription)", cloud: true)
                         }
                     }
                 }
@@ -479,14 +479,14 @@ struct HouseEditView: View {
             }
             HouseSyncProgress.shared.clear()
             if failed > 0 {
-                BackupLogStore.log(category: "房源", action: "上传媒体", result: "部分失败", detail: "\(house.displayRoomNo)：成功\(success) 失败\(failed)（已入队自动补传）", cloud: true)
+                BackupLogStore.log(category: "房源", action: "上传媒体（本地→云端）", result: "部分失败", detail: "\(house.displayRoomNo)：成功\(success) 失败\(failed)（已入队自动补传）", cloud: true)
                 await MainActor.run {
                     if pendingUploadTip == nil {
                         pendingUploadTip = "房源已保存到本机；媒体上传云端失败（共 \(failed) 个），已自动排队，网络恢复后自动补传。"
                     }
                 }
             } else if success > 0 {
-                BackupLogStore.log(category: "房源", action: "上传媒体", result: "成功", detail: "\(house.displayRoomNo)：\(success) 个媒体", cloud: true)
+                BackupLogStore.log(category: "房源", action: "上传媒体（本地→云端）", result: "成功", detail: "\(house.displayRoomNo)：\(success) 个媒体", cloud: true)
             }
         }
     }
@@ -502,9 +502,9 @@ struct HouseEditView: View {
                     house.cloudStatus = .both
                     try? modelContext.save()
                 }
-                BackupLogStore.log(category: "房源", action: "同步房源", result: "成功", detail: house.displayRoomNo, cloud: true)
+                BackupLogStore.log(category: "房源", action: "同步房源（本地→云端）", result: "成功", detail: house.displayRoomNo, cloud: true)
             } catch {
-                BackupLogStore.log(category: "房源", action: "同步房源", result: "失败", detail: "\(house.displayRoomNo)：\(error.localizedDescription)", cloud: true)
+                BackupLogStore.log(category: "房源", action: "同步房源（本地→云端）", result: "失败", detail: "\(house.displayRoomNo)：\(error.localizedDescription)", cloud: true)
                 // v1.42：保存成功但账本上传失败 → 提示待网络恢复后刷新同步（此前只写日志，用户无感知）
                 await MainActor.run {
                     if pendingUploadTip == nil {

@@ -190,6 +190,8 @@ struct HouseDetailView: View {
 
     var body: some View {
         dialogLayer
+        // v1.43：打开详情自动补缺——记录在但磁盘文件缺失且云端有 → 自动下载回补（用户手删 media 文件夹后重开不再空白）
+        .onAppear { repairMissingMediaIfNeeded() }
         .alert("无法分享", isPresented: Binding(
             get: { shareError != nil },
             set: { if !$0 { shareError = nil } }
@@ -629,7 +631,16 @@ struct HouseDetailView: View {
         let roomKey = house.mediaRoomKey
         Task {
             do {
-                let files = try await CosUploader.downloadHouseMedia(roomKey: roomKey, config: config)
+                // v1.43：只下载云端账本名单内的媒体（避免把首帧图/分享页等非账本对象混入本地记录）
+                let names = await cloudMediaNames(for: roomKey, config: config)
+                guard !names.isEmpty else {
+                    await MainActor.run {
+                        isDownloading = false
+                        cloudDeleteMessage = "云端账本未找到该房源媒体，无法下载。"
+                    }
+                    return
+                }
+                let files = try await CosUploader.downloadHouseMedia(roomKey: roomKey, expectedNames: names, config: config)
                 await MainActor.run {
                     for f in files {
                         let item = MediaItem(fileName: f.fileName, kind: f.kind)
@@ -650,6 +661,44 @@ struct HouseDetailView: View {
         }
     }
 
+    /// v1.43：拉取云端账本里该房号的媒体名单（下载/补缺统一以账本为准，避免桶内非账本对象混入）
+    private func cloudMediaNames(for roomKey: String, config: CosConfig) async -> [String] {
+        guard let recs = try? await CloudHouseSync.fetchAll(config: config),
+              let rec = recs.first(where: { $0.roomKey == roomKey }) else { return [] }
+        return rec.mediaNames
+    }
+
+    /// v1.43：详情页打开时补缺——记录还在但磁盘文件缺失（用户手删/意外丢失）且云端有 → 自动从云端下载回补
+    private func repairMissingMediaIfNeeded() {
+        guard house.cloudStatus != .cloud, !house.mediaItems.isEmpty, let config = CosConfig.load() else { return }
+        let recorded = house.mediaItems.map { $0.fileName }
+        let diskNorm = Set(MediaStore.existingFileNames(roomKey: house.mediaRoomKey).map { ($0 as NSString).deletingPathExtension.lowercased() })
+        let missing = recorded.filter { !diskNorm.contains(($0 as NSString).deletingPathExtension.lowercased()) }
+        guard !missing.isEmpty else { return }
+        let roomKey = house.mediaRoomKey
+        isDownloading = true
+        Task {
+            let names = await cloudMediaNames(for: roomKey, config: config)
+            guard !names.isEmpty else {
+                await MainActor.run { isDownloading = false }
+                return
+            }
+            if let files = try? await CosUploader.downloadHouseMedia(roomKey: roomKey, expectedNames: names, config: config), !files.isEmpty {
+                await MainActor.run {
+                    for f in files where !house.mediaItems.contains(where: { $0.fileName == f.fileName }) {
+                        let item = MediaItem(fileName: f.fileName, kind: f.kind)
+                        item.house = house
+                        modelContext.insert(item)
+                    }
+                    try? modelContext.save()
+                    isDownloading = false
+                }
+            } else {
+                await MainActor.run { isDownloading = false }
+            }
+        }
+    }
+
     /// 操作前自动下载：分享 / 一键保存 / 编辑前若为纯云端房源，先自动拉到本地（v1.19 需求11）
     private func ensureLocalMedia(_ action: @escaping () -> Void) {
         if !house.mediaItems.isEmpty || house.cloudStatus != .cloud {
@@ -661,7 +710,14 @@ struct HouseDetailView: View {
         let roomKey = house.mediaRoomKey
         Task {
             do {
-                let files = try await CosUploader.downloadHouseMedia(roomKey: roomKey, config: config)
+                // v1.43：只下载云端账本名单内的媒体（避免把首帧图/分享页等非账本对象混入本地记录）
+                let names = await cloudMediaNames(for: roomKey, config: config)
+                guard !names.isEmpty else {
+                    await MainActor.run { isDownloading = false }
+                    action()
+                    return
+                }
+                let files = try await CosUploader.downloadHouseMedia(roomKey: roomKey, expectedNames: names, config: config)
                 await MainActor.run {
                     for f in files {
                         let item = MediaItem(fileName: f.fileName, kind: f.kind)
@@ -708,7 +764,7 @@ struct HouseDetailView: View {
         NotificationCenter.default.post(name: HouseListView.houseStoreChanged, object: nil)
         // 2) 云端删除（异步；本地成功云端失败 → 分开提示 + 写操作日志）
         guard let config = config, config.isValid else {
-            BackupLogStore.log(category: "删除", action: "删除云端房源", result: "跳过", detail: "未配置云存储 \(roomKey)", cloud: true)
+            BackupLogStore.log(category: "删除", action: "删除云端房源（本地→云端）", result: "跳过", detail: "未配置云存储 \(roomKey)", cloud: true)
             // v1.19 补全：删除成功提示区分存储位置
             deleteResultMessage = wasCloud == .both ? "已删除本地 + 云端房源" : "已删除本地房源"
             return
@@ -718,13 +774,13 @@ struct HouseDetailView: View {
             do {
                 try await CloudBackupService.deleteHouseRemoteFolder(roomKey: roomKey, config: config)
                 try? await CloudHouseSync.delete(roomKey: roomKey, config: config)   // v1.19 补全：同步从云端账本移除
-                BackupLogStore.log(category: "删除", action: "删除云端房源", result: "成功", detail: roomKey, cloud: true)
+                BackupLogStore.log(category: "删除", action: "删除云端房源（本地→云端）", result: "成功", detail: roomKey, cloud: true)
                 await MainActor.run {
                     isDeletingCloud = false
                     deleteResultMessage = wasCloud == .cloud ? "已删除云端房源" : "已删除本地 + 云端房源"
                 }
             } catch {
-                BackupLogStore.log(category: "删除", action: "删除云端房源", result: "失败", detail: "\(roomKey) \(error.localizedDescription)", cloud: true)
+                BackupLogStore.log(category: "删除", action: "删除云端房源（本地→云端）", result: "失败", detail: "\(roomKey) \(error.localizedDescription)", cloud: true)
                 await MainActor.run {
                     isDeletingCloud = false
                     cloudDeleteMessage = "本地已删除；云端删除失败：\(error.localizedDescription)。可在「管理后台 → 桶管理」手动清理 h/\(roomKey)/"

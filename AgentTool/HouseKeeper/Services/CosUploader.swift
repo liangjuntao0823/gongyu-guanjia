@@ -2912,33 +2912,50 @@ enum CloudHouseSync {
 
 extension CosUploader {
     /// 把云端 h/<roomKey>/ 的媒体下载到本地 MediaStore 目录，返回 (本地文件名, kind)。
-    /// 跳过非媒体对象（cover、缩略图、分享页、账本等）。视频云端为 mp4、图片保留原扩展。
     /// v1.37：改为幂等回补——本地已存在同名文件直接跳过，缺失的用云端原名写回（不产生重复文件）。
     /// v1.41：视频名归一化——云端视频统一 .mp4，本地写回 .mov（与账本 mediaNames 的本地原始名一致），
     ///        彻底消除「账本 .mov ↔ 本地磁盘 .mp4」的同步误判（此前每次同步都误报媒体缺失）。
-    static func downloadHouseMedia(roomKey: String, config: CosConfig, progress: ((Double) -> Void)? = nil) async throws -> [(fileName: String, kind: String)] {
+    /// v1.43 重写（修复「每次同步都下载N删N」循环与「本地删文件后刷不回」）：
+    ///   - **只下载 expectedNames（云端账本名单）里的文件**——桶目录里多出来的
+    ///     非账本对象（视频首帧图 .vthumb.jpg、旧分享页 .html、cover 等）一律不下载、不进记录，
+    ///     从源头消除「下载↔删除互抵」的死循环；
+    ///   - **落盘名与账本名单完全一致**（视频桶对象 .mp4 ↔ 账本名 .mov/.mp4 按账本名写回），
+    ///     同步完成后本地记录 = 账本名单，下次同步零差异；
+    ///   - 本地磁盘已有账本名（或桶同名对象）→ 跳过（幂等，不重复下载）。
+    static func downloadHouseMedia(roomKey: String, expectedNames: [String], config: CosConfig, progress: ((Double) -> Void)? = nil) async throws -> [(fileName: String, kind: String)] {
         let objs = try await listObjects(prefix: "h/\(roomKey)/", config: config)
-        var result: [(fileName: String, kind: String)] = []
-        let existing = MediaStore.existingFileNames(roomKey: roomKey)
-        let total = max(1, objs.count)
-        for (idx, obj) in objs.enumerated() {
-            // v1.42：按对象推进同步进度（卡片底部进度条，云端 → 本机）
-            progress?(Double(idx) / Double(total))
+        // 桶对象名（归一化 key：去扩展名小写）→ 对象完整路径；只收媒体对象（图片/视频），跳过首帧图/分享页/cover
+        var remotePathByNormKey: [String: String] = [:]
+        for obj in objs {
             let name = (obj.name as NSString).lastPathComponent
             let lower = name.lowercased()
             let isVideo = lower.hasSuffix(".mp4") || lower.hasSuffix(".mov")
             let isImage = [".jpg", ".jpeg", ".png", ".heic", ".webp", ".gif"].contains { lower.hasSuffix($0) }
             guard isVideo || isImage else { continue }
-            // v1.41：本地名归一化——视频云端 .mp4 → 本地写 .mov（账本/本地记录均用 .mov）
-            var localName = name
-            if isVideo, lower.hasSuffix(".mp4"), !existing.contains(name) {
-                localName = (name as NSString).deletingPathExtension + ".mov"
+            let normKey = (name as NSString).deletingPathExtension.lowercased()
+            if remotePathByNormKey[normKey] == nil {
+                remotePathByNormKey[normKey] = obj.name
             }
-            // 本地已有（.mov 归一化名或云端原名）→ 跳过（幂等回补）
-            if existing.contains(localName) || existing.contains(name) { continue }
-            let data = try await fetchObjectData(path: obj.name, config: config)
-            _ = MediaStore.write(data: data, fileName: localName, roomKey: roomKey)
-            result.append((localName, isVideo ? "video" : "image"))
+        }
+        var result: [(fileName: String, kind: String)] = []
+        let existing = MediaStore.existingFileNames(roomKey: roomKey)
+        let total = max(1, expectedNames.count)
+        for (idx, expected) in expectedNames.enumerated() {
+            // v1.42：按账本名单推进同步进度（卡片底部进度条，云端 → 本机）
+            progress?(Double(idx) / Double(total))
+            let lower = expected.lowercased()
+            let isVideo = lower.hasSuffix(".mp4") || lower.hasSuffix(".mov")
+            let isImage = [".jpg", ".jpeg", ".png", ".heic", ".webp", ".gif"].contains { lower.hasSuffix($0) }
+            guard isVideo || isImage else { continue }
+            let expNormKey = (expected as NSString).deletingPathExtension.lowercased()
+            // 桶里按归一化 key 找等价对象（视频 .mp4 ↔ .mov 等价；图片同名）——找不到说明账本与桶不一致，跳过不硬下
+            guard let remotePath = remotePathByNormKey[expNormKey] else { continue }
+            // 磁盘已有（账本名或桶同名对象）→ 跳过（幂等回补）
+            if existing.contains(expected) || existing.contains((remotePath as NSString).lastPathComponent) { continue }
+            let data = try await fetchObjectData(path: remotePath, config: config)
+            // 落盘用账本名 expected（与账本零差异），视频不再强制 .mov——账本是 .mp4 就落 .mp4
+            _ = MediaStore.write(data: data, fileName: expected, roomKey: roomKey)
+            result.append((expected, isVideo ? "video" : "image"))
         }
         progress?(1.0)
         return result
