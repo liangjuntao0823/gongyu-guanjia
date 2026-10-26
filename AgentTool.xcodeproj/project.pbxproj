@@ -241,6 +241,7 @@
 				B10000010000000000000009 /* PayoutView.swift */,
 				B10000010000000000000010 /* ProfitView.swift */,
 				B10000010000000000000095 /* SettingsView.swift */,
+				B10000010000000000000140 /* MediaPendingView.swift */,
 				B10000010000000000000113 /* BackupCenterViews.swift */,
 				B10000010000000000000011 /* UtilityView.swift */,
 				B10000010000000000000099 /* TrashView.swift */,
@@ -284,7 +285,6 @@
 				B10000010000000000000102 /* MediaStore.swift */,
 				B10000010000000000000114 /* HouseMediaUploadQueue.swift */,
 				B10000010000000000000117 /* NetworkMonitor.swift */,
-				B10000010000000000000140 /* MediaPendingView.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
