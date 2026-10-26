@@ -188,7 +188,8 @@ struct HouseCardView: View {
                         .font(.title3.weight(.bold))
                         .foregroundColor(.primary)
                     Text(house.priceText)
-                        .font(.headline.weight(.bold))
+                        // v1.71（#96）：租金字体与房号一样大（title3）
+                        .font(.title3.weight(.bold))
                         .foregroundColor(AppTheme.accent)
                     Spacer(minLength: 0)
                     StatusBadge(status: house.status)

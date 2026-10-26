@@ -397,6 +397,8 @@ struct MainTabView: View {
 
             // 底部导航
             bottomBar
+            // v1.71（#95）：全局提示遮罩——完成/错误提示离开任何板块都能点「好」
+            GlobalAlertOverlay()
         }
         .onAppear {
             UNUserNotificationCenter.current().setBadgeCount(0)

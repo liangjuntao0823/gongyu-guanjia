@@ -283,11 +283,22 @@ struct HouseEditView: View {
     // MARK: - 载入 / 保存
 
     /// 当前房号对应的媒体目录 key（新增时用临时 key，保存后正式按房号）
+    /// v1.71：与 House.mediaRoomKey 完全一致——1 座也强制「1-」前缀。
+    /// 修复根因：此前 1 座返回无前缀（如「2059」），编辑页新图落盘 media/2059/，
+    /// 上传却按带前缀 1-2059 找文件 → 找不到全失败 → 云端无新图、旧图已删 → 刷新缺媒体死循环。
     private var currentRoomKey: String {
         let trimmed = roomNo.trimmingCharacters(in: .whitespacesAndNewlines)
             .replacingOccurrences(of: "2－", with: "2-")
-        let clean = trimmed.hasPrefix("2-") ? String(trimmed.dropFirst(2)) : trimmed
-        let key = tower == 2 ? "2-\(clean)" : clean
+            .replacingOccurrences(of: "1－", with: "1-")
+        let clean: String
+        if trimmed.hasPrefix("2-") {
+            clean = String(trimmed.dropFirst(2))
+        } else if trimmed.hasPrefix("1-") {
+            clean = String(trimmed.dropFirst(2))
+        } else {
+            clean = trimmed
+        }
+        let key = tower == 2 ? "2-\(clean)" : (clean.hasPrefix("1-") ? clean : "1-\(clean)")
         let illegal = CharacterSet(charactersIn: "/:\\?%*|\"<>")
         return key.components(separatedBy: illegal).joined(separator: "-")
     }
@@ -423,6 +434,8 @@ struct HouseEditView: View {
         // 只在保存时执行 → 点「取消」不会落盘，删除可完整回滚
         // v1.41：删除媒体同时删云端对象（图片原名 / 视频 .mp4 + 用户区首帧图），
         //        并清除该文件的上传队列——保证「我删了照片，别人也看不到」（此前只删本地是致命缺陷）
+        // v1.71：编辑前的媒体文件名快照（用于「仅新增才上传」判定；在删除媒体逻辑之前取）
+        let originalMediaNames = Set(house?.mediaItems.map { $0.fileName } ?? [])
         if let house {
             let removed = house.mediaItems.filter { old in
                 !mediaItems.contains { $0.fileName == old.fileName }
@@ -474,9 +487,14 @@ struct HouseEditView: View {
         }
 
         try? modelContext.save()
-        // v1.41：保存后把该房全部媒体即时上传到桶（新增/替换照片视频立即云端可见，
-        //        别的设备同步就能看到最新照片视频）；上传失败自动入队，启动/回前台自动补传
-        pushHouseMediaToCloud(target)
+        // v1.71：编辑保存只在「媒体有变化」时才触发上传——纯文字修改（价格/户型/房东/备注等）
+        // 不再全量重传媒体（此前每次保存都触发、失败日志吓人）；新增媒体才上传，删除媒体已走
+        // deleteRemoteMedia 同步删云端。新增房源（无原始快照）全部上传。
+        // 联动：编辑改房号时本地媒体目录已迁移到新房号目录，云端新房号目录还没有任何媒体——
+        // 此时不做文件名过滤（全传），否则新目录媒体要等下次同步对账才补。
+        // v1.41 语义保持：上传失败自动入队，启动/回前台自动补传
+        let roomChanged = isEditing && !originalRoomKey.isEmpty && originalRoomKey != target.mediaRoomKey
+        pushHouseMediaToCloud(target, originalNames: roomChanged ? [] : originalMediaNames)
         // v1.54：保存后自动生成/更新该房源的脱敏版 H5（删旧生成新）——
         //        保证「新增了房源就自动有分享页」，选房链接里点卡片即可打开完整详情；
         //        编辑保存时旧 H5 立即失效、生成新 H5（内容与最新房源信息一致）
@@ -508,17 +526,19 @@ struct HouseEditView: View {
 
     // MARK: - v1.19 云端双写
 
-    /// v1.41：房源媒体即时上传——保存后把全部媒体传到桶 h/<房号>/（桶内已有则幂等跳过）。
-    /// 上传失败自动入 HouseMediaUploadQueue，App 启动/回前台自动补传；写云端操作日志。
-    /// 与分享上传、队列补传共用 CosUploader.uploadHouseMedia（视频转 mp4 + 用户区首帧图），行为一致。
-    private func pushHouseMediaToCloud(_ house: House) {
+    /// v1.41：房源媒体即时上传——保存后把「新增」的媒体传到桶 h/<房号>/（桶内已有则幂等跳过）。
+    /// v1.71：编辑保存只上传新增媒体（originalNames 为编辑前快照）；纯文字修改不触发任何媒体上传。
+    /// 上传失败自动重试 1 次（瞬时网络抖动自愈），仍失败才入 HouseMediaUploadQueue（启动/回前台自动补传）；
+    /// 写云端操作日志（含具体错误原因）。与分享上传、队列补传共用 CosUploader.uploadHouseMedia。
+    private func pushHouseMediaToCloud(_ house: House, originalNames: Set<String> = []) {
         guard let config = CosConfig.load(), config.isValid else { return }
         let roomKey = house.mediaRoomKey
         let compress = shareCompressionEnabled
-        let media = house.mediaItems
-        guard !media.isEmpty else { return }
+        let media = house.mediaItems.filter { !originalNames.contains($0.fileName) }
+        guard !media.isEmpty else { return }   // 纯文字修改：无新增媒体，直接跳过（不写日志）
         Task {
             var success = 0, failed = 0
+            var lastError = ""
             let total = media.count
             // v1.42：卡片底部进度条——按文件推进（上传中 x%）
             HouseSyncProgress.shared.update(roomKey: roomKey, direction: .upload, progress: 0)
@@ -535,14 +555,23 @@ struct HouseEditView: View {
                     HouseMediaUploadQueue.remove(roomKey: roomKey, fileName: item.fileName)
                     success += 1
                 } catch {
-                    HouseMediaUploadQueue.enqueue(roomKey: roomKey, fileName: item.fileName, kind: item.kind)
-                    failed += 1
+                    // v1.71：瞬时网络失败自动重试 1 次（幂等覆盖写，安全）
+                    do {
+                        try await Task.sleep(nanoseconds: 1_000_000_000)
+                        try await CosUploader.uploadHouseMedia(fileName: item.fileName, kind: item.kind, roomKey: roomKey, config: config, compress: compress)
+                        HouseMediaUploadQueue.remove(roomKey: roomKey, fileName: item.fileName)
+                        success += 1
+                    } catch {
+                        HouseMediaUploadQueue.enqueue(roomKey: roomKey, fileName: item.fileName, kind: item.kind)
+                        failed += 1
+                        lastError = error.localizedDescription
+                    }
                 }
                 HouseSyncProgress.shared.update(roomKey: roomKey, direction: .upload, progress: Double(idx + 1) / Double(total))
             }
             HouseSyncProgress.shared.clear()
             if failed > 0 {
-                BackupLogStore.log(category: "房源", action: "上传媒体（本地→云端）", result: "部分失败", detail: "\(house.displayRoomNo)：成功\(success) 失败\(failed)（已入队自动补传）", cloud: true)
+                BackupLogStore.log(category: "房源", action: "上传媒体（本地→云端）", result: "部分失败", detail: "\(house.displayRoomNo)：成功\(success) 失败\(failed)（已入队自动补传）" + (lastError.isEmpty ? "" : "；错误：\(lastError)"), cloud: true)
                 await MainActor.run {
                     if pendingUploadTip == nil {
                         pendingUploadTip = "房源已保存到本机；媒体上传云端失败（共 \(failed) 个），已自动排队，网络恢复后自动补传。"

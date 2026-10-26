@@ -673,8 +673,8 @@ struct HouseDetailView: View {
 
     /// v1.43：拉取云端账本里该房号的媒体名单（下载/补缺统一以账本为准，避免桶内非账本对象混入）
     private func cloudMediaNames(for roomKey: String, config: CosConfig) async -> [String] {
-        guard let recs = try? await CloudHouseSync.fetchAll(config: config),
-              let rec = recs.first(where: { $0.roomKey == roomKey }) else { return [] }
+        // v1.71（方案 A）：单套账本已是一房一文件，直接读单套 info.json，不再全量拉取
+        guard let rec = try? await CloudHouseSync.fetchOne(roomKey: roomKey, config: config) else { return [] }
         return rec.mediaNames
     }
 

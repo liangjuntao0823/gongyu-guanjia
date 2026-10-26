@@ -212,6 +212,29 @@ enum MediaStore {
         try? FileManager.default.removeItem(at: oldDir)
     }
 
+    /// v1.71：存量无前缀目录归一迁移——把 media/<无前缀房号>/ 迁移到 media/<带前缀房号>/。
+    /// 背景：v1.69 前 HouseEditView.currentRoomKey 对 1 座不加「1-」前缀，编辑页新图曾落盘
+    /// media/2059/ 这类无前缀目录，上传按带前缀 1-2059 找文件失败 → 云端断媒体 → 刷新死循环。
+    /// 现在目录已修复带前缀，本函数把历史上写进无前缀目录的文件搬回正确目录（幂等，可反复执行）。
+    /// 只迁移「与现有房源对应」的无前缀目录；目标已存在则逐文件并入（不覆盖同名）。
+    static func migrateUnprefixedHouseDirectories(houses: [House]) {
+        let fm = FileManager.default
+        let base = mediaDirectory()
+        guard let topNames = try? fm.contentsOfDirectory(atPath: base.path) else { return }
+        for house in houses {
+            let wanted = house.mediaRoomKey           // 带前缀，如 1-2059
+            guard !wanted.isEmpty else { continue }
+            // 只迁移 1 座：历史上无前缀目录仅由 1 座 bug 产生（2 座一直是带前缀）；
+            // 跳过 2 座可避免「1-1006 与 2-1006」房号本体相同时的误迁移。
+            guard wanted.hasPrefix("1-") else { continue }
+            let body = String(wanted.dropFirst(2))
+            // 无前缀目录名可能形如 2059、1418下、1543A下
+            if topNames.contains(body) {
+                migrateHouseDirectory(from: body, to: wanted)
+            }
+        }
+    }
+
     // MARK: - v1.58 批量录入支持
 
     /// 列出某目录的直接子目录名（跳过隐藏项与 __MACOSX 元数据目录）

@@ -1667,6 +1667,12 @@ enum CosUploader {
                 let date = parseCOSDate(tagValue("LastModified", in: block))
                 result.append((name: percentDecode(key), size: size, date: date))
             }
+            // v1.71：解析 <CommonPrefixes><Prefix>…</Prefix></CommonPrefixes>——delimiter="/" 时
+            // COS 用 CommonPrefixes 返回「目录子项」（如 h/1-2059/），方案 A 账本 fetchAll 依赖它列房号目录。
+            let prefixBlocks = extractCommonPrefixes(from: xml)
+            for pref in prefixBlocks {
+                result.append((name: percentDecode(pref), size: 0, date: .distantPast))
+            }
             // 分页：IsTruncated=true 且带 NextContinuationToken
             if let truncated = tagValue("IsTruncated", in: xml), truncated == "true",
                let next = tagValue("NextContinuationToken", in: xml), !next.isEmpty {
@@ -1687,6 +1693,20 @@ enum CosUploader {
             rest = rest[end.upperBound...]
         }
         return blocks
+    }
+
+    /// v1.71：解析 XML 中全部 <CommonPrefixes> 块的 <Prefix> 值（delimiter="/" 时的目录子项）
+    private static func extractCommonPrefixes(from xml: String) -> [String] {
+        var results: [String] = []
+        var rest = xml[...]
+        while let start = rest.range(of: "<CommonPrefixes>"), let end = rest[start.upperBound...].range(of: "</CommonPrefixes>") {
+            let block = String(rest[start.upperBound..<end.lowerBound])
+            if let p = tagValue("Prefix", in: block) {
+                results.append(p)
+            }
+            rest = rest[end.upperBound...]
+        }
+        return results
     }
 
     /// 取 XML 单标签文本
@@ -3135,17 +3155,22 @@ struct CloudHouseRecord: Codable, Identifiable {
     var mediaNames: [String]
 }
 
-/// 云端房源账本读写：桶内 h/_houses.json（覆盖写，读改写）。任何失败由调用方 try? 静默处理。
-/// v1.42：云端对象不存在（HTTP 404）——供账本等读取方区分「真没有」与「读失败（网络/服务异常）」。
-/// 断网误删本地房源事故的根因修复：此前 fetchAll 用 try? 吞掉所有错误、把读失败当空账本，
-/// 导致无网络时把本地全部房源误判为「云端已删」并被硬删。
+/// 云端房源账本读写（v1.71 方案 A）：一房一文件——每套房在 h/<房号>/info.json 存自己的记录，
+/// 与媒体同目录；不再有 h/_houses.json 汇总文件。任何失败由调用方 try? 静默处理。
+/// 相比旧「单文件全量读改写」：修改一套只写一套（消灭写放大）；不同套房各写各的文件
+/// （并发互不覆盖，根治此前实测的「删 7 套账本残留 3 套」）；删除整套 = 删 h/<房号>/ 目录一步到位。
+/// v1.42 语义保持：云端对象不存在（HTTP 404）与「读失败（网络/服务异常）」必须严格区分，
+/// 读失败绝不能被当成「云端没有房源」而误删本地。
 struct CosObjectNotFoundError: Error, LocalizedError {
     let path: String
     var errorDescription: String? { "云端对象不存在: \(path)" }
 }
 
 enum CloudHouseSync {
-    static let accountPath = "h/_houses.json"
+    /// 单套账本对象路径（媒体与账本同目录）
+    static func recordPath(roomKey: String) -> String {
+        "h/\(roomKey)/info.json"
+    }
 
     static func record(from house: House, username: String) -> CloudHouseRecord {
         CloudHouseRecord(
@@ -3164,46 +3189,85 @@ enum CloudHouseSync {
         )
     }
 
-    /// 拉取云端账本。
-    /// v1.42：仅「对象确实不存在(404)」返回空数组（首次使用/从未上传）；网络、HTTP 非 404、
-    /// 解析失败一律 throw——读失败必须报「同步失败」，绝不能再被当成「云端没有房源」而误删本地。
+    /// 拉取云端账本（全量）：
+    /// 1) 列 h/ 根下的房号目录（delimiter "/"，只收「h/<房号>/」形式，根下散文件如旧 _houses.json 忽略）；
+    /// 2) 并发 GET 每套 info.json；
+    /// 3) 某套无 info.json（404）→ 该套无记录，跳过；网络、HTTP 非 404、解析失败一律 throw。
+    /// v1.42 语义：列表/读取失败必须报「同步失败」，绝不能被当成「云端没有房源」而误删本地。
     static func fetchAll(config: CosConfig) async throws -> [CloudHouseRecord] {
-        let data: Data
-        do {
-            data = try await CosUploader.fetchObjectData(path: accountPath, config: config)
-        } catch let e as CosObjectNotFoundError {
-            return []
+        let prefix = "h/"
+        let objects = try await CosUploader.listObjects(prefix: prefix, delimiter: "/", config: config)
+        var roomKeys: [String] = []
+        for obj in objects {
+            var name = obj.name
+            guard name.hasPrefix(prefix) else { continue }
+            name.removeFirst(prefix.count)
+            guard name.hasSuffix("/") else { continue }   // 目录子项；忽略 h/ 根下散文件（旧 _houses.json 等）
+            name.removeLast()
+            guard !name.isEmpty else { continue }
+            guard !name.hasPrefix("_") else { continue }   // 跳过系统保留目录（_verify 等）
+            roomKeys.append(name)
         }
-        guard let arr = try? JSONDecoder().decode([CloudHouseRecord].self, from: data) else {
-            throw NSError(domain: "CloudHouseSync", code: -1, userInfo: [NSLocalizedDescriptionKey: "云端房源账本解析失败（格式异常）"])
+        var records: [CloudHouseRecord] = []
+        try await withThrowingTaskGroup(of: CloudHouseRecord?.self) { group in
+            for rk in roomKeys {
+                group.addTask {
+                    let data: Data
+                    do {
+                        data = try await CosUploader.fetchObjectData(path: recordPath(roomKey: rk), config: config)
+                    } catch let e as CosObjectNotFoundError {
+                        return nil   // 该套无账本记录 → 跳过
+                    }
+                    guard let rec = try? JSONDecoder().decode(CloudHouseRecord.self, from: data) else {
+                        throw NSError(domain: "CloudHouseSync", code: -1, userInfo: [NSLocalizedDescriptionKey: "云端房源账本解析失败：\(rk)/info.json 格式异常"])
+                    }
+                    return rec
+                }
+            }
+            for try await rec in group {
+                if let rec { records.append(rec) }
+            }
         }
-        return arr
+        return records
     }
 
-    /// 覆盖写整个账本
+    /// 批量写账本（全量恢复/同步聚合等场景）：逐套并发覆盖写各自 info.json。
+    /// 同房号覆盖写为对象级原子（COS PUT），并发不互相覆盖。
     static func uploadRecords(_ records: [CloudHouseRecord], config: CosConfig) async throws {
-        let data = try JSONEncoder().encode(records)
-        try await CosUploader.upload(data: data, to: accountPath, contentType: "application/json", config: config)
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            for rec in records {
+                group.addTask {
+                    try await upload(record: rec, config: config)
+                }
+            }
+            try await group.waitForAll()
+        }
     }
 
-    /// 上传单个房源（读改写：同房号覆盖）
+    /// 拉取单套账本（404 → nil；网络/解析失败 throw）——详情页等只关心单套的场景，避免全量 list+GET
+    static func fetchOne(roomKey: String, config: CosConfig) async throws -> CloudHouseRecord? {
+        do {
+            let data = try await CosUploader.fetchObjectData(path: recordPath(roomKey: roomKey), config: config)
+            return try JSONDecoder().decode(CloudHouseRecord.self, from: data)
+        } catch let e as CosObjectNotFoundError {
+            return nil
+        }
+    }
+
+    /// 上传单个房源（同房号覆盖写，只写这一套）
     static func uploadOne(house: House, username: String, config: CosConfig) async throws {
         try await upload(record: record(from: house, username: username), config: config)
     }
 
-    /// 上传单条记录（读改写：同房号覆盖）
+    /// 上传单条记录（覆盖写单套 info.json，不再读改写全量账本）
     static func upload(record: CloudHouseRecord, config: CosConfig) async throws {
-        var recs = try await fetchAll(config: config)
-        recs.removeAll { $0.roomKey == record.roomKey }
-        recs.append(record)
-        try await uploadRecords(recs, config: config)
+        let data = try JSONEncoder().encode(record)
+        try await CosUploader.upload(data: data, to: recordPath(roomKey: record.roomKey), contentType: "application/json", config: config)
     }
 
-    /// 删除云端某房
+    /// 删除云端某房账本（info.json；整套目录删除由 deleteHouseRemoteFolder 一并处理媒体+账本）
     static func delete(roomKey: String, config: CosConfig) async throws {
-        var recs = try await fetchAll(config: config)
-        recs.removeAll { $0.roomKey == roomKey }
-        try await uploadRecords(recs, config: config)
+        try? await CloudBackupService.deleteRemoteObject(name: recordPath(roomKey: roomKey), config: config)
     }
 }
 

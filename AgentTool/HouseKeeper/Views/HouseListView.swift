@@ -225,10 +225,14 @@ struct HouseListView: View {
                 }
             }
             // v1.16 需求2：分享错误 / 批量结果提示（单行文本，独立 alert）
-            .alert("提示", isPresented: $showInfoAlert) {
-                Button("好", role: .cancel) {}
-            } message: {
-                Text(infoMessage)
+            // v1.71（#95）：提示改由 MainTabView 的 GlobalAlertOverlay 全局呈现——
+            // 此前挂在房源页，离开房源板块后「好」按钮被禁用变灰只能重启；现在任何页面都能点。
+            .onChange(of: showInfoAlert) { _, shown in
+                if shown {
+                    let msg = infoMessage
+                    showInfoAlert = false   // 本地状态立即复位（全局已接管呈现）
+                    GlobalAlertCenter.shared.show(msg)
+                }
             }
             // v1.40 第11点：同步变化确认——先展示变化详情，确认后才应用
             .alert("发现云端变化", isPresented: $showSyncConfirm) {
@@ -283,6 +287,24 @@ struct HouseListView: View {
             // v1.16 需求2：删除确认——复刻 DealsView 已验证可用的模式：独立 alert + 真 @State Bool 绑定，
             // 挂在本链最末（最后挂载优先响应），避免 iOS 17 swipeActions 手势拦截 confirmationDialog / 自定义 Binding 失效的问题
             // v1.36 需求1：删除改为彻底删除（不再进回收站）
+            // v1.71（#94）：同步任务横幅自动收起兜底 + 最小化状态复位——
+            //   1) 新任务出现（id 变化）→ 复位最小化，横幅重新显示（此前最小化过一次后新任务一直不出现）；
+            //   2) 任务结束（isRunning 变 false）→ 1.2s 后自动收起横幅并复位（任何调用点忘了 dismiss 都兜底）。
+            .onChange(of: syncCenter.task?.id) { _, _ in
+                syncTaskMinimized = false
+            }
+            .onChange(of: syncCenter.task?.isRunning) { _, running in
+                guard running == false else { return }
+                // 记录本次结束的任务 id，1.2s 后仅当仍是同一个任务时才收起——
+                // 防止「完成→新任务在 1.2s 窗口内开始」时误把新任务也 dismiss
+                let finishedID = syncCenter.task?.id
+                Task {
+                    try? await Task.sleep(nanoseconds: 1_200_000_000)
+                    guard let finishedID, syncCenter.task?.id == finishedID else { return }
+                    syncCenter.dismiss()
+                    syncTaskMinimized = false
+                }
+            }
             .alert("删除这套房源？", isPresented: $showDeleteConfirm) {
                 if isBatchDelete {
                     Button("彻底删除", role: .destructive) { batchSoftDelete() }
@@ -328,6 +350,9 @@ struct HouseListView: View {
             ctx.refresh(h, mergeChanges: true)
         }
         houses = all.filter { !$0.isTrashed }
+        // v1.71：存量无前缀媒体目录自动归一迁移（media/2059/ → media/1-2059/），幂等；修复
+        // v1.69 前编辑页新图落盘无前缀目录导致的上传失败、云端断媒体、刷新缺媒体死循环。
+        MediaStore.migrateUnprefixedHouseDirectories(houses: houses)
     }
 
     // MARK: - 统计（动态跟随当前筛选；v1.31：恢复 v1.29 显示方式 + 修复统计栏下沉）
@@ -891,7 +916,9 @@ struct HouseListView: View {
                     }
                 }
                 for (key, h) in localByKey where !cloudKeys.contains(key) {
-                    if h.cloudStatus == .both || h.cloudStatus == .cloud {
+                    // v1.71（方案 A）：云端账本为空（首次同步/云端被清空）时一律走「本地→云端」补传，
+                    // 不判定「云端已删」——否则本地双端房会被误判为云端已删而提示删本地（v1.42 事故模式）。
+                    if !recs.isEmpty && (h.cloudStatus == .both || h.cloudStatus == .cloud) {
                         deleted.append((key, h.displayRoomNo))
                     } else {
                         pushed.append((key, h.displayRoomNo))
@@ -1317,10 +1344,15 @@ struct HouseListView: View {
         // 云端同步删除（v1.69 规范）：单 Task 内**串行**逐套执行——此前每套一个并发 Task 同时
         // 读改写云端账本 h/_houses.json，并发互相覆盖导致删除不彻底（实测 7 套删完账本仍剩 3 套）。
         // 日志每套只记一条「彻底删除（本地+云端）」，不再出现「删媒体 + 删文件夹」两条混杂记录。
+        // v1.71：接入全局同步任务中心——顶部进度条实时显示「批量删除云端房源 N 套」逐套推进，
+        // 云端全部删完才弹完成提示（此前本地删完就弹「同步删除中」，云端过程无感知）。
         if let config = config, config.isValid {
             Task {
+                syncCenter.begin(title: "批量删除云端房源", roomKeys: deletedKeys, total: deletedKeys.count)
                 var failedKeys: [String] = []
+                var done = 0
                 for roomKey in deletedKeys {
+                    syncCenter.advance(done: done, current: roomKey)
                     do {
                         var objCount = 0
                         try await CloudBackupService.deleteHouseRemoteFolder(roomKey: roomKey, config: config, writeLog: false, reportCount: { objCount = $0 })
@@ -1330,11 +1362,22 @@ struct HouseListView: View {
                         failedKeys.append(roomKey)
                         BackupLogStore.log(category: "删除", action: "彻底删除（本地+云端）", result: "失败", detail: "\(roomKey) \(error.localizedDescription)", cloud: true)
                     }
+                    done += 1
+                    syncCenter.advance(done: done, current: roomKey)
                 }
+                syncCenter.finish(success: failedKeys.isEmpty)
+                var lines = ["云端删除完成：成功 \(deletedKeys.count - failedKeys.count) 套"]
                 if !failedKeys.isEmpty {
-                    await MainActor.run {
-                        infoMessage = "云端删除部分失败：\(failedKeys.joined(separator: "，"))。可在「设置 → 桶管理」手动清理剩余目录"; showInfoAlert = true
-                    }
+                    lines.append("失败 \(failedKeys.count) 套：\(failedKeys.joined(separator: "，"))（可在「设置 → 桶管理」手动清理）")
+                }
+                await MainActor.run {
+                    infoMessage = lines.joined(separator: "\n"); showInfoAlert = true
+                }
+                // v1.71：完成后进度条自动收起
+                Task {
+                    try? await Task.sleep(nanoseconds: 1_200_000_000)
+                    syncCenter.dismiss()
+                    syncTaskMinimized = false
                 }
             }
         } else {

@@ -86,6 +86,10 @@ struct HouseBatchImportView: View {
 
     // —— 通用 ——
     @State private var isImporting = false
+    // v1.71（#87/#97）：文档选择器延迟挂载——SwiftUI sheet 动画期间直接初始化
+    // UIDocumentPickerViewController（FileProvider 加载）会白屏数秒甚至卡死；先显示占位，
+    // 等 sheet 呈现稳定后再挂载真选择器，消除「打开选择框就白屏、要重启 App」。
+    @State private var pickerReady = false
     @State private var summary: BatchImportSummary?
     @State private var showSummary = false
     @State private var showError = false
@@ -120,17 +124,29 @@ struct HouseBatchImportView: View {
             }
         }
         .sheet(item: $activePicker) { target in
-            DocPicker(types: target.types) { url in
-                switch target {
-                case .csv: loadCsvFile(url)
-                case .zip:
-                    // v1.61：支持直接选文件夹（不压缩的媒体包）
-                    var isDir: ObjCBool = false
-                    FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir)
-                    if isDir.boolValue { parseFolder(url) } else { parseZip(url) }
+            Group {
+                if pickerReady {
+                    DocPicker(types: target.types) { url in
+                        switch target {
+                        case .csv: loadCsvFile(url)
+                        case .zip:
+                            // v1.61：支持直接选文件夹（不压缩的媒体包）
+                            var isDir: ObjCBool = false
+                            FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir)
+                            if isDir.boolValue { parseFolder(url) } else { parseZip(url) }
+                        }
+                    }
+                    .ignoresSafeArea()
+                } else {
+                    ProgressView("正在打开文件选择…")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .onAppear {
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                                pickerReady = true
+                            }
+                        }
                 }
             }
-            .ignoresSafeArea()
         }
         .alert("导入结果", isPresented: $showSummary) {
             Button("好", role: .cancel) {
