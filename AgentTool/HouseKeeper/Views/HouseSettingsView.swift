@@ -76,13 +76,16 @@ enum KeychainFix {
 /// 本文件保留远程配置（CosConfigView）、名片信息（ShareProfileView）、恢复列表（ConfigRestoreListView）、
 /// 钥匙串修复（KeychainFix）与配置备份（CosConfigBackup）等子页面与工具，供主设置页复用。
 
-/// 「备份」子文件夹总大小（数据库、Media/、二维码、分享缓存等都在这里）
+/// 数据文件夹总大小 = 「备份」子文件夹 + 「media」房源媒体文件夹（平级两个目录）。
+/// v1.40 起房源媒体独立到 Documents/media/（不再挂在备份/Media 下），旧实现只统计「备份」漏掉了整个媒体目录，统计偏小。
 func houseDocumentsSizeText() -> String {
     var total: Int64 = 0
-    if let enumerator = FileManager.default.enumerator(at: DataRoot.url(), includingPropertiesForKeys: [.fileSizeKey]) {
-        for case let url as URL in enumerator {
-            if let values = try? url.resourceValues(forKeys: [.fileSizeKey]), let size = values.fileSize {
-                total += Int64(size)
+    for root in [DataRoot.url(), MediaStore.mediaDirectory()] {
+        if let enumerator = FileManager.default.enumerator(at: root, includingPropertiesForKeys: [.fileSizeKey]) {
+            for case let url as URL in enumerator {
+                if let values = try? url.resourceValues(forKeys: [.fileSizeKey]), let size = values.fileSize {
+                    total += Int64(size)
+                }
             }
         }
     }

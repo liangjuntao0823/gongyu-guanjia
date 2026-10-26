@@ -46,6 +46,11 @@ struct HouseListView: View {
     @State private var infoMessage = ""
     // v1.40 第11点：同步先弹变化确认（预览 → 确认 → 应用）
     @State private var showSyncConfirm = false
+    // v1.68：云端媒体对账确认（先干跑列桶 → 弹确认 → 确认后才上传）+ 同步任务进度/最小化
+    @State private var showMediaSyncConfirm = false
+    @State private var pendingMediaSnaps: [PendingMediaHouseSnapshot] = []
+    @State private var syncTaskMinimized = false
+    @ObservedObject private var syncCenter = SyncTaskCenter.shared
     @State private var pendingSyncRecs: [CloudHouseRecord] = []
     @State private var pendingSyncAdded: [(roomNo: String, roomKey: String, mediaNames: [String])] = []
     @State private var pendingSyncUpdated: [(roomNo: String, byUser: String)] = []
@@ -132,6 +137,7 @@ struct HouseListView: View {
                 AppTheme.background.ignoresSafeArea()
 
                 VStack(spacing: 0) {
+                    syncTaskBanner
                     statsBar
                     searchBar
                     filterBar
@@ -232,6 +238,15 @@ struct HouseListView: View {
                 Button("取消", role: .cancel) {}
             } message: {
                 Text(syncChangeSummary())
+            }
+            // v1.68：云端媒体对账确认——干跑列桶后发现云端缺媒体，确认后才开始上传（不再静默后台跑）
+            .alert("确认补齐云端媒体", isPresented: $showMediaSyncConfirm) {
+                Button("开始补齐", role: .destructive) {
+                    Task { await runMediaUpload(snaps: pendingMediaSnaps, config: CosConfig.load(), ctx: houseModelContext) }
+                }
+                Button("取消", role: .cancel) { pendingMediaSnaps = [] }
+            } message: {
+                Text(mediaSyncConfirmSummary())
             }
             .sheet(item: $currentShareStep, onDismiss: {
                 // 上一张分享面板关闭后自动弹下一张；全部发完自动退出多选
@@ -872,10 +887,17 @@ struct HouseListView: View {
             }
             let hasChange = !added.isEmpty || !updated.isEmpty || !deleted.isEmpty || !pushed.isEmpty || !mediaRoomKeys.isEmpty
             guard hasChange else {
-                // v1.65：账本无变化时仍做「云端媒体对账」——本地有媒体但云端 h/<房号>/ 缺对象 → 自动补传并刷新分享页。
-                // 背景：同步只写账本不传媒体，恢复/导入后的媒体上不了云，「双端」名不副实；
-                // 已上传过的媒体不会重传（列桶比对，幂等），桶齐则直接提示「已刷新，无变化」。
-                await performCloudMediaReconcile(config: config, ctx: ctx)
+                // v1.65：账本无变化时做「云端媒体对账」——本地有媒体但云端 h/<房号>/ 缺对象 → 补齐媒体。
+                // v1.68：改为先「干跑」列桶比对（只查不传），得出待补列表 → 弹确认框，确认后才开始上传。
+                // 不再静默后台跑（用户看不到过程以为没反应）；上传过程走全局同步任务中心：
+                // 房源页顶部进度条 + 可最小化收起到「设置 → 待补传媒体」随时查看进度。
+                let pending = await preflightMediaSnapshots(config: config, ctx: ctx)
+                if pending.isEmpty {
+                    infoMessage = "已刷新，无变化"; showInfoAlert = true
+                    return
+                }
+                pendingMediaSnaps = pending
+                showMediaSyncConfirm = true
                 return
             }
             pendingSyncRecs = recs
@@ -890,65 +912,114 @@ struct HouseListView: View {
         }
     }
 
-    /// v1.65：云端媒体对账——本地有媒体、云端 h/<房号>/ 缺对象 → 全量幂等重传该套媒体并刷新分享页。
-    /// 用于同步「无变化」时的自动补齐（同步只写账本不传媒体的历史缺口），桶齐则提示无变化。
-    /// v1.67：在主线程把 House 的可跨线程数据提取成值快照（后台线程安全）
-    private func makePendingSnapshot(from h: House) -> PendingMediaHouseSnapshot {
-        let files = h.mediaItems.map { ShareMediaFile(name: $0.fileName, kind: $0.kind) }
-        let profile = CosUploader.loadShareProfile()
-        let info = ShareHouseInfo(
-            displayRoomNo: h.displayRoomNo, towerLabel: h.towerLabel,
-            layout: h.layout, statusLabel: h.status.label, priceText: h.priceText,
-            landlord: h.landlord, password: h.password, remark: h.remark,
-            name: profile.name, phone: profile.phone
-        )
-        return PendingMediaHouseSnapshot(roomKey: h.mediaRoomKey, displayRoomNo: h.displayRoomNo, files: files, info: info)
-    }
-
-    private func performCloudMediaReconcile(config: CosConfig, ctx: ModelContext) async {
-        // v1.67：SwiftData 模型属性只能在主线程访问——先把待对账房源的数据提取成纯值快照，
-        // 后台循环只做列桶比对和网络上传，不再触碰模型对象（v1.66「点击没反应」即此崩溃）
+    /// v1.68：云端媒体对账「干跑」——只列桶比对，不传任何东西，返回「云端缺媒体」的房源快照列表。
+    /// 供同步无变化时弹确认框前预检；列桶失败视为待补（确认后可重试，不丢数据）。
+    private func preflightMediaSnapshots(config: CosConfig, ctx: ModelContext) async -> [PendingMediaHouseSnapshot] {
         var snapshots: [PendingMediaHouseSnapshot] = []
         await MainActor.run {
             let local = (try? ctx.fetch(FetchDescriptor<House>())) ?? []
             snapshots = local.filter { !$0.isTrashed && $0.cloudStatus != .cloud && !$0.mediaItems.isEmpty }.map { makePendingSnapshot(from: $0) }
         }
-        var uploaded: [String] = []
-        var failed: [String] = []
+        var pending: [PendingMediaHouseSnapshot] = []
         for snap in snapshots {
-            let cloudNames: Set<String>
             do {
                 let objs = try await CosUploader.listObjects(prefix: "h/\(snap.roomKey)/", config: config)
-                cloudNames = Set(objs.map { Self.mediaNormKey(($0.name as NSString).lastPathComponent) })
+                let cloudNames = Set(objs.map { Self.mediaNormKey(($0.name as NSString).lastPathComponent) })
+                let localNames = Set(snap.files.map { Self.mediaNormKey($0.name) })
+                if !localNames.isSubset(of: cloudNames) { pending.append(snap) }
             } catch {
-                failed.append(snap.displayRoomNo)
-                continue
+                pending.append(snap)
             }
-            let localNames = Set(snap.files.map { Self.mediaNormKey($0.name) })
-            guard !localNames.isSubset(of: cloudNames) else { continue }
+        }
+        return pending
+    }
+
+    /// v1.68：按确认后的快照列表执行媒体补传，走全局同步任务中心（进度条 / 最小化 / 待补传页可见）。
+    /// 幂等覆盖+刷新分享页（与批量导入同机制）；失败保留在补传队列，下次刷新对账再补。
+    private func runMediaUpload(snaps: [PendingMediaHouseSnapshot], config: CosConfig?, ctx: ModelContext?) async {
+        guard !snaps.isEmpty, let config else { return }
+        let total = snaps.reduce(0) { $0 + $1.files.count }
+        syncCenter.begin(title: "补齐云端媒体", roomKeys: snaps.map { $0.displayRoomNo }, total: total)
+        var uploaded: [String] = []
+        var failed: [String] = []
+        var done = 0
+        for snap in snaps {
+            syncCenter.advance(done: done, current: snap.displayRoomNo)
             do {
                 _ = try await CosUploader.autoRegenerateMaskedShare(mediaFiles: snap.files, roomKey: snap.roomKey, info: snap.info, config: config)
                 uploaded.append(snap.displayRoomNo)
             } catch {
                 failed.append(snap.displayRoomNo)
             }
+            done += snap.files.count
+            syncCenter.advance(done: done, current: snap.displayRoomNo)
         }
-        await MainActor.run {
-            if uploaded.isEmpty && failed.isEmpty {
-                infoMessage = "已刷新，无变化"
-            } else {
-                var lines: [String] = []
-                if !uploaded.isEmpty { lines.append("已刷新，补齐云端媒体 \(uploaded.count) 套：" + uploaded.joined(separator: "，")) }
-                if !failed.isEmpty { lines.append("补传失败（下次刷新自动重试）：" + failed.joined(separator: "，")) }
-                infoMessage = lines.joined(separator: "\n")
-            }
-            showInfoAlert = true
-        }
+        syncCenter.finish(success: failed.isEmpty)
+        var lines: [String] = []
+        if !uploaded.isEmpty { lines.append("已补齐云端媒体 \(uploaded.count) 套：" + uploaded.joined(separator: "，")) }
+        if !failed.isEmpty { lines.append("补传失败（可稍后再刷新重试）：" + failed.joined(separator: "，")) }
+        infoMessage = lines.isEmpty ? "没有需要补传的媒体" : lines.joined(separator: "\n")
+        showInfoAlert = true
         if !uploaded.isEmpty {
             BackupLogStore.log(category: "同步", action: "补齐云端媒体（本地→云端）", result: "成功", detail: uploaded.joined(separator: "，"), cloud: true)
         }
         if !failed.isEmpty {
             BackupLogStore.log(category: "同步", action: "补齐云端媒体（本地→云端）", result: "失败", detail: failed.joined(separator: "，"), cloud: true)
+        }
+    }
+
+    /// v1.68：媒体对账确认框详情——列出每套缺几个媒体
+    private func mediaSyncConfirmSummary() -> String {
+        guard !pendingMediaSnaps.isEmpty else { return "" }
+        var lines = ["云端缺失媒体 \(pendingMediaSnaps.count) 套，确认后开始补齐："]
+        lines += pendingMediaSnaps.map { "\($0.displayRoomNo)（缺 \($0.files.count) 个媒体）" }
+        return lines.joined(separator: "\n")
+    }
+
+    /// v1.68：进行中的同步/补传任务进度条（房源页顶部，可「最小化」收起到设置-待补传媒体页查看）
+    @ViewBuilder
+    private var syncTaskBanner: some View {
+        if let t = syncCenter.task, !syncTaskMinimized {
+            VStack(spacing: 8) {
+                HStack {
+                    Label(t.title, systemImage: "arrow.triangle.2.circlepath")
+                        .font(.subheadline.weight(.semibold))
+                    Spacer()
+                    if t.isRunning {
+                        Button { syncTaskMinimized = true } label: {
+                            Label("最小化", systemImage: "minus.circle")
+                                .font(.footnote)
+                        }
+                    } else {
+                        Button {
+                            syncCenter.dismiss()
+                            syncTaskMinimized = false
+                        } label: {
+                            Label("完成", systemImage: "checkmark.circle")
+                                .font(.footnote)
+                        }
+                    }
+                }
+                ProgressView(value: t.fraction)
+                HStack {
+                    if t.isRunning {
+                        Text("\(t.done)/\(t.total) 个媒体 · 正在处理 \(t.current)")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    } else {
+                        Text(t.success ? "全部完成" : "完成，部分失败")
+                            .font(.caption2)
+                            .foregroundColor(t.success ? .green : .orange)
+                    }
+                    Spacer()
+                    Text("\(Int(t.fraction * 100))%")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .background(Color(.secondarySystemBackground))
         }
     }
 
@@ -1094,10 +1165,9 @@ struct HouseListView: View {
                     // 此前同步只写账本不传媒体，恢复/导入后媒体永远上不了云，「双端」名不副实；
                     // 上传失败的媒体下次「已刷新无变化」会走云端媒体对账再补。
                     // v1.67：只用主线程提取的值快照，后台不再访问 SwiftData 模型。
-                    for snap in pushedMediaHouses {
-                        _ = Task {
-                            _ = try? await CosUploader.autoRegenerateMaskedShare(mediaFiles: snap.files, roomKey: snap.roomKey, info: snap.info, config: config)
-                        }
+                    // v1.68：上传纳入全局同步任务中心（房源页进度条 + 可最小化到待补传媒体页查看）。
+                    if !pushedMediaHouses.isEmpty {
+                        Task { await runMediaUpload(snaps: pushedMediaHouses, config: config, ctx: ctx) }
                     }
                     BackupLogStore.log(category: "同步", action: "补传房源（本地→云端）", result: "成功", detail: pushedRoomNo.joined(separator: "，"), cloud: true)
                 } catch {

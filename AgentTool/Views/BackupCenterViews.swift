@@ -1083,12 +1083,13 @@ private struct BackupLogRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack {
+                let isFail = ["失败", "错误", "异常", "报错", "超时", "中断", "拒绝"].contains { entry.result.contains($0) }
                 Text(entry.category)
                     .font(.caption.weight(.semibold))
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
-                    .background(entry.result == "成功" ? Color.green.opacity(0.15) : Color.red.opacity(0.15))
-                    .foregroundColor(entry.result == "成功" ? .green : .red)
+                    .background(isFail ? Color.red.opacity(0.15) : Color.green.opacity(0.15))
+                    .foregroundColor(isFail ? .red : .green)
                     .clipShape(Capsule())
                 Text(entry.action)
                     .font(.subheadline.weight(.medium))
@@ -1123,12 +1124,15 @@ private struct CloudOpRow: View {
         VStack(alignment: .leading, spacing: 3) {
             HStack {
                 if !cat.isEmpty {
+                    // v1.68：云端日志结果字段不总是「成功/失败」二字（如「补传7套」「删除房源」等动作详情），
+                    // 颜色改为「明确失败词才标红」，其余（成功/动作详情/空结果）统一标绿，不再误标。
+                    let isFail = ["失败", "错误", "异常", "报错", "超时", "中断", "拒绝"].contains { res.contains($0) }
                     Text(cat)
                         .font(.caption.weight(.semibold))
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
-                        .background(res == "成功" ? Color.green.opacity(0.15) : Color.red.opacity(0.15))
-                        .foregroundColor(res == "成功" ? .green : .red)
+                        .background(isFail ? Color.red.opacity(0.15) : Color.green.opacity(0.15))
+                        .foregroundColor(isFail ? .red : .green)
                         .clipShape(Capsule())
                 }
                 if !act.isEmpty { Text(act).font(.subheadline.weight(.medium)) }

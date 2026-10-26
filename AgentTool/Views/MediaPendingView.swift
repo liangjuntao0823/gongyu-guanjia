@@ -7,9 +7,44 @@ struct MediaPendingView: View {
     @State private var isRetrying = false
     @State private var showResult = false
     @State private var resultText = ""
+    // v1.68：进行中的同步/补传任务（房源页最小化后在这里随时查看进度）
+    @ObservedObject private var syncCenter = SyncTaskCenter.shared
 
     var body: some View {
         List {
+            if let t = syncCenter.task {
+                Section("进行中的同步任务") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Label(t.title, systemImage: "arrow.triangle.2.circlepath")
+                                .font(.subheadline.weight(.semibold))
+                            Spacer()
+                            if t.isRunning {
+                                Text("进行中").font(.caption).foregroundColor(.blue)
+                            } else {
+                                Text(t.success ? "已完成" : "部分失败")
+                                    .font(.caption)
+                                    .foregroundColor(t.success ? .green : .orange)
+                            }
+                        }
+                        ProgressView(value: t.fraction)
+                        HStack {
+                            if t.isRunning {
+                                Text("\(t.done)/\(t.total) 个媒体 · 正在处理 \(t.current)")
+                                    .font(.caption2).foregroundColor(.secondary)
+                            } else {
+                                Text("共 \(t.total) 个媒体").font(.caption2).foregroundColor(.secondary)
+                            }
+                            Spacer()
+                            Text("\(Int(t.fraction * 100))%")
+                                .font(.caption2).foregroundColor(.secondary)
+                        }
+                        Text("参与套房：\(t.roomKeys.joined(separator: "、"))")
+                            .font(.caption2).foregroundColor(.secondary)
+                    }
+                    .padding(.vertical, 4)
+                }
+            }
             if items.isEmpty {
                 Section {
                     HStack {
