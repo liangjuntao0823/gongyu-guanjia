@@ -313,6 +313,14 @@ enum MediaStore {
 /// 在「备份」子文件夹生成「备份说明.txt」（只写一次），引导用户：备份 = 复制「备份」子文件夹，恢复 = 放回原位。
 /// v1.40 第9点：根目录重建后更新说明——media 独立在「公寓管家」根目录，与「备份」平级
 enum BackupGuide {
+    /// v1.74：清理本地遗留的旧单文件账本（media/_houses.json）——
+    /// v1.71 改一房一账本（media/<房号>/info.json）后该文件不再写入；历史版本未写过本地单文件账本，
+    /// 此函数仅为兜底：若文件 App 目录或旧备份迁移带入该文件，启动即删，避免与新房号账本并存造成误解。
+    static func cleanupLegacyLedger() {
+        let legacy = mediaDirectory().appendingPathComponent("_houses.json")
+        try? FileManager.default.removeItem(at: legacy)
+    }
+
     static func ensureExists() {
         let url = DataRoot.url().appendingPathComponent("备份说明.txt")
         // v1.40：文件不存在，或还是旧结构说明（不含「media/」标记）→ 重写为新版说明

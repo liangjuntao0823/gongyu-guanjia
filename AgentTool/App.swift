@@ -29,6 +29,9 @@ struct AgentToolApp: App {
         // v1.40 第9点：本地根目录重建——启动时把 备份/Media 整体迁移到 Documents/media/（幂等，不丢数据）
         MediaStore.migrateLegacyMediaIfNeeded()
 
+        // v1.74：清理本地遗留旧单文件账本（media/_houses.json 兜底；一房一账本后不再需要）
+        MediaStore.cleanupLegacyLedger()
+
         // v1.13 需求16：启动时执行一次性目录迁移——旧分区备份 JSON 迁入 备份/旧版备份/，COS 配置 json 迁入 备份/CosConfig/
         DataBackupManager.migrateLegacyDirectories()
 
