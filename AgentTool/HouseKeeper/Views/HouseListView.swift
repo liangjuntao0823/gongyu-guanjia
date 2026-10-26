@@ -9,6 +9,16 @@ struct HouseListView: View {
 
     static let houseStoreChanged = Notification.Name("houseStoreChanged")
 
+    /// v1.67：后台线程安全的媒体对账快照——SwiftData @Model 属性（mediaItems 等）只能在
+    /// 主线程/模型上下文访问，跨线程读会崩溃（v1.66 刷新「点击没反应」根因）。
+    /// 因此先在主线程把需要的数据提取成纯值，后台只做网络请求。
+    private struct PendingMediaHouseSnapshot {
+        let roomKey: String
+        let displayRoomNo: String
+        let files: [ShareMediaFile]
+        let info: ShareHouseInfo
+    }
+
     @State private var searchText = ""
     @State private var towerFilter: Int? = nil      // nil = 全部
     @State private var statusFilter: HouseStatus? = .available   // 首页默认显示待租房源
@@ -882,38 +892,45 @@ struct HouseListView: View {
 
     /// v1.65：云端媒体对账——本地有媒体、云端 h/<房号>/ 缺对象 → 全量幂等重传该套媒体并刷新分享页。
     /// 用于同步「无变化」时的自动补齐（同步只写账本不传媒体的历史缺口），桶齐则提示无变化。
+    /// v1.67：在主线程把 House 的可跨线程数据提取成值快照（后台线程安全）
+    private func makePendingSnapshot(from h: House) -> PendingMediaHouseSnapshot {
+        let files = h.mediaItems.map { ShareMediaFile(name: $0.fileName, kind: $0.kind) }
+        let profile = CosUploader.loadShareProfile()
+        let info = ShareHouseInfo(
+            displayRoomNo: h.displayRoomNo, towerLabel: h.towerLabel,
+            layout: h.layout, statusLabel: h.status.label, priceText: h.priceText,
+            landlord: h.landlord, password: h.password, remark: h.remark,
+            name: profile.name, phone: profile.phone
+        )
+        return PendingMediaHouseSnapshot(roomKey: h.mediaRoomKey, displayRoomNo: h.displayRoomNo, files: files, info: info)
+    }
+
     private func performCloudMediaReconcile(config: CosConfig, ctx: ModelContext) async {
-        var houses: [House] = []
+        // v1.67：SwiftData 模型属性只能在主线程访问——先把待对账房源的数据提取成纯值快照，
+        // 后台循环只做列桶比对和网络上传，不再触碰模型对象（v1.66「点击没反应」即此崩溃）
+        var snapshots: [PendingMediaHouseSnapshot] = []
         await MainActor.run {
             let local = (try? ctx.fetch(FetchDescriptor<House>())) ?? []
-            houses = local.filter { !$0.isTrashed && $0.cloudStatus != .cloud && !$0.mediaItems.isEmpty }
+            snapshots = local.filter { !$0.isTrashed && $0.cloudStatus != .cloud && !$0.mediaItems.isEmpty }.map { makePendingSnapshot(from: $0) }
         }
         var uploaded: [String] = []
         var failed: [String] = []
-        for h in houses {
+        for snap in snapshots {
             let cloudNames: Set<String>
             do {
-                let objs = try await CosUploader.listObjects(prefix: "h/\(h.mediaRoomKey)/", config: config)
+                let objs = try await CosUploader.listObjects(prefix: "h/\(snap.roomKey)/", config: config)
                 cloudNames = Set(objs.map { Self.mediaNormKey(($0.name as NSString).lastPathComponent) })
             } catch {
-                failed.append(h.displayRoomNo)
+                failed.append(snap.displayRoomNo)
                 continue
             }
-            let localNames = Set(h.mediaItems.map { Self.mediaNormKey($0.fileName) })
+            let localNames = Set(snap.files.map { Self.mediaNormKey($0.name) })
             guard !localNames.isSubset(of: cloudNames) else { continue }
-            let files = h.mediaItems.map { ShareMediaFile(name: $0.fileName, kind: $0.kind) }
-            let profile = CosUploader.loadShareProfile()
-            let info = ShareHouseInfo(
-                displayRoomNo: h.displayRoomNo, towerLabel: h.towerLabel,
-                layout: h.layout, statusLabel: h.status.label, priceText: h.priceText,
-                landlord: h.landlord, password: h.password, remark: h.remark,
-                name: profile.name, phone: profile.phone
-            )
             do {
-                _ = try await CosUploader.autoRegenerateMaskedShare(mediaFiles: files, roomKey: h.mediaRoomKey, info: info, config: config)
-                uploaded.append(h.displayRoomNo)
+                _ = try await CosUploader.autoRegenerateMaskedShare(mediaFiles: snap.files, roomKey: snap.roomKey, info: snap.info, config: config)
+                uploaded.append(snap.displayRoomNo)
             } catch {
-                failed.append(h.displayRoomNo)
+                failed.append(snap.displayRoomNo)
             }
         }
         await MainActor.run {
@@ -971,7 +988,7 @@ struct HouseListView: View {
             var deletedRoomNo: [String] = []
             var pushedRoomNo: [String] = []
             var pushedRecords: [CloudHouseRecord] = []   // v1.64：补传聚合
-            var pushedMediaHouses: [House] = []   // v1.65：补传后需上传媒体的房源
+            var pushedMediaHouses: [PendingMediaHouseSnapshot] = []   // v1.67：补传后需上传媒体的快照（主线程提取，后台只传值）
             var mediaDiffRoomNo: [String] = []
             var mediaRoomKeys: [(roomKey: String, roomNo: String)] = []   // v1.42：带房号
             await MainActor.run {
@@ -1062,29 +1079,24 @@ struct HouseListView: View {
                     try await CloudHouseSync.uploadRecords(all, config: config)
                     await MainActor.run {
                         let local = (try? ctx.fetch(FetchDescriptor<House>())) ?? []
-                        var mediaHouses: [House] = []
+                        var snapshots: [PendingMediaHouseSnapshot] = []
                         for h in local where !h.isTrashed && pushedRecords.contains(where: { $0.roomKey == h.mediaRoomKey }) {
                             h.cloudStatus = .both
-                            if !h.mediaItems.isEmpty { mediaHouses.append(h) }
+                            if !h.mediaItems.isEmpty {
+                                snapshots.append(makePendingSnapshot(from: h))
+                            }
                         }
-                        pushedMediaHouses = mediaHouses
+                        pushedMediaHouses = snapshots
                         try? ctx.save()
                         reloadHouses()
                     }
                     // v1.65：补传账本后同步上传本地媒体（幂等覆盖+刷新分享页，与批量导入同机制）。
                     // 此前同步只写账本不传媒体，恢复/导入后媒体永远上不了云，「双端」名不副实；
                     // 上传失败的媒体下次「已刷新无变化」会走云端媒体对账再补。
-                    for h in pushedMediaHouses {
-                        let files = h.mediaItems.map { ShareMediaFile(name: $0.fileName, kind: $0.kind) }
-                        let profile = CosUploader.loadShareProfile()
-                        let info = ShareHouseInfo(
-                            displayRoomNo: h.displayRoomNo, towerLabel: h.towerLabel,
-                            layout: h.layout, statusLabel: h.status.label, priceText: h.priceText,
-                            landlord: h.landlord, password: h.password, remark: h.remark,
-                            name: profile.name, phone: profile.phone
-                        )
+                    // v1.67：只用主线程提取的值快照，后台不再访问 SwiftData 模型。
+                    for snap in pushedMediaHouses {
                         _ = Task {
-                            _ = try? await CosUploader.autoRegenerateMaskedShare(mediaFiles: files, roomKey: h.mediaRoomKey, info: info, config: config)
+                            _ = try? await CosUploader.autoRegenerateMaskedShare(mediaFiles: snap.files, roomKey: snap.roomKey, info: snap.info, config: config)
                         }
                     }
                     BackupLogStore.log(category: "同步", action: "补传房源（本地→云端）", result: "成功", detail: pushedRoomNo.joined(separator: "，"), cloud: true)
