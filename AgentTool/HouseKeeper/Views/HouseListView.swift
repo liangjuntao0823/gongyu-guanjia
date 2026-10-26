@@ -912,6 +912,7 @@ struct HouseListView: View {
             var updatedRoomNo: [String] = []
             var deletedRoomNo: [String] = []
             var pushedRoomNo: [String] = []
+            var pushedRecords: [CloudHouseRecord] = []   // v1.64：补传聚合
             var mediaDiffRoomNo: [String] = []
             var mediaRoomKeys: [(roomKey: String, roomNo: String)] = []   // v1.42：带房号
             await MainActor.run {
@@ -979,13 +980,42 @@ struct HouseListView: View {
                         deletedCount += 1
                         deletedRoomNo.append(h.displayRoomNo)
                     } else {
-                        pushHouseToCloud(h)
+                        // v1.64：不再逐个并发 pushHouseToCloud（并发读改写同一账本文件会互相覆盖、
+                        // 云端丢失房源）——先收集，同步完成后一次性聚合写回云端账本
+                        pushedRecords.append(CloudHouseSync.record(from: h, username: CloudUser.username))
                         pushedCount += 1
                         pushedRoomNo.append(h.displayRoomNo)
                     }
                 }
                 try? ctx.save()
                 reloadHouses()
+            }
+            // v1.64：本地补传聚合为一次全量账本写入（串行）——此前 7 个异步 Task 并发对 h/_houses.json
+            // 做「读改写」，最后一次写回会覆盖其他并发任务的结果，导致云端只剩最后一条（实测只剩 2309）。
+            // 聚合写 + 成功后统一把补传房源标「双端」，失败保持「仅本地」并提示，可下次重试。
+            if !pushedRecords.isEmpty {
+                do {
+                    var all = recs
+                    for rec in pushedRecords {
+                        all.removeAll { $0.roomKey == rec.roomKey }
+                        all.append(rec)
+                    }
+                    try await CloudHouseSync.uploadRecords(all, config: config)
+                    await MainActor.run {
+                        let local = (try? ctx.fetch(FetchDescriptor<House>())) ?? []
+                        for h in local where !h.isTrashed && pushedRecords.contains(where: { $0.roomKey == h.mediaRoomKey }) {
+                            h.cloudStatus = .both
+                        }
+                        try? ctx.save()
+                        reloadHouses()
+                    }
+                    BackupLogStore.log(category: "同步", action: "补传房源（本地→云端）", result: "成功", detail: pushedRoomNo.joined(separator: "，"), cloud: true)
+                } catch {
+                    await MainActor.run {
+                        infoMessage = "补传云端失败：\(error.localizedDescription)。本地房源保持「仅本地」，可稍后重新同步补传"; showInfoAlert = true
+                    }
+                    BackupLogStore.log(category: "同步", action: "补传房源（本地→云端）", result: "失败", detail: error.localizedDescription, cloud: true)
+                }
             }
             var mediaSaved = 0
             if !mediaRoomKeys.isEmpty {

@@ -3222,7 +3222,15 @@ extension CosUploader {
     ///     同步完成后本地记录 = 账本名单，下次同步零差异；
     ///   - 本地磁盘已有账本名（或桶同名对象）→ 跳过（幂等，不重复下载）。
     static func downloadHouseMedia(roomKey: String, expectedNames: [String], config: CosConfig, progress: ((Double) -> Void)? = nil) async throws -> [(fileName: String, kind: String)] {
-        let objs = try await listObjects(prefix: "h/\(roomKey)/", config: config)
+        var objs = try await listObjects(prefix: "h/\(roomKey)/", config: config)
+        // v1.64：兼容 v1.62 及更早版本上传的无前缀媒体目录（h/2309上/）——v1.63 起目录统一带
+        // 1-/2- 前缀，旧媒体若还在无前缀目录，列对象为空时回退剥前缀再列，避免「本地缺媒体」一直循环
+        if objs.isEmpty {
+            let stripped = roomKey.hasPrefix("1-") || roomKey.hasPrefix("2-") ? String(roomKey.dropFirst(2)) : roomKey
+            if stripped != roomKey {
+                objs = try await listObjects(prefix: "h/\(stripped)/", config: config)
+            }
+        }
         // 桶对象名（归一化 key：去扩展名小写）→ 对象完整路径；只收媒体对象（图片/视频），跳过首帧图/分享页/cover
         var remotePathByNormKey: [String: String] = [:]
         for obj in objs {
