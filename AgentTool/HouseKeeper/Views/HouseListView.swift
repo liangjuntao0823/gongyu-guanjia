@@ -862,7 +862,10 @@ struct HouseListView: View {
             }
             let hasChange = !added.isEmpty || !updated.isEmpty || !deleted.isEmpty || !pushed.isEmpty || !mediaRoomKeys.isEmpty
             guard hasChange else {
-                infoMessage = "已刷新，无变化"; showInfoAlert = true
+                // v1.65：账本无变化时仍做「云端媒体对账」——本地有媒体但云端 h/<房号>/ 缺对象 → 自动补传并刷新分享页。
+                // 背景：同步只写账本不传媒体，恢复/导入后的媒体上不了云，「双端」名不副实；
+                // 已上传过的媒体不会重传（列桶比对，幂等），桶齐则直接提示「已刷新，无变化」。
+                await performCloudMediaReconcile(config: config, ctx: ctx)
                 return
             }
             pendingSyncRecs = recs
@@ -874,6 +877,61 @@ struct HouseListView: View {
         } catch {
             infoMessage = "同步失败：\(error.localizedDescription)"; showInfoAlert = true
             BackupLogStore.log(category: "同步", action: "同步房源（云端→本地）", result: "失败", detail: error.localizedDescription, cloud: true)
+        }
+    }
+
+    /// v1.65：云端媒体对账——本地有媒体、云端 h/<房号>/ 缺对象 → 全量幂等重传该套媒体并刷新分享页。
+    /// 用于同步「无变化」时的自动补齐（同步只写账本不传媒体的历史缺口），桶齐则提示无变化。
+    private func performCloudMediaReconcile(config: CosConfig, ctx: ModelContext) async {
+        var houses: [House] = []
+        await MainActor.run {
+            let local = (try? ctx.fetch(FetchDescriptor<House>())) ?? []
+            houses = local.filter { !$0.isTrashed && $0.cloudStatus != .cloud && !$0.mediaItems.isEmpty }
+        }
+        var uploaded: [String] = []
+        var failed: [String] = []
+        for h in houses {
+            let cloudNames: Set<String>
+            do {
+                let objs = try await CosUploader.listObjects(prefix: "h/\(h.mediaRoomKey)/", config: config)
+                cloudNames = Set(objs.map { Self.mediaNormKey(($0.name as NSString).lastPathComponent) })
+            } catch {
+                failed.append(h.displayRoomNo)
+                continue
+            }
+            let localNames = Set(h.mediaItems.map { Self.mediaNormKey($0.fileName) })
+            guard !localNames.isSubset(of: cloudNames) else { continue }
+            let files = h.mediaItems.map { ShareMediaFile(name: $0.fileName, kind: $0.kind) }
+            let profile = CosUploader.loadShareProfile()
+            let info = ShareHouseInfo(
+                displayRoomNo: h.displayRoomNo, towerLabel: h.towerLabel,
+                layout: h.layout, statusLabel: h.status.label, priceText: h.priceText,
+                landlord: h.landlord, password: h.password, remark: h.remark,
+                name: profile.name, phone: profile.phone
+            )
+            do {
+                _ = try await CosUploader.autoRegenerateMaskedShare(mediaFiles: files, roomKey: h.mediaRoomKey, info: info, config: config)
+                uploaded.append(h.displayRoomNo)
+            } catch {
+                failed.append(h.displayRoomNo)
+            }
+        }
+        await MainActor.run {
+            if uploaded.isEmpty && failed.isEmpty {
+                infoMessage = "已刷新，无变化"
+            } else {
+                var lines: [String] = []
+                if !uploaded.isEmpty { lines.append("已刷新，补齐云端媒体 \(uploaded.count) 套：" + uploaded.joined(separator: "，")) }
+                if !failed.isEmpty { lines.append("补传失败（下次刷新自动重试）：" + failed.joined(separator: "，")) }
+                infoMessage = lines.joined(separator: "\n")
+            }
+            showInfoAlert = true
+        }
+        if !uploaded.isEmpty {
+            BackupLogStore.log(category: "同步", action: "补齐云端媒体（本地→云端）", result: "成功", detail: uploaded.joined(separator: "，"), cloud: true)
+        }
+        if !failed.isEmpty {
+            BackupLogStore.log(category: "同步", action: "补齐云端媒体（本地→云端）", result: "失败", detail: failed.joined(separator: "，"), cloud: true)
         }
     }
 
@@ -913,6 +971,7 @@ struct HouseListView: View {
             var deletedRoomNo: [String] = []
             var pushedRoomNo: [String] = []
             var pushedRecords: [CloudHouseRecord] = []   // v1.64：补传聚合
+            var pushedMediaHouses: [House] = []   // v1.65：补传后需上传媒体的房源
             var mediaDiffRoomNo: [String] = []
             var mediaRoomKeys: [(roomKey: String, roomNo: String)] = []   // v1.42：带房号
             await MainActor.run {
@@ -1003,11 +1062,30 @@ struct HouseListView: View {
                     try await CloudHouseSync.uploadRecords(all, config: config)
                     await MainActor.run {
                         let local = (try? ctx.fetch(FetchDescriptor<House>())) ?? []
+                        var mediaHouses: [House] = []
                         for h in local where !h.isTrashed && pushedRecords.contains(where: { $0.roomKey == h.mediaRoomKey }) {
                             h.cloudStatus = .both
+                            if !h.mediaItems.isEmpty { mediaHouses.append(h) }
                         }
+                        pushedMediaHouses = mediaHouses
                         try? ctx.save()
                         reloadHouses()
+                    }
+                    // v1.65：补传账本后同步上传本地媒体（幂等覆盖+刷新分享页，与批量导入同机制）。
+                    // 此前同步只写账本不传媒体，恢复/导入后媒体永远上不了云，「双端」名不副实；
+                    // 上传失败的媒体下次「已刷新无变化」会走云端媒体对账再补。
+                    for h in pushedMediaHouses {
+                        let files = h.mediaItems.map { ShareMediaFile(name: $0.fileName, kind: $0.kind) }
+                        let profile = CosUploader.loadShareProfile()
+                        let info = ShareHouseInfo(
+                            displayRoomNo: h.displayRoomNo, towerLabel: h.towerLabel,
+                            layout: h.layout, statusLabel: h.status.label, priceText: h.priceText,
+                            landlord: h.landlord, password: h.password, remark: h.remark,
+                            name: profile.name, phone: profile.phone
+                        )
+                        _ = Task {
+                            _ = try? await CosUploader.autoRegenerateMaskedShare(mediaFiles: files, roomKey: h.mediaRoomKey, info: info, config: config)
+                        }
                     }
                     BackupLogStore.log(category: "同步", action: "补传房源（本地→云端）", result: "成功", detail: pushedRoomNo.joined(separator: "，"), cloud: true)
                 } catch {
