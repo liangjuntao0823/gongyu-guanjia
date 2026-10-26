@@ -146,7 +146,10 @@ struct HouseBatchImportView: View {
             if templateURL == nil {
                 let url = FileManager.default.temporaryDirectory.appendingPathComponent("房源导入模板.csv")
                 let text = "房号,座号,房东,户型,租金,密码,备注,状态\n2334上,1,康,单间,1100,,,待租\n2-1418下,2,业主,单间,900,,,已租\n"
-                try? text.write(to: url, atomically: true, encoding: .utf8)
+                // v1.60：加 UTF-8 BOM，Windows 的 Excel/记事本打开不再乱码
+                var bytes = Data([0xEF, 0xBB, 0xBF])
+                if let body = text.data(using: .utf8) { bytes.append(body) }
+                try? bytes.write(to: url)
                 templateURL = url
             }
         }
@@ -194,13 +197,35 @@ struct HouseBatchImportView: View {
     private func loadCsvFile(_ url: URL) {
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-        guard let text = try? String(contentsOf: url, encoding: .utf8) else {
-            errorMessage = "无法读取该文件，请确认是 UTF-8 编码的文本/CSV"
+        guard let data = try? Data(contentsOf: url) else {
+            errorMessage = "无法读取该文件"
+            showError = true
+            return
+        }
+        guard let text = decodeCSV(data) else {
+            errorMessage = "无法识别该文件编码（支持 UTF-8 / GBK / Unicode）"
             showError = true
             return
         }
         csvText = text
         parseCsv()
+    }
+
+    /// v1.60：CSV 编码自动识别——UTF-8（含 BOM）→ GB18030/GBK（Excel 中文版另存）→ UTF-16（Excel 另存 Unicode）
+    private func decodeCSV(_ data: Data) -> String? {
+        // UTF-8 BOM
+        if data.starts(with: [0xEF, 0xBB, 0xBF]) {
+            if let s = String(data: data.dropFirst(3), encoding: .utf8) { return s }
+        }
+        // UTF-8（无 BOM，校验非法序列）
+        if let s = String(data: data, encoding: .utf8), !s.contains("\u{FFFD}") { return s }
+        // GB18030（GBK 超集）
+        let gbk = String.Encoding(rawValue: CFStringConvertEncodingToNSStringEncoding(
+            CFStringEncoding(CFStringEncodings.GB_18030_2000.rawValue)))
+        if let s = String(data: data, encoding: gbk) { return s }
+        // UTF-16（Excel 另存 Unicode）
+        if let s = String(data: data, encoding: .utf16) { return s }
+        return nil
     }
 
     /// CSV 解析：忽略表头（首行若含「房号/房间」关键字则跳过），兼容中文逗号/制表符/引号包裹
