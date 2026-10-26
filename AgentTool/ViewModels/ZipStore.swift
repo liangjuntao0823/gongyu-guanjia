@@ -223,7 +223,7 @@ enum ZipStore {
                 guard let base = src.baseAddress else { return Z_ERRNO }
                 return out.withUnsafeMutableBytes { (dst: UnsafeMutableRawBufferPointer) -> Int32 in
                     guard let db = dst.baseAddress else { return Z_ERRNO }
-                    stream.next_in = base.bindMemory(to: Bytef.self, capacity: data.count)
+                    stream.next_in = UnsafeMutableRawPointer(mutating: base).bindMemory(to: Bytef.self, capacity: data.count)
                     stream.avail_in = uInt(data.count)
                     stream.next_out = db.bindMemory(to: Bytef.self, capacity: expectedSize)
                     stream.avail_out = uInt(expectedSize)
