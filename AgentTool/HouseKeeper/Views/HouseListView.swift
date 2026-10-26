@@ -934,8 +934,6 @@ struct HouseListView: View {
             showToast("未配置云存储，无法同步云端房源", isError: true)
             return
         }
-        // v1.74：清理云端旧单文件账本残留 h/_houses.json（方案A 后不再读写；幂等，404 视为已删）
-        _ = try? await CloudBackupService.deleteRemoteObject(name: "h/_houses.json", config: config)
         guard let ctx = houseModelContext else { return }
         do {
             let recs = try await CloudHouseSync.fetchAll(config: config)
