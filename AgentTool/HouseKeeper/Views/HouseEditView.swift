@@ -345,11 +345,16 @@ struct HouseEditView: View {
 
     private func save() {
         // v1.40 第10点：无稳定网络 → 先提示「仅存本机」，用户确认后再保存（避免静默只存本地造成误解）
-        if !NetworkMonitor.shared.isReachable {
-            showOfflineAlert = true
-            return
+        // v1.66：改为异步确认（最多等 1.2s），避免 NWPathMonitor 未就绪/路径切换瞬间误报离线——
+        // 此前「有网络但保存提示没网络、取消再保存就好了」即瞬态误报
+        Task {
+            let ok = await NetworkMonitor.shared.awaitReachable()
+            if ok {
+                await MainActor.run { performSave() }
+            } else {
+                await MainActor.run { showOfflineAlert = true }
+            }
         }
-        performSave()
     }
 
     private func performSave() {

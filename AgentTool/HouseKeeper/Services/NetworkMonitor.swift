@@ -25,6 +25,19 @@ final class NetworkMonitor {
         return path.status == .satisfied
     }
 
+    /// v1.66：保存/同步等主动动作的网络确认——NWPathMonitor 刚启动或路径切换瞬间，
+    /// currentPath 可能短暂非 .satisfied（误报离线，用户「取消再保存就好了」就是这种瞬态）。
+    /// 先立即读一次，非可达则短时轮询等待路径就绪（最多 timeout 秒），仍不可达才判定离线。
+    func awaitReachable(timeout: TimeInterval = 1.2) async -> Bool {
+        if isReachable { return true }
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            try? await Task.sleep(nanoseconds: 150_000_000)
+            if monitor.currentPath.status == .satisfied { return true }
+        }
+        return false
+    }
+
     func startIfNeeded() {
         lock.lock()
         let need = !started

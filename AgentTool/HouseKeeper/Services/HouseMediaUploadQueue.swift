@@ -4,7 +4,7 @@ import Foundation
 /// 分享上传媒体失败（弱网/断网/进程被杀）时自动入队，App 启动/回前台自动补传；
 /// 补传成功后移除并写操作日志。任务持久化在 UserDefaults（按用户名分 key，多用户互不干扰）。
 enum HouseMediaUploadQueue {
-    struct Item: Codable, Equatable {
+    struct Item: Codable, Equatable, Hashable {
         let roomKey: String
         let fileName: String
         let kind: String
