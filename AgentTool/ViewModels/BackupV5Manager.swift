@@ -592,9 +592,22 @@ final class BackupV5Manager {
         decoder.dateDecodingStrategy = .iso8601
         let bundle = try decoder.decode(HouseBundleDTO.self, from: data)
         for dto in bundle.houses {
+            // v1.69：全量恢复同样强制带前缀口径——备份里房号若意外带前缀（历史脏数据），
+            // 归一为内部「无前缀 + tower」结构，保证恢复后 mediaRoomKey/显示房号统一带 1-/2- 前缀
+            var roomNo = dto.roomNo.trimmingCharacters(in: .whitespacesAndNewlines)
+                .replacingOccurrences(of: "2－", with: "2-")
+                .replacingOccurrences(of: "1－", with: "1-")
+            var tower = dto.tower
+            if roomNo.hasPrefix("2-") {
+                roomNo = String(roomNo.dropFirst(2))
+                if tower == 0 { tower = 2 }
+            } else if roomNo.hasPrefix("1-") {
+                roomNo = String(roomNo.dropFirst(2))
+                if tower == 0 { tower = 1 }
+            }
             let house = House(
-                roomNo: dto.roomNo,
-                tower: dto.tower,
+                roomNo: roomNo,
+                tower: tower,
                 landlord: dto.landlord,
                 layout: dto.layout,
                 price: dto.price,

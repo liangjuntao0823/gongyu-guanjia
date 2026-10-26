@@ -447,23 +447,27 @@ struct HouseListView: View {
             }
 
             // 第二行：户型筛选（独立一行，选项随已收录房源的户型类型动态增减；支持多选）
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    filterChip(title: "全部户型", isOn: layoutFilters.isEmpty) {
-                        layoutFilters.removeAll()
-                    }
-                    ForEach(layouts, id: \.self) { layout in
-                        filterChip(title: layout, isOn: layoutFilters.contains(layout)) {
-                            if layoutFilters.contains(layout) {
-                                layoutFilters.remove(layout)
-                            } else {
-                                layoutFilters.insert(layout)
+            // v1.69：「全部户型」固定在最左，不随右侧户型左右移动
+            HStack(spacing: 8) {
+                filterChip(title: "全部户型", isOn: layoutFilters.isEmpty) {
+                    layoutFilters.removeAll()
+                }
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(layouts, id: \.self) { layout in
+                            filterChip(title: layout, isOn: layoutFilters.contains(layout)) {
+                                if layoutFilters.contains(layout) {
+                                    layoutFilters.remove(layout)
+                                } else {
+                                    layoutFilters.insert(layout)
+                                }
                             }
                         }
                     }
+                    .padding(.trailing, 16)
                 }
-                .padding(.horizontal, 16)
             }
+            .padding(.horizontal, 16)
         }
         .padding(.bottom, 10)
     }
@@ -677,23 +681,23 @@ struct HouseListView: View {
         case .cloud:
             infoMessage = "已删除云端同步副本"; showInfoAlert = true
         }
-        // 云端同步删除（失败写日志 + 二次提示）
+        // 云端同步删除（v1.69 规范：单条日志「彻底删除（本地+云端）」）
         if let config = config, config.isValid {
             Task {
                 do {
-                    try await CloudBackupService.deleteHouseRemoteFolder(roomKey: roomKey, config: config)
-                    // v1.19：同时从云端房源账本移除该房
-                    try? await CloudHouseSync.delete(roomKey: roomKey, config: config)
-                    BackupLogStore.log(category: "删除", action: "删除云端房源（本地→云端）", result: "成功", detail: roomKey, cloud: true)
+                    var objCount = 0
+                    try await CloudBackupService.deleteHouseRemoteFolder(roomKey: roomKey, config: config, writeLog: false, reportCount: { objCount = $0 })
+                    try await CloudHouseSync.delete(roomKey: roomKey, config: config)
+                    BackupLogStore.log(category: "删除", action: "彻底删除（本地+云端）", result: "成功", detail: "\(roomKey)（云端桶文件夹\(objCount)个对象 + 云端账本已移除）", cloud: true)
                 } catch {
-                    BackupLogStore.log(category: "删除", action: "删除云端房源（本地→云端）", result: "失败", detail: "\(roomKey) \(error.localizedDescription)", cloud: true)
+                    BackupLogStore.log(category: "删除", action: "彻底删除（本地+云端）", result: "失败", detail: "\(roomKey) \(error.localizedDescription)", cloud: true)
                     await MainActor.run {
-                        infoMessage = "云端删除失败：\(error.localizedDescription)。可在「管理后台 → 桶管理」手动清理 h/\(roomKey)/"; showInfoAlert = true
+                        infoMessage = "云端删除失败：\(error.localizedDescription)。可在「设置 → 桶管理」手动清理 h/\(roomKey)/"; showInfoAlert = true
                     }
                 }
             }
         } else {
-            BackupLogStore.log(category: "删除", action: "删除云端房源（本地→云端）", result: "跳过", detail: "未配置云存储 \(roomKey)", cloud: true)
+            BackupLogStore.log(category: "删除", action: "彻底删除（本地+云端）", result: "跳过", detail: "未配置云存储 \(roomKey)", cloud: true)
         }
     }
 
@@ -778,7 +782,8 @@ struct HouseListView: View {
         await MainActor.run {
             var inserted: [MediaItem] = []
             for house in active {
-                let dir = MediaStore.migrateDirToPrefixed(roomNo: house.roomNo, tower: house.tower)
+                // v1.69：目录名强制带前缀（mediaRoomKey），不再做无前缀迁移
+                let dir = MediaStore.houseDirectory(roomKey: house.mediaRoomKey)
                 let disk = Set(MediaStore.mediaFileNames(in: dir))
                 let recorded = Set(house.mediaItems.map { $0.fileName })
                 let toAdd = disk.subtracting(recorded)
@@ -854,7 +859,8 @@ struct HouseListView: View {
                     if let h = localByKey[rec.roomKey] {
                         if cloudRecordDiffers(rec, from: h) {
                             // v1.40 B1：多人冲突提示——云端由他人更新时展示修改者
-                            updated.append((rec.roomNo, rec.updatedBy))
+                            // v1.69：房号一律真实引用带前缀（rec.roomKey），不做去前缀简化
+                            updated.append((rec.roomKey, rec.updatedBy))
                         }
                         // v1.43：媒体差异三名单对账（账本 / 本地记录 / 磁盘真实文件），归一化等价比较：
                         //   - 账本有、本地记录或磁盘缺 → 需要下载（含用户手删 media 文件后刷新刷回）
@@ -870,10 +876,11 @@ struct HouseListView: View {
                             pendingSyncMediaDiff.append((h.displayRoomNo, needDownload))
                         }
                     } else {
-                        added.append((rec.roomNo, rec.roomKey, rec.mediaNames))
+                        // v1.69：新增列表与媒体差异的房号一律带前缀真实引用
+                        added.append((rec.roomKey, rec.roomKey, rec.mediaNames))
                         if !rec.mediaNames.isEmpty {
-                            mediaRoomKeys.append((rec.roomKey, rec.roomNo))
-                            pendingSyncMediaDiff.append((rec.roomNo, true))
+                            mediaRoomKeys.append((rec.roomKey, rec.roomKey))
+                            pendingSyncMediaDiff.append((rec.roomKey, true))
                         }
                     }
                 }
@@ -1088,7 +1095,7 @@ struct HouseListView: View {
                             h.remark = rec.remark; h.statusRaw = rec.status
                             h.lastUpdatedAt = rec.updatedAt
                             updatedCount += 1
-                            updatedRoomNo.append(rec.roomNo)
+                            updatedRoomNo.append(rec.roomKey)   // v1.69：带前缀真实引用
                         }
                         // v1.43：媒体差异双向 reconcile（归一化等价，.mov/.mp4 视为同一文件）——
                         //  ① 账本有、本地记录或磁盘缺 → 下载（mediaRoomKeys；含用户手删文件后刷回）
@@ -1126,10 +1133,10 @@ struct HouseListView: View {
                         h.cloudStatus = .cloud
                         ctx.insert(h)
                         addedCount += 1
-                        addedRoomNo.append(rec.roomNo)
+                        addedRoomNo.append(rec.roomKey)   // v1.69：带前缀真实引用
                         if !rec.mediaNames.isEmpty {
-                            mediaRoomKeys.append((h.mediaRoomKey, rec.roomNo))
-                            mediaDiffRoomNo.append(rec.roomNo)
+                            mediaRoomKeys.append((h.mediaRoomKey, rec.roomKey))
+                            mediaDiffRoomNo.append(rec.roomKey)
                         }
                     }
                 }
@@ -1294,22 +1301,31 @@ struct HouseListView: View {
         } catch {
             infoMessage = "删除失败：\(error.localizedDescription)"; showInfoAlert = true
         }
-        // 云端同步删除（失败写日志）
+        // 云端同步删除（v1.69 规范）：单 Task 内**串行**逐套执行——此前每套一个并发 Task 同时
+        // 读改写云端账本 h/_houses.json，并发互相覆盖导致删除不彻底（实测 7 套删完账本仍剩 3 套）。
+        // 日志每套只记一条「彻底删除（本地+云端）」，不再出现「删媒体 + 删文件夹」两条混杂记录。
         if let config = config, config.isValid {
-            for roomKey in deletedKeys {
-                Task {
+            Task {
+                var failedKeys: [String] = []
+                for roomKey in deletedKeys {
                     do {
-                        try await CloudBackupService.deleteHouseRemoteFolder(roomKey: roomKey, config: config)
-                        // v1.19：同时从云端房源账本移除该房
-                        try? await CloudHouseSync.delete(roomKey: roomKey, config: config)
-                        BackupLogStore.log(category: "删除", action: "删除云端房源（本地→云端）", result: "成功", detail: roomKey, cloud: true)
+                        var objCount = 0
+                        try await CloudBackupService.deleteHouseRemoteFolder(roomKey: roomKey, config: config, writeLog: false, reportCount: { objCount = $0 })
+                        try await CloudHouseSync.delete(roomKey: roomKey, config: config)
+                        BackupLogStore.log(category: "删除", action: "彻底删除（本地+云端）", result: "成功", detail: "\(roomKey)（云端桶文件夹\(objCount)个对象 + 云端账本已移除）", cloud: true)
                     } catch {
-                        BackupLogStore.log(category: "删除", action: "删除云端房源（本地→云端）", result: "失败", detail: "\(roomKey) \(error.localizedDescription)", cloud: true)
+                        failedKeys.append(roomKey)
+                        BackupLogStore.log(category: "删除", action: "彻底删除（本地+云端）", result: "失败", detail: "\(roomKey) \(error.localizedDescription)", cloud: true)
+                    }
+                }
+                if !failedKeys.isEmpty {
+                    await MainActor.run {
+                        infoMessage = "云端删除部分失败：\(failedKeys.joined(separator: "，"))。可在「设置 → 桶管理」手动清理剩余目录"; showInfoAlert = true
                     }
                 }
             }
         } else {
-            BackupLogStore.log(category: "删除", action: "删除云端房源（本地→云端）", result: "跳过", detail: "未配置云存储 共\(deletedKeys.count)套", cloud: true)
+            BackupLogStore.log(category: "删除", action: "彻底删除（本地+云端）", result: "跳过", detail: "未配置云存储 共\(deletedKeys.count)套", cloud: true)
         }
         let total = selectedHouseIDs.count
         exitMultiSelect()

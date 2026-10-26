@@ -778,7 +778,7 @@ struct HouseDetailView: View {
         NotificationCenter.default.post(name: HouseListView.houseStoreChanged, object: nil)
         // 2) 云端删除（异步；本地成功云端失败 → 分开提示 + 写操作日志）
         guard let config = config, config.isValid else {
-            BackupLogStore.log(category: "删除", action: "删除云端房源（本地→云端）", result: "跳过", detail: "未配置云存储 \(roomKey)", cloud: true)
+            BackupLogStore.log(category: "删除", action: "彻底删除（本地+云端）", result: "跳过", detail: "未配置云存储 \(roomKey)", cloud: true)
             // v1.19 补全：删除成功提示区分存储位置
             deleteResultMessage = wasCloud == .both ? "已删除本地 + 云端房源" : "已删除本地房源"
             return
@@ -786,15 +786,17 @@ struct HouseDetailView: View {
         isDeletingCloud = true
         Task {
             do {
-                try await CloudBackupService.deleteHouseRemoteFolder(roomKey: roomKey, config: config)
+                // v1.69：日志统一一条「彻底删除（本地+云端）」
+                var objCount = 0
+                try await CloudBackupService.deleteHouseRemoteFolder(roomKey: roomKey, config: config, writeLog: false, reportCount: { objCount = $0 })
                 try? await CloudHouseSync.delete(roomKey: roomKey, config: config)   // v1.19 补全：同步从云端账本移除
-                BackupLogStore.log(category: "删除", action: "删除云端房源（本地→云端）", result: "成功", detail: roomKey, cloud: true)
+                BackupLogStore.log(category: "删除", action: "彻底删除（本地+云端）", result: "成功", detail: "\(roomKey)（云端桶文件夹\(objCount)个对象 + 云端账本已移除）", cloud: true)
                 await MainActor.run {
                     isDeletingCloud = false
                     deleteResultMessage = wasCloud == .cloud ? "已删除云端房源" : "已删除本地 + 云端房源"
                 }
             } catch {
-                BackupLogStore.log(category: "删除", action: "删除云端房源（本地→云端）", result: "失败", detail: "\(roomKey) \(error.localizedDescription)", cloud: true)
+                BackupLogStore.log(category: "删除", action: "彻底删除（本地+云端）", result: "失败", detail: "\(roomKey) \(error.localizedDescription)", cloud: true)
                 await MainActor.run {
                     isDeletingCloud = false
                     cloudDeleteMessage = "本地已删除；云端删除失败：\(error.localizedDescription)。可在「管理后台 → 桶管理」手动清理 h/\(roomKey)/"

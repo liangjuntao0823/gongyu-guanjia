@@ -316,14 +316,23 @@ final class CloudBackupService {
     /// v1.40 第6点：分享页/封面/视频首帧图已移入用户私有目录，删房时必须一并删除，避免残留
     /// 无云端配置或桶里无该房源的文件夹时静默返回（不打断本地删除）；
     /// 单个对象删除失败会继续删其余对象，最终把第一个错误抛给上层（供 App 分开提示本地已删、云端失败）。
-    static func deleteHouseRemoteFolder(roomKey: String, config: CosConfig?) async throws {
+    /// 删除整套房源在云端的全部对象（h/<房号>/ 媒体 + 用户区分享页/首帧图）。
+    /// v1.69：writeLog=false 时不写「云端删除房源文件夹」日志（由删除调用方统一记一条
+    /// 「彻底删除（本地+云端）」）；reportCount 回传实际删除对象数（含 0=桶里本就没有）。
+    static func deleteHouseRemoteFolder(roomKey: String, config: CosConfig?, writeLog: Bool = true, reportCount: ((Int) -> Void)? = nil) async throws {
         guard let config = config ?? CosConfig.load(), config.isValid else { return }
         var objects = try await listHouseRemoteObjects(roomKey: roomKey, config: config)
         // v1.40：私有分享页目录（用户区）
         let sharePrefix = CloudUser.sharePagePrefix + roomKey + "/"
         let shareObjects = (try? await CosUploader.listObjects(prefix: sharePrefix, delimiter: nil, config: config).map { $0.name }) ?? []
         objects.append(contentsOf: shareObjects)
-        guard !objects.isEmpty else { return }   // 桶里没有该房源的文件夹
+        guard !objects.isEmpty else {
+            reportCount?(0)
+            if writeLog {
+                BackupLogStore.log(category: "删除", action: "云端删除房源文件夹", result: "成功", detail: "h/\(roomKey)/ 桶内无对象", cloud: true)
+            }
+            return
+        }
         var firstError: Error?
         for name in objects {
             do {
@@ -336,7 +345,10 @@ final class CloudBackupService {
         if let firstError {
             throw firstError
         }
-        BackupLogStore.log(category: "删除", action: "云端删除房源文件夹", result: "成功", detail: "h/\(roomKey)/ + 用户分享页 共 \(objects.count) 个对象", cloud: true)
+        reportCount?(objects.count)
+        if writeLog {
+            BackupLogStore.log(category: "删除", action: "云端删除房源文件夹", result: "成功", detail: "h/\(roomKey)/ + 用户分享页 共 \(objects.count) 个对象", cloud: true)
+        }
     }
 
     // MARK: - 云端保留（快速_ 且文件名带 _自动 的自动备份保留最近 10 份）

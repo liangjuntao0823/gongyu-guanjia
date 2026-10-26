@@ -61,10 +61,12 @@ struct HouseBatchImportView: View {
     @State private var zipTempRoot: URL?
     @State private var zipItems: [BatchImportItem] = []
     @State private var zipParseInfo = ""
+    @State private var zipErrorHint = ""   // v1.69：媒体包无前缀目录提示
 
     // —— 扫描补录 ——
     @State private var scanItems: [BatchImportItem] = []
     @State private var scanInfo = ""
+    @State private var scanBadHint = ""   // v1.69：扫描无前缀目录提示
 
     // —— 文件选择（v1.59：UIKit 文档选择器，替代无反应的 fileImporter） ——
     enum PickerTarget: String, Identifiable {
@@ -249,6 +251,12 @@ struct HouseBatchImportView: View {
             if idx == 0 && (cols.contains("房号") || cols.contains("房间") || cols.contains("room")) { continue }
             guard cols.count >= 1, !cols[0].isEmpty else { badLines.append("第\(idx + 1)行：缺房号"); continue }
             let rawRoom = cols[0]
+            // v1.69：清单房号必须以 1-/2- 座号前缀开头，无前缀不识别（防止无前缀脏数据）
+            let rawRoomNorm = rawRoom.replacingOccurrences(of: "2－", with: "2-").replacingOccurrences(of: "1－", with: "1-")
+            guard rawRoomNorm.hasPrefix("1-") || rawRoomNorm.hasPrefix("2-") else {
+                badLines.append("第\(idx + 1)行：房号「\(rawRoom)」未带座号前缀（需 1- 或 2-），已跳过")
+                continue
+            }
             let (roomNo, tower) = BatchImporter.parseRoom(rawRoom, explicitTower: cols.count > 1 ? Int(cols[1].replacingOccurrences(of: "座", with: "")) ?? 0 : 0)
             guard !roomNo.isEmpty else { badLines.append("第\(idx + 1)行：房号无效"); continue }
             var item = BatchImportItem(roomNo: roomNo, tower: tower)
@@ -292,6 +300,9 @@ struct HouseBatchImportView: View {
             }
             if !zipParseInfo.isEmpty {
                 Text(zipParseInfo).font(.footnote).foregroundColor(.secondary)
+            }
+            if !zipErrorHint.isEmpty {
+                Text(zipErrorHint).font(.footnote).foregroundColor(.red)
             }
             if !zipItems.isEmpty { previewList(items: zipItems, mode: .zip) }
             if !zipItems.isEmpty {
@@ -337,9 +348,17 @@ struct HouseBatchImportView: View {
 
     /// 媒体包解析公共逻辑：从根目录 + 房号 key 列表构建预览项
     private func buildZipItems(from root: URL, keys: [String]) {
+        zipErrorHint = ""
         let all = (try? houseModelContext?.fetch(FetchDescriptor<House>())) ?? []
         var items: [BatchImportItem] = []
+        var badKeys: [String] = []
         for key in keys {
+            // v1.69：目录名必须以 1-/2- 前缀开头，无前缀不识别（提示哪些房号不符合规范）
+            let norm = key.replacingOccurrences(of: "2－", with: "2-").replacingOccurrences(of: "1－", with: "1-")
+            guard norm.hasPrefix("1-") || norm.hasPrefix("2-") else {
+                badKeys.append(key)
+                continue
+            }
             let (roomNo, tower) = BatchImporter.parseRoom(key, explicitTower: key.hasPrefix("2-") ? 2 : 0)
             guard !roomNo.isEmpty else { continue }
             var item = BatchImportItem(roomNo: roomNo, tower: tower)
@@ -357,7 +376,12 @@ struct HouseBatchImportView: View {
             items.append(item)
         }
         zipItems = items
-        zipParseInfo = "识别到 \(items.count) 个房号目录：新建 \(items.filter { !$0.duplicate }.count) 间，补媒体 \(items.filter { $0.duplicate && $0.missingRecordCount > 0 }.count) 间，媒体齐全 \(items.filter { $0.duplicate && $0.missingRecordCount == 0 }.count) 间"
+        var info = "识别到 \(items.count) 个房号目录：新建 \(items.filter { !$0.duplicate }.count) 间，补媒体 \(items.filter { $0.duplicate && $0.missingRecordCount > 0 }.count) 间，媒体齐全 \(items.filter { $0.duplicate && $0.missingRecordCount == 0 }.count) 间"
+        if !badKeys.isEmpty {
+            info += "\n未识别（房号未带 1-/2- 前缀）：\(badKeys.joined(separator: "，"))"
+            zipErrorHint = "以下目录名不符合规范（未带座号前缀），已跳过不识别：\(badKeys.joined(separator: "，"))"
+        }
+        zipParseInfo = info
     }
 
     // MARK: - 扫描补录
@@ -371,6 +395,9 @@ struct HouseBatchImportView: View {
                 .buttonStyle(.borderedProminent)
             if !scanInfo.isEmpty {
                 Text(scanInfo).font(.footnote).foregroundColor(.secondary)
+            }
+            if !scanBadHint.isEmpty {
+                Text(scanBadHint).font(.footnote).foregroundColor(.red)
             }
             if !scanItems.isEmpty { previewList(items: scanItems, mode: .scan) }
             if !scanItems.isEmpty {
@@ -386,6 +413,7 @@ struct HouseBatchImportView: View {
 
     private func runScan() {
         scanInfo = ""
+        scanBadHint = ""
         let keys = MediaStore.scanMediaDirectoryKeys()
         guard !keys.isEmpty else {
             scanInfo = "media 目录下没有房号文件夹"
@@ -394,14 +422,21 @@ struct HouseBatchImportView: View {
         }
         let all = (try? houseModelContext?.fetch(FetchDescriptor<House>())) ?? []
         var items: [BatchImportItem] = []
+        var badKeys: [String] = []
         for key in keys {
+            // v1.69：media 目录名必须以 1-/2- 前缀开头，无前缀不识别并提示
+            let norm = key.replacingOccurrences(of: "2－", with: "2-").replacingOccurrences(of: "1－", with: "1-")
+            guard norm.hasPrefix("1-") || norm.hasPrefix("2-") else {
+                badKeys.append(key)
+                continue
+            }
             let (roomNo, tower) = BatchImporter.parseRoom(key, explicitTower: key.hasPrefix("2-") ? 2 : 0)
             guard !roomNo.isEmpty else { continue }
             var item = BatchImportItem(roomNo: roomNo, tower: tower)
             item.rawRoomNo = key   // v1.61：预览回显目录名原样（含 2- 前缀）
             item.mediaDirKey = key
-            // v1.63：扫描即归位——v1.62 时期遗留的无前缀目录合并到带前缀目录（1-2245上），与 House.mediaRoomKey 一致
-            let dir = MediaStore.migrateDirToPrefixed(roomNo: roomNo, tower: tower)
+            // v1.69：目录名强制带前缀，与 House.mediaRoomKey 一致，不再做无前缀迁移
+            let dir = MediaStore.houseDirectory(roomKey: key)
             item.diskFileCount = MediaStore.mediaFileNames(in: dir).count
             if let house = BatchImporter.findDuplicate(roomNo: roomNo, tower: tower, in: all) {
                 item.duplicate = true
@@ -413,7 +448,12 @@ struct HouseBatchImportView: View {
             items.append(item)
         }
         scanItems = items
-        scanInfo = "发现 \(keys.count) 个房号目录：新建 \(items.filter { !$0.duplicate }.count) 间，补媒体 \(items.filter { $0.duplicate && $0.missingRecordCount > 0 }.count) 间，媒体齐全 \(items.filter { $0.duplicate && $0.missingRecordCount == 0 }.count) 间"
+        var info = "发现 \(keys.count) 个房号目录：新建 \(items.filter { !$0.duplicate }.count) 间，补媒体 \(items.filter { $0.duplicate && $0.missingRecordCount > 0 }.count) 间，媒体齐全 \(items.filter { $0.duplicate && $0.missingRecordCount == 0 }.count) 间"
+        if !badKeys.isEmpty {
+            info += "\n未识别（房号未带 1-/2- 前缀）：\(badKeys.joined(separator: "，"))"
+            scanBadHint = "以下目录名不符合规范（未带座号前缀），已跳过不识别：\(badKeys.joined(separator: "，"))"
+        }
+        scanInfo = info
     }
 
     // MARK: - 预览列表（每行写清动作）
@@ -573,8 +613,8 @@ struct HouseBatchImportView: View {
             let src = zipRoot.appendingPathComponent(key, isDirectory: true)
             return MediaStore.importMediaFiles(fromTempDir: src, toRoomKey: normalized)
         }
-        // scan：源目录在正式 media/ 下，先把无前缀目录合并到带前缀目录，再取文件名
-        let dir = MediaStore.migrateDirToPrefixed(roomNo: item.roomNo, tower: item.tower)
+        // scan：源目录在正式 media/ 下（v1.69 起只认带前缀目录，无前缀目录导入前已被拦截提示）
+        let dir = MediaStore.houseDirectory(roomKey: item.tower == 2 ? "2-\(item.roomNo)" : "1-\(item.roomNo)")
         return MediaStore.mediaFileNames(in: dir)
     }
 

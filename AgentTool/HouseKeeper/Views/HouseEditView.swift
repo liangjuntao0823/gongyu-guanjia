@@ -43,6 +43,7 @@ struct HouseEditView: View {
     /// v1.7：房号实时查重——输入时即提示（变红），与保存时校验同一口径
     @State private var duplicateHint: House?
     @State private var showDuplicateHint = false
+    @State private var noPrefixHint = false   // v1.69：新增时房号未带座号前缀的红提示
 
     private var isEditing: Bool { house != nil }
 
@@ -107,7 +108,7 @@ struct HouseEditView: View {
                             .foregroundColor(.secondary)
                             .frame(width: 64, alignment: .leading)
                         // v1.13 需求18：房号输入不允许含空格（避免不小心加空格导致信息重复/查重失效）
-                        TextField("如 2334 或 2-1418", text: Binding(
+                        TextField("如 1-2334上 或 2-1418下", text: Binding(
                             get: { roomNo },
                             set: { roomNo = $0.replacingOccurrences(of: " ", with: "") }
                         ))
@@ -129,6 +130,13 @@ struct HouseEditView: View {
                     // v1.7：重复房号实时提示（类似注册账号检测是否可用）
                     if showDuplicateHint, let dup = duplicateHint {
                         Text("该房号已收录：\(dup.tower == 2 ? "2-" : "")\(dup.roomNo)（\(dup.layout.isEmpty ? "户型未填" : dup.layout)，\(dup.status.label)）\n同一座同一房号不能重复添加")
+                            .font(.caption)
+                            .foregroundColor(.red)
+                            .padding(.leading, 64)
+                    }
+                    // v1.69：新增时房号未带座号前缀 → 红提示
+                    if noPrefixHint {
+                        Text("房号必须以座号前缀开头：1- 或 2-（如 1-2334上、2-1418下）")
                             .font(.caption)
                             .foregroundColor(.red)
                             .padding(.leading, 64)
@@ -329,6 +337,17 @@ struct HouseEditView: View {
 
     /// 输入时实时检测：命中重复 → 变红提示；清空或无重复 → 复位
     private func checkDuplicate(for rawRoomNo: String) {
+        // v1.69：新增时房号必须带 1-/2- 座号前缀，否则实时红提示（不触发查重）
+        let trimmedPrefix = rawRoomNo.trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "2－", with: "2-")
+            .replacingOccurrences(of: "1－", with: "1-")
+        if house == nil && !trimmedPrefix.isEmpty && !trimmedPrefix.hasPrefix("1-") && !trimmedPrefix.hasPrefix("2-") {
+            noPrefixHint = true
+            showDuplicateHint = false
+            duplicateHint = nil
+            return
+        }
+        noPrefixHint = false
         guard !normalizedRoom(rawRoomNo).isEmpty else {
             showDuplicateHint = false
             duplicateHint = nil
@@ -360,7 +379,23 @@ struct HouseEditView: View {
     private func performSave() {
         let trimmedRoomNo = roomNo.trimmingCharacters(in: .whitespacesAndNewlines)
             .replacingOccurrences(of: "2－", with: "2-")
-        let cleanRoomNo = trimmedRoomNo.hasPrefix("2-") ? String(trimmedRoomNo.dropFirst(2)) : trimmedRoomNo
+            .replacingOccurrences(of: "1－", with: "1-")
+
+        // v1.69：新增房源房号必须以 1-/2- 座号前缀开头，否则无法添加（防止无前缀脏数据/座号归属歧义）
+        if house == nil && !trimmedRoomNo.hasPrefix("1-") && !trimmedRoomNo.hasPrefix("2-") {
+            errorMessage = "房号必须以座号前缀开头：1- 或 2-（如 1-2334上、2-1418下）"
+            showError = true
+            return
+        }
+
+        let cleanRoomNo: String
+        if trimmedRoomNo.hasPrefix("2-") {
+            cleanRoomNo = String(trimmedRoomNo.dropFirst(2))
+        } else if trimmedRoomNo.hasPrefix("1-") {
+            cleanRoomNo = String(trimmedRoomNo.dropFirst(2))
+        } else {
+            cleanRoomNo = trimmedRoomNo
+        }
 
         guard !cleanRoomNo.isEmpty else {
             errorMessage = "请填写房号"

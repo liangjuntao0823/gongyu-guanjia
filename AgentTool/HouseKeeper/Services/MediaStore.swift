@@ -103,12 +103,6 @@ enum MediaStore {
         if FileManager.default.fileExists(atPath: newURL.path) {
             return newURL
         }
-        // v1.63：兼容 v1.62 时期遗留的无前缀目录（media/<房号>/）——roomKey 现为带前缀，剥掉前缀再试
-        let stripped = roomKey.hasPrefix("1-") || roomKey.hasPrefix("2-") ? String(roomKey.dropFirst(2)) : roomKey
-        let plainURL = houseDirectory(roomKey: stripped).appendingPathComponent(fileName)
-        if FileManager.default.fileExists(atPath: plainURL.path) {
-            return plainURL
-        }
         // v1.40 兼容：升级前旧目录 备份/Media/<房号>/<文件>（迁移未完成或读取旧备份时）
         let legacyHouseURL = legacyMediaDirectory.appendingPathComponent(roomKey, isDirectory: true).appendingPathComponent(fileName)
         if FileManager.default.fileExists(atPath: legacyHouseURL.path) {
@@ -171,13 +165,8 @@ enum MediaStore {
     /// v1.63：带前缀目录（media/1-<房号>/）为空时回退 v1.62 时期遗留的无前缀目录
     static func existingFileNames(roomKey: String) -> Set<String> {
         let dir = houseDirectory(roomKey: roomKey)
-        var names = Set((try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? [])
-        if names.isEmpty {
-            let stripped = roomKey.hasPrefix("1-") || roomKey.hasPrefix("2-") ? String(roomKey.dropFirst(2)) : roomKey
-            let plain = houseDirectory(roomKey: stripped)
-            names = Set((try? FileManager.default.contentsOfDirectory(atPath: plain.path)) ?? [])
-        }
-        return names
+        // v1.69：目录名强制带前缀，不再回退 v1.62 无前缀目录
+        return Set((try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? [])
     }
 
     /// v1.37：按指定文件名写入媒体数据（云端同步回补用；已存在则覆盖），返回是否写入成功
@@ -263,34 +252,6 @@ enum MediaStore {
         return (tempRoot, keys)
     }
 
-    /// v1.63：房号目录归一到带座号前缀——1 座媒体目录应为 media/1-<房号>（与 House.mediaRoomKey 一致）。
-    /// 若带前缀目录不存在而 v1.62 时期遗留的无前缀目录存在 → 整目录迁移/合并到带前缀目录。
-    /// 导入/扫描时调用保证目录名与房源一致，防止媒体读不到、恢复错乱、双目录并存。
-    @discardableResult
-    static func migrateDirToPrefixed(roomNo: String, tower: Int) -> URL {
-        let key = tower == 2 ? "2-\(roomNo)" : "1-\(roomNo)"
-        let target = houseDirectory(roomKey: key)
-        guard tower == 1 else { return target }   // 2 座本就带前缀，无需迁移
-        let plain = houseDirectory(roomKey: roomNo)
-        var isDir: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: plain.path, isDirectory: &isDir), isDir.boolValue else { return target }
-        if !FileManager.default.fileExists(atPath: target.path) {
-            try? FileManager.default.moveItem(at: plain, to: target)
-        } else {
-            try? FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
-            if let names = try? FileManager.default.contentsOfDirectory(atPath: plain.path) {
-                for name in names {
-                    let dest = target.appendingPathComponent(name)
-                    if !FileManager.default.fileExists(atPath: dest.path) {
-                        try? FileManager.default.moveItem(at: plain.appendingPathComponent(name), to: dest)
-                    }
-                }
-            }
-            let rest = (try? FileManager.default.contentsOfDirectory(atPath: plain.path)) ?? []
-            if rest.isEmpty { try? FileManager.default.removeItem(at: plain) }
-        }
-        return target
-    }
 
     /// 把 zip 内某个房号目录的全部媒体文件复制到 Documents/media/<roomKey>/（zip 临时目录 → 正式目录），返回复制的文件名
     static func importMediaFiles(fromTempDir: URL, toRoomKey: String) -> [String] {
