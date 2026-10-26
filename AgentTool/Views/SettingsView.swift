@@ -59,6 +59,7 @@ struct SettingsView: View {
     @State private var showTrash = false   // v1.3：回收站入口从工作台移至设置页
     // v1.12：备份体系重构——统一备份/恢复入口（替代旧分板块备份/恢复；旧 JSON 备份在查看器中保留）
     @State private var showBackupKindSheet = false   // 备份方式选择（快速/全量）
+    @State private var showOfflineRestoreConfirm = false   // v1.75：离线重建房源二次确认
     @State private var showBackupCenterBrowse = false // 备份文件查看器
     @State private var showBackupCenterRestore = false // 恢复选择器
     @State private var showLogsView = false           // 操作日志
@@ -244,6 +245,15 @@ struct SettingsView: View {
             }
             Button { showBackupCenterRestore = true } label: {
                 Label("恢复数据", systemImage: "square.and.arrow.up")
+            }
+            // v1.75：离线重建房源——无需联网，从本地账本（media/<房号>/info.json）重建房源记录
+            VStack(alignment: .leading, spacing: 3) {
+                Button { showOfflineRestoreConfirm = true } label: {
+                    Label("离线重建房源", systemImage: "arrow.clockwise.circle")
+                }
+                Text("无需联网：从本机 media 文件夹的账本（每套 info.json）重建房源记录，数据库丢失或断网时可用，不删除现有数据。")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
             }
             // v1.12：备份文件查看器（快速/全量 zip + 云端 + 旧版 JSON）
             Button { showBackupCenterBrowse = true } label: {
@@ -597,6 +607,12 @@ struct SettingsView: View {
             } message: {
                 Text("快速备份：账本 + 媒体清单（不含房源与照片视频文件），备份后自动上传云端；房源从云端同步恢复。\n全量备份：账本 + 房源 + 全部照片视频，备份后可在「查看备份文件」中手动上传云端。")
             }
+            .alert("离线重建房源", isPresented: $showOfflineRestoreConfirm) {
+                Button("取消", role: .cancel) { }
+                Button("开始重建") { runOfflineRestore() }
+            } message: {
+                Text("将扫描本机 media 文件夹中的所有账本（每套 info.json）并重建房源记录。无需联网；已有房源按账本刷新，缺失房源自动补齐，不删除任何现有数据。")
+            }
             .confirmationDialog("选择要清空的板块", isPresented: $showClearSheet, titleVisibility: .visible) {
                 Button("清空成交数据") { clearType = .deals; showClearConfirm = true }
                 Button("清空收租数据") { clearType = .properties; showClearConfirm = true }
@@ -729,6 +745,24 @@ struct SettingsView: View {
             await MainActor.run {
                 houseCacheTip = "分享链接已全部重建：\(ok) 间成功" + (fail > 0 ? "，\(fail) 间失败（可再次刷新重试）" : "") + "\n旧分享链接已全部失效"
             }
+        }
+    }
+
+    // v1.75：离线重建房源——无需联网，从本机 media 账本（每套 info.json）重建/刷新房源记录
+    private func runOfflineRestore() {
+        guard let houseCtx = houseModelContext else {
+            showMessage = "房源数据容器不可用，请重启 App 后重试"
+            showAlert = true
+            return
+        }
+        let n = LocalHouseLedger.restoreAll(houseContext: houseCtx)
+        if n > 0 {
+            showMessage = "离线重建完成：已从本地账本恢复 \(n) 套房源"
+            showAlert = true
+            NotificationCenter.default.post(name: HouseListView.houseStoreChanged, object: nil)
+        } else {
+            showMessage = "未找到本地账本（media 文件夹中没有 info.json）。请先联网同步一次生成账本，或使用「恢复数据」。"
+            showAlert = true
         }
     }
 
@@ -983,7 +1017,7 @@ struct InterconnectionInfoView: View {
 // MARK: - 版本更新介绍
 struct VersionHistoryView: View {
     let versions: [(version: String, date: String, changes: [String])] = [
-        ("v1.75", "2026-10-27", ["修复同步误删「本地账本镜像」：同步对账把每套的 media/<房号>/info.json 当成多余媒体删掉（实测一次删 7 套）——现已排除该文件，不再误删", "同步完成后自动重建/刷新全部本地账本镜像，与云端完全一致", "（说明：房源图片命名自带唯一ID（如 1-2059-JPG-A3F9C2-1.jpg），删除旧图换新图文件名必不同，其他设备刷新可正确同步新图）"]),
+        ("v1.75", "2026-10-27", ["新增「离线重建房源」（设置→数据管理）：无需联网，从本机 media 账本（每套 info.json）一键重建/刷新全部房源记录，数据库丢失或断网时可用，不删除现有数据", "修复同步误删「本地账本镜像」：同步对账把每套的 media/<房号>/info.json 当成多余媒体删掉（实测一次删 7 套）——现已排除该文件，不再误删", "同步完成后自动重建/刷新全部本地账本镜像，与云端完全一致", "（说明：房源图片命名自带唯一ID（如 1-2059-JPG-A3F9C2-1.jpg），删除旧图换新图文件名必不同，其他设备刷新可正确同步新图）"]),
         ("v1.73", "2026-10-27", ["刷新/同步结果提示改为原生悬浮横幅：顶部轻量胶囊、自动消失（替代原来占半个屏幕的居中弹窗）", "删除、批量标记等操作结果同样改为悬浮横幅提示", "需要你确认的操作（同步变更确认/删除确认）仍保留弹窗"]),
         ("v1.72", "2026-10-27", ["刷新提示框重做：点刷新立即显示「正在刷新…」横幅+按钮转圈，比对完成才出结果（不再干点没反应）", "修正「版本更新介绍」顺序：改为按日期倒序（v1.71 置顶，此前 v1.50-1.53 误排最前）", "房源卡片租金字体/颜色恢复原样（headline 加粗 + 主题色）", "批量恢复/导入后不再自动上传云端（此前导入即自动传媒体且不建账本）；改为等手动点「刷新同步」先比对再统一补传，并清空自动补传队列", "操作日志动作细化：编辑保存按实际改动字段命名（修改租金同步/修改户型同步/修改状态同步…），不再笼统记「同步房源」", "本地房源账本改一房一账本：与云端同构，每套 media/<房号>/info.json（保存/导入/同步/恢复联动），删除整套=删 media/<房号>/ 文件夹一步到位", "任何涉及云端同步的动作都显示卡片进度条：纯文字编辑保存、状态切换、补传账本均有「同步中」反馈"]),
         ("v1.71", "2026-10-27", ["云端账本改为一房一文件（h/<房号>/info.json）：改一套写一套、并发不再互相覆盖，删除整套=删 h/<房号>/ 文件夹一步到位", "删除一致性：单套/批量删除同删 h/ 与私有区（分享页+首帧图）", "编辑保存只在媒体有变化时才触发上传（纯文字修改不再全量重传媒体）", "媒体上传失败自动重试一次，日志带具体错误原因", "批量删除云端加同步进度条，云端删完才弹完成提示", "刷新进度条完成后自动收起；修复最小化后新任务不显示", "完成提示框全局化：离开房源板块也能点「好」", "房源卡片租金字体与房号一样大", "批量恢复文件选择框白屏缓解", "修复编辑换图后媒体落盘无前缀目录（卡片黑图）"]),
