@@ -912,6 +912,19 @@ struct HouseListView: View {
         }
     }
 
+    /// v1.67：在主线程把 House 的可跨线程数据提取成值快照（后台线程安全）
+    private func makePendingSnapshot(from h: House) -> PendingMediaHouseSnapshot {
+        let files = h.mediaItems.map { ShareMediaFile(name: $0.fileName, kind: $0.kind) }
+        let profile = CosUploader.loadShareProfile()
+        let info = ShareHouseInfo(
+            displayRoomNo: h.displayRoomNo, towerLabel: h.towerLabel,
+            layout: h.layout, statusLabel: h.status.label, priceText: h.priceText,
+            landlord: h.landlord, password: h.password, remark: h.remark,
+            name: profile.name, phone: profile.phone
+        )
+        return PendingMediaHouseSnapshot(roomKey: h.mediaRoomKey, displayRoomNo: h.displayRoomNo, files: files, info: info)
+    }
+
     /// v1.68：云端媒体对账「干跑」——只列桶比对，不传任何东西，返回「云端缺媒体」的房源快照列表。
     /// 供同步无变化时弹确认框前预检；列桶失败视为待补（确认后可重试，不丢数据）。
     private func preflightMediaSnapshots(config: CosConfig, ctx: ModelContext) async -> [PendingMediaHouseSnapshot] {
