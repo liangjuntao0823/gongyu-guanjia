@@ -346,7 +346,10 @@ struct HouseListView: View {
         // v1.70：强制从持久层重载每个房源对象（含 mediaItems 关系）——修复「批量恢复媒体后
         // 卡片仍显示无实拍图/不显示缩略图，必须重启才正常」：SwiftData 同一上下文里插入媒体后，
         // 已缓存对象的 to-many 关系不会自动刷新，列表重新 fetch 拿到的仍是同一实例、关系为旧缓存。
-        ctx.refreshAllObjects()   // v1.70：强制从持久层重载全部对象（含 mediaItems 关系）
+        // v1.70：提交挂起变更（含媒体关系插入），确保批量恢复/编辑后重新 fetch 拿到最新关系——
+        // 此前列表重新 fetch 返回同一对象实例、mediaItems 关系为旧缓存，缩略图不显示需重启。
+        // 注：ModelContext 无 CoreData 式 refresh API，用 processPendingChanges 强制同步变更。
+        ctx.processPendingChanges()
         houses = all.filter { !$0.isTrashed }
         // v1.71：存量无前缀媒体目录自动归一迁移（media/2059/ → media/1-2059/），幂等；修复
         // v1.69 前编辑页新图落盘无前缀目录导致的上传失败、云端断媒体、刷新缺媒体死循环。
