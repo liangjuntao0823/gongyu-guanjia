@@ -321,6 +321,12 @@ struct HouseListView: View {
         guard let ctx = houseModelContext else { return }
         let descriptor = FetchDescriptor<House>(sortBy: [SortDescriptor(\House.createdAt, order: .reverse)])
         let all = (try? ctx.fetch(descriptor)) ?? []
+        // v1.70：强制从持久层重载每个房源对象（含 mediaItems 关系）——修复「批量恢复媒体后
+        // 卡片仍显示无实拍图/不显示缩略图，必须重启才正常」：SwiftData 同一上下文里插入媒体后，
+        // 已缓存对象的 to-many 关系不会自动刷新，列表重新 fetch 拿到的仍是同一实例、关系为旧缓存。
+        for h in all {
+            ctx.refresh(h, mergeChanges: true)
+        }
         houses = all.filter { !$0.isTrashed }
     }
 
@@ -975,6 +981,13 @@ struct HouseListView: View {
             syncCenter.advance(done: done, current: snap.displayRoomNo)
         }
         syncCenter.finish(success: failed.isEmpty)
+        // v1.70：完成后进度条自动收起（不再需要手动点「完成」）——任务已结束，弹窗已告知结果；
+        // 若曾最小化到「待补传媒体」页，进行中的任务卡片同样自动消失。
+        Task {
+            try? await Task.sleep(nanoseconds: 1_200_000_000)
+            syncCenter.dismiss()
+            syncTaskMinimized = false
+        }
         var lines: [String] = []
         if !uploaded.isEmpty { lines.append("已补齐云端媒体 \(uploaded.count) 套：" + uploaded.joined(separator: "，")) }
         if !failed.isEmpty { lines.append("补传失败（可稍后再刷新重试）：" + failed.joined(separator: "，")) }
