@@ -586,27 +586,18 @@ struct HouseBatchImportView: View {
             isImporting = false
             summary.skippedDuplicate += items.filter { $0.duplicate && $0.mediaDirKey == nil }.count
             self.summary = summary
-            // 导入后逐间：上传媒体到云端 + 自动生成分享 H5（与编辑保存后同机制；
-            // 新建房与补挂媒体的房都刷新 H5，保证媒体变化立即可见）
+            // v1.72（#4）：批量导入/恢复后「不自动上传云端、不自动生成分享 H5」——
+            // 此前导入完成即逐间 autoRegenerateMaskedShare（只传媒体、不建账本），用户还没点刷新
+            // 云端就出现「只有媒体没账本」的房源；改为等用户手动点「刷新同步」——同步先跑完整比对
+            // （账本 diff + 媒体对账），确认后再统一补传账本/媒体/分享页，避免半同步状态。
+            // 同时清空媒体补传队列：恢复/导入的新房源不因 App 回前台 retryAll 而自动补传旧失败项。
+            HouseMediaUploadQueue.clearAll()
             let houses = (try? ctx.fetch(FetchDescriptor<House>())) ?? []
             let imported = houses.filter { h in
                 items.contains { $0.roomNo == h.roomNo && $0.tower == h.tower }
             }
-            if let config = CosConfig.load(), config.isValid, !imported.isEmpty {
-                for h in imported {
-                    let files = h.mediaItems.map { ShareMediaFile(name: $0.fileName, kind: $0.kind) }
-                    let profile = CosUploader.loadShareProfile()
-                    let info = ShareHouseInfo(
-                        displayRoomNo: h.displayRoomNo, towerLabel: h.towerLabel,
-                        layout: h.layout, statusLabel: h.status.label, priceText: h.priceText,
-                        landlord: h.landlord, password: h.password, remark: h.remark,
-                        name: profile.name, phone: profile.phone
-                    )
-                    let roomKey = h.mediaRoomKey
-                    _ = Task {
-                        _ = try? await CosUploader.autoRegenerateMaskedShare(mediaFiles: files, roomKey: roomKey, info: info, config: config)
-                    }
-                }
+            for h in imported {
+                LocalHouseLedger.save(h)   // v1.72（#6）：本地一房一账本镜像（media/<房号>/info.json）
             }
             // v1.63：批量导入/恢复接入本地操作日志
             BackupLogStore.log(category: "房源", action: "批量导入", result: "成功",

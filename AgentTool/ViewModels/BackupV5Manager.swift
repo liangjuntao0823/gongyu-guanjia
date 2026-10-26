@@ -498,6 +498,8 @@ final class BackupV5Manager {
             phaseProgress(0.98)
 
             // 5. 成功：删除恢复前安全快照（含媒体 zip），返回统计
+            // v1.72（#4）：恢复完成后清空媒体补传队列——恢复的房源不自动补传（等用户手动点同步先比对）
+            HouseMediaUploadQueue.clearAll()
             stageMessage("恢复完成，正在清理临时文件…")
             try? FileManager.default.removeItem(at: preDir)
             phaseProgress(1.0)
@@ -631,6 +633,8 @@ final class BackupV5Manager {
                 media.house = house
                 houseContext.insert(media)
             }
+            // v1.72（#6）：媒体挂载后再写本地一房一账本镜像（mediaNames 完整）
+            LocalHouseLedger.save(house)
         }
         try houseContext.save()
     }

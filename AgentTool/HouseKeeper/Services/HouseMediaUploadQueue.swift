@@ -40,6 +40,12 @@ enum HouseMediaUploadQueue {
         save(list)
     }
 
+    /// v1.72（#4）：清空整个队列——批量恢复/导入完成后调用：
+    /// 恢复的新房源不应在 App 回前台时被 retryAll 自动补传（用户要求：恢复后等我手动点同步，先跑比对）。
+    static func clearAll() {
+        save([])
+    }
+
     /// 启动/回前台：补传全部待上传媒体。单个失败保留队列下次再试；本地文件已删除的（媒体/房源被删）直接清队。
     static func retryAll(config: CosConfig? = nil) async {
         let cfg = config ?? CosConfig.load()

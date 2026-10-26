@@ -46,6 +46,8 @@ struct HouseListView: View {
     @State private var infoMessage = ""
     // v1.40 第11点：同步先弹变化确认（预览 → 确认 → 应用）
     @State private var showSyncConfirm = false
+    // v1.72（#1/#5）：刷新/同步进行中状态——点刷新立即反馈「正在刷新…」，比对完成才收起
+    @State private var isSyncing = false
     // v1.68：云端媒体对账确认（先干跑列桶 → 弹确认 → 确认后才上传）+ 同步任务进度/最小化
     @State private var showMediaSyncConfirm = false
     @State private var pendingMediaSnaps: [PendingMediaHouseSnapshot] = []
@@ -146,6 +148,22 @@ struct HouseListView: View {
             }
             .navigationTitle("房源管理")
             .navigationBarTitleDisplayMode(.inline)
+            // v1.72（#1/#5）：同步/刷新进行中——顶部横幅立即反馈「正在刷新…」（比对完成自动收起）
+            .overlay(alignment: .top) {
+                if isSyncing {
+                    HStack(spacing: 8) {
+                        ProgressView().controlSize(.small)
+                        Text("正在刷新…")
+                            .font(.footnote.weight(.medium))
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 7)
+                    .background(.ultraThinMaterial, in: Capsule())
+                    .padding(.top, 6)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                }
+            }
             .toolbar {
                 // v1.59：左上角 = 手动同步 + 多选入口（多选从右上角移到刷新旁边）
                 ToolbarItem(placement: .topBarLeading) {
@@ -154,7 +172,11 @@ struct HouseListView: View {
                         Button {
                             Task { await syncCloudHouses() }
                         } label: {
-                            Image(systemName: "arrow.triangle.2.circlepath")
+                            if isSyncing {
+                                ProgressView().controlSize(.small)
+                            } else {
+                                Image(systemName: "arrow.triangle.2.circlepath")
+                            }
                         }
                         // v1.21：多选分享入口（v1.59 移到左上角）
                         Button {
@@ -741,26 +763,31 @@ struct HouseListView: View {
         house.status = (house.status == .rented) ? .available : .rented
         house.lastUpdatedAt = Date()
         try? ctx.save()
-        pushHouseToCloud(house)
+        pushHouseToCloud(house, action: "切换状态同步")
         NotificationCenter.default.post(name: Self.houseStoreChanged, object: nil)
     }
 
     // MARK: - v1.19 云端房源同步（共享房源）
 
     /// 把单套房源推送到云端账本（读改写，同房号覆盖）。无云存储配置则跳过（仅本地）。
-    private func pushHouseToCloud(_ house: House) {
+    /// v1.72（#7）：动作按场景命名（切换状态同步…）；（#8）账本上传也驱动卡片进度条；（#6）写本地账本镜像。
+    private func pushHouseToCloud(_ house: House, action: String = "同步房源（本地→云端）") {
         guard let config = CosConfig.load() else { return }
         let record = CloudHouseSync.record(from: house, username: CloudUser.username)
+        LocalHouseLedger.save(house)
+        HouseSyncProgress.shared.update(roomKey: house.mediaRoomKey, direction: .upload, progress: 0.2, label: "同步账本")
         Task {
             do {
                 try await CloudHouseSync.upload(record: record, config: config)
+                HouseSyncProgress.shared.clear()
                 await MainActor.run {
                     house.cloudStatus = .both
                     try? houseModelContext?.save()
                 }
-                BackupLogStore.log(category: "房源", action: "同步房源（本地→云端）", result: "成功", detail: house.displayRoomNo, cloud: true)
+                BackupLogStore.log(category: "房源", action: action, result: "成功", detail: house.displayRoomNo, cloud: true)
             } catch {
-                BackupLogStore.log(category: "房源", action: "同步房源（本地→云端）", result: "失败", detail: "\(house.displayRoomNo)：\(error.localizedDescription)", cloud: true)
+                HouseSyncProgress.shared.clear()
+                BackupLogStore.log(category: "房源", action: action, result: "失败", detail: "\(house.displayRoomNo)：\(error.localizedDescription)", cloud: true)
             }
         }
     }
@@ -804,6 +831,8 @@ struct HouseListView: View {
     /// 磁盘有而记录没有 → 自动补建媒体记录；记录有而磁盘没有 → 提示待云端回补；
     /// 无对应房源的目录 → 提示可扫描补录。有变化列明细，无变化提示「已刷新，无变化」。
     private func localRefreshWithMediaCheck() async {
+        isSyncing = true   // v1.72（#5）：本地刷新同样给出「正在刷新」反馈
+        defer { isSyncing = false }
         guard let ctx = houseModelContext else { return }
         let all = (try? ctx.fetch(FetchDescriptor<House>())) ?? []
         let active = all.filter { !$0.isTrashed }
@@ -866,6 +895,8 @@ struct HouseListView: View {
     }
 
     private func syncCloudHouses() async {
+        isSyncing = true   // v1.72（#5）：点击立即反馈「正在刷新」
+        defer { isSyncing = false }
         let config = CosConfig.load()
         guard let config else {
             infoMessage = "未配置云存储，无法同步云端房源"; showInfoAlert = true
@@ -1137,6 +1168,7 @@ struct HouseListView: View {
                             h.lastUpdatedAt = rec.updatedAt
                             updatedCount += 1
                             updatedRoomNo.append(rec.roomKey)   // v1.69：带前缀真实引用
+                            LocalHouseLedger.save(h)   // v1.72（#6）：本地一房一账本镜像随更新同步
                         }
                         // v1.43：媒体差异双向 reconcile（归一化等价，.mov/.mp4 视为同一文件）——
                         //  ① 账本有、本地记录或磁盘缺 → 下载（mediaRoomKeys；含用户手删文件后刷回）
@@ -1173,6 +1205,7 @@ struct HouseListView: View {
                         h.lastUpdatedAt = rec.updatedAt
                         h.cloudStatus = .cloud
                         ctx.insert(h)
+                        LocalHouseLedger.save(h)   // v1.72（#6）：本地一房一账本镜像
                         addedCount += 1
                         addedRoomNo.append(rec.roomKey)   // v1.69：带前缀真实引用
                         if !rec.mediaNames.isEmpty {
@@ -1203,17 +1236,23 @@ struct HouseListView: View {
             // 聚合写 + 成功后统一把补传房源标「双端」，失败保持「仅本地」并提示，可下次重试。
             if !pushedRecords.isEmpty {
                 do {
+                    // v1.72（#8）：补传账本也显示卡片进度条（本地→云端同步动作）
+                    if let first = pushedRecords.first {
+                        HouseSyncProgress.shared.update(roomKey: first.roomKey, direction: .upload, progress: 0.1, label: "补传账本")
+                    }
                     var all = recs
                     for rec in pushedRecords {
                         all.removeAll { $0.roomKey == rec.roomKey }
                         all.append(rec)
                     }
                     try await CloudHouseSync.uploadRecords(all, config: config)
+                    HouseSyncProgress.shared.clear()
                     await MainActor.run {
                         let local = (try? ctx.fetch(FetchDescriptor<House>())) ?? []
                         var snapshots: [PendingMediaHouseSnapshot] = []
                         for h in local where !h.isTrashed && pushedRecords.contains(where: { $0.roomKey == h.mediaRoomKey }) {
                             h.cloudStatus = .both
+                            LocalHouseLedger.save(h)   // v1.72（#6）：本地一房一账本镜像
                             if !h.mediaItems.isEmpty {
                                 snapshots.append(makePendingSnapshot(from: h))
                             }

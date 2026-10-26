@@ -3356,3 +3356,24 @@ extension CosUploader {
         }
     }
 }
+
+/// v1.72（#6）：本地房源账本镜像——与云端方案 A 同构：每套房在 media/<房号>/info.json 存一份
+/// 与云端同构的 CloudHouseRecord JSON（保存/导入/同步/删除联动）。
+/// 效果：本地「一房一账本」，删除整套 = 删 media/<房号>/ 文件夹（媒体 + 账本）一步到位；
+/// 备份/恢复/对账时本地账本与云端结构完全一致。
+enum LocalHouseLedger {
+    /// 写本套账本（幂等覆盖）
+    static func save(_ house: House) {
+        let record = CloudHouseSync.record(from: house, username: CloudUser.username)
+        let dir = MediaStore.houseDirectory(roomKey: house.mediaRoomKey)
+        let url = dir.appendingPathComponent("info.json")
+        guard let data = try? JSONEncoder().encode(record) else { return }
+        try? data.write(to: url, options: .atomic)
+    }
+
+    /// 删本套账本（媒体目录删除时一并清理；单独调用用于软删后彻底清理）
+    static func delete(roomKey: String) {
+        let url = MediaStore.houseDirectory(roomKey: roomKey).appendingPathComponent("info.json")
+        try? FileManager.default.removeItem(at: url)
+    }
+}

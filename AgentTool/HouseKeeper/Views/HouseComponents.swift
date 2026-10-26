@@ -188,8 +188,8 @@ struct HouseCardView: View {
                         .font(.title3.weight(.bold))
                         .foregroundColor(.primary)
                     Text(house.priceText)
-                        // v1.71（#96）：租金字体与房号一样大（title3）
-                        .font(.title3.weight(.bold))
+                        // v1.72（#3）：租金恢复 headline 加粗 + 主题色（v1.71 #96 曾改 title3，用户要求回退）
+                        .font(.headline.weight(.bold))
                         .foregroundColor(AppTheme.accent)
                     Spacer(minLength: 0)
                     StatusBadge(status: house.status)

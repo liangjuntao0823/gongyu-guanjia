@@ -434,6 +434,11 @@ struct HouseEditView: View {
         // 只在保存时执行 → 点「取消」不会落盘，删除可完整回滚
         // v1.41：删除媒体同时删云端对象（图片原名 / 视频 .mp4 + 用户区首帧图），
         //        并清除该文件的上传队列——保证「我删了照片，别人也看不到」（此前只删本地是致命缺陷）
+        // v1.72（#7）：编辑前字段快照——日志动作按实际改动字段命名（修改租金同步等）
+        let before = house.map { h in
+            (roomNo: h.roomNo, tower: h.tower, landlord: h.landlord, layout: h.layout,
+             price: h.price, password: h.password, remark: h.remark, status: h.status)
+        }
         // v1.71：编辑前的媒体文件名快照（用于「仅新增才上传」判定；在删除媒体逻辑之前取）
         let originalMediaNames = Set(house?.mediaItems.map { $0.fileName } ?? [])
         if let house {
@@ -481,6 +486,20 @@ struct HouseEditView: View {
         // v1.19：最后更新时间（首次录入 / 编辑保存时刷新）
         target.lastUpdatedAt = Date()
 
+        // v1.72（#7）：按编辑前后字段差异生成详细同步动作（修改租金同步 / 修改户型同步 …）
+        var syncAction = "新增房源同步"
+        if let before {
+            var changed: [String] = []
+            if before.roomNo != target.roomNo || before.tower != target.tower { changed.append("房号") }
+            if before.landlord != target.landlord { changed.append("房东") }
+            if before.layout != target.layout { changed.append("户型") }
+            if before.price != target.price { changed.append("租金") }
+            if before.password != target.password { changed.append("密码") }
+            if before.remark != target.remark { changed.append("备注") }
+            if before.status != target.status { changed.append("状态") }
+            syncAction = changed.isEmpty ? "修改房源同步" : "修改" + changed.joined(separator: "/") + "同步"
+        }
+
         for item in mediaItems where item.house == nil {
             item.house = target
             modelContext.insert(item)
@@ -518,8 +537,11 @@ struct HouseEditView: View {
                 _ = try? await CosUploader.autoRegenerateMaskedShare(mediaFiles: files, roomKey: roomKey, info: info, config: config)
             }
         }
+        // v1.72（#6）：本地账本镜像（media/<房号>/info.json，与云端同构）——保存即写，删除随目录一步到位
+        LocalHouseLedger.save(target)
         // v1.19：新增 / 编辑保存后同步到云端账本（共享房源）
-        pushHouseToCloud(target)
+        // v1.72（#7）：日志动作按实际改动命名（修改租金同步等）；（#8）账本上传也驱动卡片进度条
+        pushHouseToCloud(target, action: syncAction)
         NotificationCenter.default.post(name: HouseListView.houseStoreChanged, object: nil)
         dismiss()
     }
@@ -584,19 +606,23 @@ struct HouseEditView: View {
     }
 
     /// 保存后把房源推到云端账本（读改写，同房号覆盖）。无云存储配置则跳过（仅本地）。
-    private func pushHouseToCloud(_ house: House) {
+    /// v1.72（#7）：action 传详细动作名（修改租金同步/新增房源同步…）；（#8）账本上传也驱动卡片底部进度条。
+    private func pushHouseToCloud(_ house: House, action: String) {
         guard let config = CosConfig.load() else { return }
         let record = CloudHouseSync.record(from: house, username: CloudUser.username)
+        HouseSyncProgress.shared.update(roomKey: house.mediaRoomKey, direction: .upload, progress: 0.2, label: "同步账本")
         Task {
             do {
                 try await CloudHouseSync.upload(record: record, config: config)
+                HouseSyncProgress.shared.clear()
                 await MainActor.run {
                     house.cloudStatus = .both
                     try? modelContext.save()
                 }
-                BackupLogStore.log(category: "房源", action: "同步房源（本地→云端）", result: "成功", detail: house.displayRoomNo, cloud: true)
+                BackupLogStore.log(category: "房源", action: action, result: "成功", detail: house.displayRoomNo, cloud: true)
             } catch {
-                BackupLogStore.log(category: "房源", action: "同步房源（本地→云端）", result: "失败", detail: "\(house.displayRoomNo)：\(error.localizedDescription)", cloud: true)
+                HouseSyncProgress.shared.clear()
+                BackupLogStore.log(category: "房源", action: action, result: "失败", detail: "\(house.displayRoomNo)：\(error.localizedDescription)", cloud: true)
                 // v1.42：保存成功但账本上传失败 → 提示待网络恢复后刷新同步（此前只写日志，用户无感知）
                 await MainActor.run {
                     if pendingUploadTip == nil {
