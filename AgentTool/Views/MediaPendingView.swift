@@ -115,11 +115,6 @@ struct MediaPendingView: View {
                 }
             }
         }
-        .alert("补传结果", isPresented: $showResult) {
-            Button("好", role: .cancel) {}
-        } message: {
-            Text(resultText)
-        }
         .onAppear {
             reload()
         }
@@ -148,8 +143,12 @@ struct MediaPendingView: View {
             await MainActor.run {
                 reload()
                 isRetrying = false
-                resultText = items.isEmpty ? "全部补传完成" : "完成部分补传，剩余 \(items.count) 个保留待重试"
-                showResult = true
+                // v1.75：补传结果改由全局提示中心呈现（根层级）——此前挂在「待补传媒体」页自己的 .alert 上，
+                // 用户离开该页面后「好」按钮失效、App 卡死只能退出
+                GlobalAlertCenter.shared.show(
+                    items.isEmpty ? "全部补传完成" : "完成部分补传，剩余 \(items.count) 个保留待重试",
+                    title: "补传结果"
+                )
             }
         }
     }

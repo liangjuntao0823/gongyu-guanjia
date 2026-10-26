@@ -7,8 +7,9 @@ import SwiftUI
 final class GlobalAlertCenter: ObservableObject {
     static let shared = GlobalAlertCenter()
     @Published var message: String?
-    func show(_ msg: String) { message = msg }
-    func dismiss() { message = nil }
+    @Published var title: String = "提示"
+    func show(_ msg: String, title: String = "提示") { self.message = msg; self.title = title }
+    func dismiss() { message = nil; title = "提示" }
 }
 
 /// 全局提示遮罩（置于 MainTabView 最上层，不受 Tab 切换 disabled 影响）
@@ -21,7 +22,7 @@ struct GlobalAlertOverlay: View {
                     .ignoresSafeArea()
                     .onTapGesture { center.dismiss() }
                 VStack(spacing: 14) {
-                    Text("提示")
+                    Text(center.title)
                         .font(.headline)
                     Text(msg)
                         .font(.subheadline)

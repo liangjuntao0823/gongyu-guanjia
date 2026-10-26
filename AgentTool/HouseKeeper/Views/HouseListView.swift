@@ -1364,6 +1364,14 @@ struct HouseListView: View {
             if !mediaDiffRoomNo.isEmpty { parts.append("媒体同步：\(Array(Set(mediaDiffRoomNo)).joined(separator: "，"))") }
             let msg = "已同步：\(parts.joined(separator: "，"))"
             showToast(msg)
+            // v1.75：同步完成后重建/刷新全部本地账本镜像（media/<房号>/info.json）——
+            // 覆盖历史版本误删（对账把 info.json 当多余媒体删掉）与新增/变化，保证本地镜像与云端一致
+            await MainActor.run {
+                let all = (try? ctx.fetch(FetchDescriptor<House>())) ?? []
+                for h in all where !h.isTrashed {
+                    LocalHouseLedger.save(h)
+                }
+            }
             BackupLogStore.log(category: "同步", action: "同步房源（云端→本地）", result: "成功", detail: msg, cloud: true)
             HouseSyncProgress.shared.clear()
         } catch {

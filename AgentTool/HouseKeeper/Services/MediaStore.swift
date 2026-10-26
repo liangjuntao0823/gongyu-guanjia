@@ -166,7 +166,10 @@ enum MediaStore {
     static func existingFileNames(roomKey: String) -> Set<String> {
         let dir = houseDirectory(roomKey: roomKey)
         // v1.69：目录名强制带前缀，不再回退 v1.62 无前缀目录
-        return Set((try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? [])
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []
+        // v1.75：排除本地账本镜像 info.json（v1.72 起每套一份）与系统杂项——
+        // 它们不是媒体文件，若不排除，同步对账会把它们误判为「本地多余媒体」删除（实测删了7套账本）
+        return Set(names.filter { $0 != "info.json" && $0 != ".DS_Store" })
     }
 
     /// v1.37：按指定文件名写入媒体数据（云端同步回补用；已存在则覆盖），返回是否写入成功
