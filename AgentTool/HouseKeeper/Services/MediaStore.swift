@@ -103,6 +103,12 @@ enum MediaStore {
         if FileManager.default.fileExists(atPath: newURL.path) {
             return newURL
         }
+        // v1.62：兼容带「1-」前缀的手工目录（media/1-<roomKey>/）——用户手动拖入的文件夹常带 1- 前缀，
+        // 未跑迁移前读取也能命中
+        let prefixedURL = houseDirectory(roomKey: "1-\(roomKey)").appendingPathComponent(fileName)
+        if FileManager.default.fileExists(atPath: prefixedURL.path) {
+            return prefixedURL
+        }
         // v1.40 兼容：升级前旧目录 备份/Media/<房号>/<文件>（迁移未完成或读取旧备份时）
         let legacyHouseURL = legacyMediaDirectory.appendingPathComponent(roomKey, isDirectory: true).appendingPathComponent(fileName)
         if FileManager.default.fileExists(atPath: legacyHouseURL.path) {
@@ -162,9 +168,15 @@ enum MediaStore {
     }
 
     /// v1.37：列出某房号目录下实际存在的媒体文件名（用于检测本地媒体是否缺失、是否需要从云端回补）
+    /// v1.62：无前缀目录为空时回退带「1-」前缀目录（用户手工文件夹命名场景）
     static func existingFileNames(roomKey: String) -> Set<String> {
         let dir = houseDirectory(roomKey: roomKey)
-        return Set((try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? [])
+        var names = Set((try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? [])
+        if names.isEmpty {
+            let prefixed = houseDirectory(roomKey: "1-\(roomKey)")
+            names = Set((try? FileManager.default.contentsOfDirectory(atPath: prefixed.path)) ?? [])
+        }
+        return names
     }
 
     /// v1.37：按指定文件名写入媒体数据（云端同步回补用；已存在则覆盖），返回是否写入成功
@@ -248,6 +260,30 @@ enum MediaStore {
             }
         }
         return (tempRoot, keys)
+    }
+
+    /// v1.62：房号目录归一——把带「1-」前缀的目录（如 media/1-2245上）合并到无前缀目录（media/2245上），删除空源目录。
+    /// 用户手动整理/媒体包里的文件夹常带 1- 前缀，而 House.mediaRoomKey 为无前缀（tower=1），
+    /// 导入/扫描时调用保证目录名与房源一致，防止媒体读不到、恢复错乱、双目录并存。
+    @discardableResult
+    static func migratePrefixedDir(rawKey: String, normalized: String) -> URL {
+        let target = houseDirectory(roomKey: normalized)
+        guard rawKey != normalized else { return target }
+        let source = houseDirectory(roomKey: rawKey)
+        var isDir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: source.path, isDirectory: &isDir), isDir.boolValue else { return target }
+        try? FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
+        if let names = try? FileManager.default.contentsOfDirectory(atPath: source.path) {
+            for name in names {
+                let dest = target.appendingPathComponent(name)
+                if !FileManager.default.fileExists(atPath: dest.path) {
+                    try? FileManager.default.moveItem(at: source.appendingPathComponent(name), to: dest)
+                }
+            }
+        }
+        let rest = (try? FileManager.default.contentsOfDirectory(atPath: source.path)) ?? []
+        if rest.isEmpty { try? FileManager.default.removeItem(at: source) }
+        return target
     }
 
     /// 把 zip 内某个房号目录的全部媒体文件复制到 Documents/media/<roomKey>/（zip 临时目录 → 正式目录），返回复制的文件名

@@ -400,11 +400,15 @@ struct HouseBatchImportView: View {
             var item = BatchImportItem(roomNo: roomNo, tower: tower)
             item.rawRoomNo = key   // v1.61：预览回显目录名原样（含 2- 前缀）
             item.mediaDirKey = key
-            item.diskFileCount = MediaStore.mediaFileNames(in: MediaStore.houseDirectory(roomKey: key)).count
+            // v1.62：扫描即归位——带「1-」前缀的目录合并到无前缀目录（与 House.mediaRoomKey 一致），
+            //         存量错乱目录（1-2245上 + 2245上 并存）点一次扫描即可全部修复
+            let normalized = tower == 2 ? "2-\(roomNo)" : roomNo
+            let dir = MediaStore.migratePrefixedDir(rawKey: key, normalized: normalized)
+            item.diskFileCount = MediaStore.mediaFileNames(in: dir).count
             if let house = BatchImporter.findDuplicate(roomNo: roomNo, tower: tower, in: all) {
                 item.duplicate = true
                 item.existingRecordCount = house.mediaItems.count
-                let disk = Set(MediaStore.mediaFileNames(in: MediaStore.houseDirectory(roomKey: key)))
+                let disk = Set(MediaStore.mediaFileNames(in: dir))
                 let exist = Set(house.mediaItems.map { $0.fileName })
                 item.missingRecordCount = disk.subtracting(exist).count
             }
@@ -551,20 +555,26 @@ struct HouseBatchImportView: View {
                 }
             }
             showSummary = true
+            // v1.62：导入完成后通知房源列表刷新（否则需退出重进才能看到新房源）
+            NotificationCenter.default.post(name: HouseListView.houseStoreChanged, object: nil)
         }
     }
 
     /// 该房源要挂的媒体文件列表：
     /// zip 模式 = 从临时目录复制进正式目录（返回实际复制的文件名）；
     /// scan 模式 = 磁盘已在正式目录，返回磁盘里全部媒体文件名（由调用方按已有记录去重）
+    /// v1.62：目标目录统一用规范化 mediaRoomKey（1 座无前缀）——用户 zip/文件夹里带「1-」前缀的目录名
+    ///         导入时归一到无前缀目录，避免与 House.mediaRoomKey 不一致导致媒体读不到/恢复错乱
     private func mediaFilesToAttach(for item: BatchImportItem) -> [String] {
         guard let key = item.mediaDirKey else { return [] }
+        let normalized = item.tower == 2 ? "2-\(item.roomNo)" : item.roomNo
         if let zipRoot = zipTempRoot {
             let src = zipRoot.appendingPathComponent(key, isDirectory: true)
-            // 解压目录名（如 2334上 / 2-1418下）即 mediaRoomKey，直接作为正式目录名
-            return MediaStore.importMediaFiles(fromTempDir: src, toRoomKey: key)
+            return MediaStore.importMediaFiles(fromTempDir: src, toRoomKey: normalized)
         }
-        return MediaStore.mediaFileNames(in: MediaStore.houseDirectory(roomKey: key))
+        // scan：源目录在正式 media/ 下，先把带「1-」前缀的目录合并到无前缀目录，再取文件名
+        let dir = MediaStore.migratePrefixedDir(rawKey: key, normalized: normalized)
+        return MediaStore.mediaFileNames(in: dir)
     }
 
     private func resultText(_ s: BatchImportSummary) -> String {
