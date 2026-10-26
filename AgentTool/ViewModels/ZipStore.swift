@@ -1,8 +1,11 @@
 import Foundation
+import zlib
 
 // MARK: - v1.12 最小 ZIP 归档（STORE 无压缩模式）
 // iOS 无内置 zip 归档 API（Compression 框架只支持单流压缩），为不引入第三方依赖，
 // 自实现最小 zip 读写：本地文件头 + 中央目录 + EOCD，method=STORE（媒体多为 jpg/mov 已压缩格式，再压无意义）。
+// v1.61：读取端支持 DEFLATE（method=8）压缩条目（电脑 WinRAR/「发送到压缩文件夹」压的 zip 默认压缩），
+//        中文文件名编码兼容（UTF-8 失败回退 GB18030）。
 // 支持：整包写入、解析中央目录、按需提取单文件、全量解压到目录。
 
 struct ZipEntry {
@@ -140,17 +143,28 @@ enum ZipStore {
             guard pos + 46 <= cdData.count, le32Value(cdData, at: pos) == 0x02014B50 else { throw ZipError.corrupted }
             let method = le16Value(cdData, at: pos + 10)
             let usize = Int(le32Value(cdData, at: pos + 24))
+            let csize = Int(le32Value(cdData, at: pos + 20))
             let nameLen = Int(le16Value(cdData, at: pos + 28))
             let extraLen = Int(le16Value(cdData, at: pos + 30))
             let commentLen = Int(le16Value(cdData, at: pos + 32))
             let localOffset = Int(le32Value(cdData, at: pos + 42))
             let nameStart = pos + 46
             guard nameStart + nameLen <= cdData.count else { throw ZipError.corrupted }
-            let path = String(data: cdData.subdata(in: nameStart..<(nameStart + nameLen)), encoding: .utf8) ?? ""
+            // v1.61：文件名编码兼容——UTF-8 失败回退 GB18030（Windows 压缩的中文文件名常见 GBK）
+            let rawName = cdData.subdata(in: nameStart..<(nameStart + nameLen))
+            let path: String
+            if let u = String(data: rawName, encoding: .utf8) {
+                path = u
+            } else {
+                let gbk = String.Encoding(rawValue: CFStringConvertEncodingToNSStringEncoding(
+                    CFStringEncoding(CFStringEncodings.GB_18030_2000.rawValue)))
+                path = String(data: rawName, encoding: gbk) ?? ""
+            }
             pos = nameStart + nameLen + extraLen + commentLen
 
             guard !path.hasSuffix("/") else { continue }
-            guard method == 0 else { throw ZipError.corrupted }  // 本工具只支持 STORE 条目
+            // v1.61：支持 STORE(0) 与 DEFLATE(8)；其余（LZMA 等）不识别
+            guard method == 0 || method == 8 else { throw ZipError.corrupted }
             // v1.40：可选路径过滤（全量恢复只解压 media/ 条目，避免 manifest 等散落到 Documents 根）
             if let includePath = includePath, !includePath(path) { continue }
             let safePath = normalizeArchivePath(path)
@@ -171,14 +185,58 @@ enum ZipStore {
             }
             guard let out = FileHandle(forWritingAtPath: target.path) else { throw ZipError.corrupted }
             defer { try? out.close() }
-            var remaining = usize
-            while remaining > 0 {
-                let chunk = handle.readData(ofLength: min(1_048_576, remaining))
-                guard !chunk.isEmpty else { throw ZipError.corrupted }
-                out.write(chunk)
-                remaining -= chunk.count
+
+            if method == 0 {
+                var remaining = usize
+                while remaining > 0 {
+                    let chunk = handle.readData(ofLength: min(1_048_576, remaining))
+                    guard !chunk.isEmpty else { throw ZipError.corrupted }
+                    out.write(chunk)
+                    remaining -= chunk.count
+                }
+            } else {
+                // v1.61：DEFLATE 压缩条目——收集压缩数据 → inflate（raw deflate，先 -MAX_WBITS，失败回退 zlib 头）
+                var compressed = Data(capacity: csize)
+                var remainingC = csize
+                while remainingC > 0 {
+                    let chunk = handle.readData(ofLength: min(1_048_576, remainingC))
+                    guard !chunk.isEmpty else { throw ZipError.corrupted }
+                    compressed.append(chunk)
+                    remainingC -= chunk.count
+                }
+                // 防御：单条解压上限 1.5GB，防畸形 zip 声明超大尺寸
+                guard usize <= 1_500_000_000 else { throw ZipError.corrupted }
+                guard let inflated = ZipStore.inflateRaw(compressed, expectedSize: usize) else { throw ZipError.corrupted }
+                out.write(inflated)
             }
         }
+    }
+
+    /// v1.61：DEFLATE 解压（zip method=8）。先按 raw deflate 解，失败再按 zlib 头解。
+    static func inflateRaw(_ data: Data, expectedSize: Int) -> Data? {
+        guard expectedSize > 0 else { return Data() }
+        var out = Data(count: expectedSize)
+        var ok = false
+        for windowBits in [-MAX_WBITS, MAX_WBITS] {
+            var stream = z_stream()
+            let result: Int32 = data.withUnsafeBytes { (src: UnsafeRawBufferPointer) -> Int32 in
+                guard let base = src.baseAddress else { return Z_ERRNO }
+                return out.withUnsafeMutableBytes { (dst: UnsafeMutableRawBufferPointer) -> Int32 in
+                    guard let db = dst.baseAddress else { return Z_ERRNO }
+                    stream.next_in = base.bindMemory(to: Bytef.self, capacity: data.count)
+                    stream.avail_in = uInt(data.count)
+                    stream.next_out = db.bindMemory(to: Bytef.self, capacity: expectedSize)
+                    stream.avail_out = uInt(expectedSize)
+                    let initRet = inflateInit2_(&stream, windowBits, ZLIB_VERSION, Int32(MemoryLayout<z_stream>.size))
+                    guard initRet == Z_OK else { return initRet }
+                    let r = inflate(&stream, Z_FINISH)
+                    inflateEnd(&stream)
+                    return r
+                }
+            }
+            if result == Z_STREAM_END { ok = true; break }
+        }
+        return ok ? out : nil
     }
 
     static func isZip(url: URL) -> Bool {

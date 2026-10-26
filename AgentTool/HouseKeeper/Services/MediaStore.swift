@@ -212,16 +212,20 @@ enum MediaStore {
 
     // MARK: - v1.58 批量录入支持
 
-    /// 扫描 Documents/media/ 下所有房号子目录名（即 mediaRoomKey；跳过隐藏/非目录项）
-    static func scanMediaDirectoryKeys() -> [String] {
-        let dir = mediaDirectory()
+    /// 列出某目录的直接子目录名（跳过隐藏项与 __MACOSX 元数据目录）
+    static func subdirNames(at dir: URL) -> [String] {
         guard let names = try? FileManager.default.contentsOfDirectory(atPath: dir.path) else { return [] }
-        return names.filter { name in
-            guard !name.hasPrefix(".") else { return false }
+        return names.filter { n in
+            guard !n.hasPrefix(".") && !n.hasPrefix("__MACOSX") else { return false }
             var isDir: ObjCBool = false
-            FileManager.default.fileExists(atPath: dir.appendingPathComponent(name).path, isDirectory: &isDir)
+            FileManager.default.fileExists(atPath: dir.appendingPathComponent(n).path, isDirectory: &isDir)
             return isDir.boolValue
         }
+    }
+
+    /// 扫描 Documents/media/ 下所有房号子目录名（即 mediaRoomKey；跳过隐藏/非目录项）
+    static func scanMediaDirectoryKeys() -> [String] {
+        subdirNames(at: mediaDirectory())
     }
 
     /// 把「媒体包 zip」解压到系统临时目录，识别出房号目录 key 列表。
@@ -231,19 +235,11 @@ enum MediaStore {
             .appendingPathComponent("BatchMedia_\(UUID().uuidString)", isDirectory: true)
         try? FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
         guard (try? ZipStore.extractAll(at: url, to: tempRoot)) != nil else { return nil }
-        func subdirs(of dir: URL) -> [String] {
-            guard let names = try? FileManager.default.contentsOfDirectory(atPath: dir.path) else { return [] }
-            return names.filter { n in
-                var isDir: ObjCBool = false
-                FileManager.default.fileExists(atPath: dir.appendingPathComponent(n).path, isDirectory: &isDir)
-                return isDir.boolValue && !n.hasPrefix("__MACOSX") && !n.hasPrefix(".")
-            }
-        }
-        var keys = subdirs(of: tempRoot)
+        var keys = subdirNames(at: tempRoot)
         // 单层包裹：根下只有 1 个目录且没有散落文件 → 下钻
         if keys.count == 1 {
             let single = tempRoot.appendingPathComponent(keys[0], isDirectory: true)
-            let inner = subdirs(of: single)
+            let inner = subdirNames(at: single)
             let looseFiles = ((try? FileManager.default.contentsOfDirectory(atPath: tempRoot.path)) ?? [])
                 .filter { !$0.hasPrefix(".") }
             let innerAll = inner.filter { $0 != "__MACOSX" }

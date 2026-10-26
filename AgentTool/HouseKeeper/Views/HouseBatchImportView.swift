@@ -7,7 +7,8 @@ import UniformTypeIdentifiers
 /// 批量导入的单个房源项（预览用）
 struct BatchImportItem: Identifiable {
     let id = UUID()
-    var roomNo: String          // 房号本体（不带 2- 前缀；tower 单独记录）
+    var rawRoomNo = ""          // v1.61 预览回显：CSV 原始输入 / zip·目录名（用户写什么显示什么）
+    var roomNo: String          // 房号本体（不带 2-/1- 前缀；tower 单独记录）
     var tower: Int
     var landlord = ""
     var layout = ""
@@ -72,12 +73,14 @@ struct HouseBatchImportView: View {
         var types: [UTType] {
             switch self {
             case .csv: return [.commaSeparatedText, .plainText, .text, .data]
-            case .zip: return [.zip, .archive, .data]
+            // v1.61：支持 zip / 通用归档 / 直接选文件夹（媒体包可不压缩）
+            case .zip: return [.zip, .archive, .folder, .data]
             }
         }
     }
     @State private var activePicker: PickerTarget?
     @State private var templateURL: URL?
+    @State private var pickedIsFolder = false   // v1.61：所选 zip 实为文件夹时标记
 
     // —— 通用 ——
     @State private var isImporting = false
@@ -118,7 +121,11 @@ struct HouseBatchImportView: View {
             DocPicker(types: target.types) { url in
                 switch target {
                 case .csv: loadCsvFile(url)
-                case .zip: parseZip(url)
+                case .zip:
+                    // v1.61：支持直接选文件夹（不压缩的媒体包）
+                    var isDir: ObjCBool = false
+                    FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir)
+                    if isDir.boolValue { parseFolder(url) } else { parseZip(url) }
                 }
             }
             .ignoresSafeArea()
@@ -159,7 +166,7 @@ struct HouseBatchImportView: View {
 
     private var listModeView: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("粘贴房源清单（每行一间，逗号分隔）：\n房号,座号,房东,户型,租金,密码,备注,状态\n例：2334上,1,康,单间,1100,,,待租\n2-1418下,2,业主,单间,900,,,已租")
+            Text("粘贴房源清单（每行一间，逗号分隔）：\n房号,座号,房东,户型,租金,密码,备注,状态\n例：2334上,1,康,单间,1100,,,待租\n2-1418下,2,业主,单间,900,,,已租\n座号留空：房号带 2- 前缀自动判为 2 座；状态留空默认「待租」")
                 .font(.footnote)
                 .foregroundColor(.secondary)
             TextEditor(text: $csvText)
@@ -245,6 +252,7 @@ struct HouseBatchImportView: View {
             let (roomNo, tower) = BatchImporter.parseRoom(rawRoom, explicitTower: cols.count > 1 ? Int(cols[1].replacingOccurrences(of: "座", with: "")) ?? 0 : 0)
             guard !roomNo.isEmpty else { badLines.append("第\(idx + 1)行：房号无效"); continue }
             var item = BatchImportItem(roomNo: roomNo, tower: tower)
+            item.rawRoomNo = rawRoom   // v1.61：预览回显用户原始输入（含 1-/2- 前缀原样显示）
             if cols.count > 2 { item.landlord = cols[2] }
             if cols.count > 3 { item.layout = cols[3] }
             if cols.count > 4 { item.price = Int(cols[4].replacingOccurrences(of: "元", with: "")) ?? 0 }
@@ -269,15 +277,15 @@ struct HouseBatchImportView: View {
 
     private var zipModeView: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("选择一个 zip 媒体包：\nzip 根目录下按房号建文件夹（如 2334上/、2-1418下/），文件夹内放照片视频（jpg/png/heic/mov/mp4）。\n已收录房号 → 自动补挂媒体；未收录房号 → 自动新建房源（字段留空待补）。")
+            Text("选择一个 zip 媒体包，或直接选一个文件夹（不压缩也行）：\nzip 根目录 / 文件夹里按房号建子文件夹（如 2334上/、2-1418下/），子文件夹内放照片视频（jpg/png/heic/mov/mp4）。\n已收录房号 → 自动补挂媒体；未收录房号 → 自动新建房源（字段留空待补）。")
                 .font(.footnote)
                 .foregroundColor(.secondary)
             HStack(spacing: 12) {
-                Button("选择 zip 媒体包") { activePicker = .zip }
+                Button("选择 zip 或文件夹") { activePicker = .zip }
                     .font(.subheadline)
                 Spacer()
                 if let name = pickedZip?.lastPathComponent {
-                    Text(name).font(.footnote).foregroundColor(.secondary)
+                    Text("\(name)\(pickedIsFolder ? "（文件夹）" : "")").font(.footnote).foregroundColor(.secondary)
                 } else {
                     Text("未选择").foregroundColor(.secondary)
                 }
@@ -301,20 +309,43 @@ struct HouseBatchImportView: View {
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
         guard let extracted = MediaStore.extractMediaZipToTemp(url: url) else {
-            errorMessage = "无法解析该 zip（不是有效的压缩包）"
+            errorMessage = "无法解析该 zip（不是有效的压缩包，或使用了不支持的压缩方式）"
             showError = true
             return
         }
-        zipTempRoot = extracted.tempRoot
         pickedZip = url
+        pickedIsFolder = false
+        zipTempRoot = extracted.tempRoot
+        buildZipItems(from: extracted.tempRoot, keys: extracted.roomKeys)
+    }
+
+    /// v1.61：直接选文件夹作为媒体包（无需压缩）——文件夹根 = 房号子目录集合
+    private func parseFolder(_ url: URL) {
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        let keys = MediaStore.subdirNames(at: url)
+        guard !keys.isEmpty else {
+            errorMessage = "该文件夹下没有按房号建好的子文件夹"
+            showError = true
+            return
+        }
+        pickedZip = url
+        pickedIsFolder = true
+        zipTempRoot = url
+        buildZipItems(from: url, keys: keys)
+    }
+
+    /// 媒体包解析公共逻辑：从根目录 + 房号 key 列表构建预览项
+    private func buildZipItems(from root: URL, keys: [String]) {
         let all = (try? houseModelContext?.fetch(FetchDescriptor<House>())) ?? []
         var items: [BatchImportItem] = []
-        for key in extracted.roomKeys {
+        for key in keys {
             let (roomNo, tower) = BatchImporter.parseRoom(key, explicitTower: key.hasPrefix("2-") ? 2 : 0)
             guard !roomNo.isEmpty else { continue }
             var item = BatchImportItem(roomNo: roomNo, tower: tower)
+            item.rawRoomNo = key
             item.mediaDirKey = key
-            let src = extracted.tempRoot.appendingPathComponent(key, isDirectory: true)
+            let src = root.appendingPathComponent(key, isDirectory: true)
             item.diskFileCount = MediaStore.mediaFileNames(in: src).count
             if let house = BatchImporter.findDuplicate(roomNo: roomNo, tower: tower, in: all) {
                 item.duplicate = true
@@ -367,6 +398,7 @@ struct HouseBatchImportView: View {
             let (roomNo, tower) = BatchImporter.parseRoom(key, explicitTower: key.hasPrefix("2-") ? 2 : 0)
             guard !roomNo.isEmpty else { continue }
             var item = BatchImportItem(roomNo: roomNo, tower: tower)
+            item.rawRoomNo = key   // v1.61：预览回显目录名原样（含 2- 前缀）
             item.mediaDirKey = key
             item.diskFileCount = MediaStore.mediaFileNames(in: MediaStore.houseDirectory(roomKey: key)).count
             if let house = BatchImporter.findDuplicate(roomNo: roomNo, tower: tower, in: all) {
@@ -389,7 +421,8 @@ struct HouseBatchImportView: View {
             ForEach(items) { item in
                 VStack(alignment: .leading, spacing: 2) {
                     HStack {
-                        Text(item.tower == 2 ? "2-\(item.roomNo)" : item.roomNo)
+                        // v1.61：优先回显用户原始输入（CSV 写 1-2245上 就显示 1-2245上，不再"被删"）
+                        Text(item.rawRoomNo.isEmpty ? (item.tower == 2 ? "2-\(item.roomNo)" : item.roomNo) : item.rawRoomNo)
                             .font(.subheadline).fontWeight(.medium)
                         Spacer()
                         if !item.layout.isEmpty { Text(item.layout).font(.footnote).foregroundColor(.secondary) }
@@ -441,6 +474,9 @@ struct HouseBatchImportView: View {
         guard let ctx = houseModelContext else { return }
         isImporting = true
         Task { @MainActor in
+            // v1.61：文件夹模式需在任务内重新持有安全作用域（复制文件时保持可读）
+            let scoped = pickedIsFolder ? (pickedZip?.startAccessingSecurityScopedResource() ?? false) : false
+            defer { if scoped { pickedZip?.stopAccessingSecurityScopedResource() } }
             var summary = BatchImportSummary()
             var all = (try? ctx.fetch(FetchDescriptor<House>())) ?? []
             for item in items where !item.duplicate {
