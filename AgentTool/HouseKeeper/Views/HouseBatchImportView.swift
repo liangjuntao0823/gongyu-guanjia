@@ -152,7 +152,7 @@ struct HouseBatchImportView: View {
         .onAppear {
             if templateURL == nil {
                 let url = FileManager.default.temporaryDirectory.appendingPathComponent("房源导入模板.csv")
-                let text = "房号,座号,房东,户型,租金,密码,备注,状态\n2334上,1,康,单间,1100,,,待租\n2-1418下,2,业主,单间,900,,,已租\n"
+                let text = "房号,座号,房东,户型,租金,密码,备注,状态\n1-2334上,,康,单间,1100,,,待租\n2-1418下,,业主,单间,900,,,已租\n"
                 // v1.60：加 UTF-8 BOM，Windows 的 Excel/记事本打开不再乱码
                 var bytes = Data([0xEF, 0xBB, 0xBF])
                 if let body = text.data(using: .utf8) { bytes.append(body) }
@@ -166,7 +166,7 @@ struct HouseBatchImportView: View {
 
     private var listModeView: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("粘贴房源清单（每行一间，逗号分隔）：\n房号,座号,房东,户型,租金,密码,备注,状态\n例：2334上,1,康,单间,1100,,,待租\n2-1418下,2,业主,单间,900,,,已租\n座号留空：房号带 2- 前缀自动判为 2 座；状态留空默认「待租」")
+            Text("粘贴房源清单（每行一间，逗号分隔）：\n房号,座号,房东,户型,租金,密码,备注,状态\n例：1-2334上,,康,单间,1100,,,待租\n2-1418下,,业主,单间,900,,,已租\n房号带 1-/2- 前缀自动识别座号（座号留空也可）；状态留空默认「待租」")
                 .font(.footnote)
                 .foregroundColor(.secondary)
             TextEditor(text: $csvText)
@@ -277,7 +277,7 @@ struct HouseBatchImportView: View {
 
     private var zipModeView: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("选择一个 zip 媒体包，或直接选一个文件夹（不压缩也行）：\nzip 根目录 / 文件夹里按房号建子文件夹（如 2334上/、2-1418下/），子文件夹内放照片视频（jpg/png/heic/mov/mp4）。\n已收录房号 → 自动补挂媒体；未收录房号 → 自动新建房源（字段留空待补）。")
+            Text("选择一个 zip 媒体包，或直接选一个文件夹（不压缩也行）：\nzip 根目录 / 文件夹里按房号建子文件夹（如 1-2334上/、2-1418下/），子文件夹内放照片视频（jpg/png/heic/mov/mp4）。\n已收录房号 → 自动补挂媒体；未收录房号 → 自动新建房源（字段留空待补）。")
                 .font(.footnote)
                 .foregroundColor(.secondary)
             HStack(spacing: 12) {
@@ -364,7 +364,7 @@ struct HouseBatchImportView: View {
 
     private var scanModeView: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("扫描 Documents/media/ 下已按房号建好的文件夹：\n已收录房号 → 比对磁盘与记录，缺失的补建媒体记录；未收录房号 → 自动新建房源（字段留空待补）。\n电脑导入方法：连接电脑后在「访达/文件」里找到「公寓管家」App 的 Documents/media/，把按房号的文件夹整体拖进去，再回这里点扫描。")
+            Text("扫描 Documents/media/ 下已按房号建好的文件夹：\n已收录房号 → 比对磁盘与记录，缺失的补建媒体记录；未收录房号 → 自动新建房源（字段留空待补）。\n电脑导入方法：连接电脑后在「访达/文件」里找到「公寓管家」App 的 Documents/media/，把按房号的文件夹整体拖进去，再回这里点扫描。文件夹名建议带座号前缀（1-xxx / 2-xxx）。")
                 .font(.footnote)
                 .foregroundColor(.secondary)
             Button("扫描 media 目录") { runScan() }
@@ -400,10 +400,8 @@ struct HouseBatchImportView: View {
             var item = BatchImportItem(roomNo: roomNo, tower: tower)
             item.rawRoomNo = key   // v1.61：预览回显目录名原样（含 2- 前缀）
             item.mediaDirKey = key
-            // v1.62：扫描即归位——带「1-」前缀的目录合并到无前缀目录（与 House.mediaRoomKey 一致），
-            //         存量错乱目录（1-2245上 + 2245上 并存）点一次扫描即可全部修复
-            let normalized = tower == 2 ? "2-\(roomNo)" : roomNo
-            let dir = MediaStore.migratePrefixedDir(rawKey: key, normalized: normalized)
+            // v1.63：扫描即归位——v1.62 时期遗留的无前缀目录合并到带前缀目录（1-2245上），与 House.mediaRoomKey 一致
+            let dir = MediaStore.migrateDirToPrefixed(roomNo: roomNo, tower: tower)
             item.diskFileCount = MediaStore.mediaFileNames(in: dir).count
             if let house = BatchImporter.findDuplicate(roomNo: roomNo, tower: tower, in: all) {
                 item.duplicate = true
@@ -554,6 +552,9 @@ struct HouseBatchImportView: View {
                     }
                 }
             }
+            // v1.63：批量导入/恢复接入本地操作日志
+            BackupLogStore.log(category: "房源", action: "批量导入", result: "成功",
+                                detail: resultText(summary).replacingOccurrences(of: "\n", with: "；"))
             showSummary = true
             // v1.62：导入完成后通知房源列表刷新（否则需退出重进才能看到新房源）
             NotificationCenter.default.post(name: HouseListView.houseStoreChanged, object: nil)
@@ -563,17 +564,17 @@ struct HouseBatchImportView: View {
     /// 该房源要挂的媒体文件列表：
     /// zip 模式 = 从临时目录复制进正式目录（返回实际复制的文件名）；
     /// scan 模式 = 磁盘已在正式目录，返回磁盘里全部媒体文件名（由调用方按已有记录去重）
-    /// v1.62：目标目录统一用规范化 mediaRoomKey（1 座无前缀）——用户 zip/文件夹里带「1-」前缀的目录名
-    ///         导入时归一到无前缀目录，避免与 House.mediaRoomKey 不一致导致媒体读不到/恢复错乱
+    /// v1.63：目标目录统一用带前缀 mediaRoomKey（1 座「1-」、2 座「2-」）——用户 zip/文件夹里的目录名
+    ///         无论带不带前缀，导入后目录名与 House.mediaRoomKey 一致，避免媒体读不到/恢复错乱
     private func mediaFilesToAttach(for item: BatchImportItem) -> [String] {
         guard let key = item.mediaDirKey else { return [] }
-        let normalized = item.tower == 2 ? "2-\(item.roomNo)" : item.roomNo
+        let normalized = item.tower == 2 ? "2-\(item.roomNo)" : "1-\(item.roomNo)"
         if let zipRoot = zipTempRoot {
             let src = zipRoot.appendingPathComponent(key, isDirectory: true)
             return MediaStore.importMediaFiles(fromTempDir: src, toRoomKey: normalized)
         }
-        // scan：源目录在正式 media/ 下，先把带「1-」前缀的目录合并到无前缀目录，再取文件名
-        let dir = MediaStore.migratePrefixedDir(rawKey: key, normalized: normalized)
+        // scan：源目录在正式 media/ 下，先把无前缀目录合并到带前缀目录，再取文件名
+        let dir = MediaStore.migrateDirToPrefixed(roomNo: item.roomNo, tower: item.tower)
         return MediaStore.mediaFileNames(in: dir)
     }
 

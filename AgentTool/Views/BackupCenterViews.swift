@@ -760,6 +760,8 @@ struct BackupFileBrowseViewV5: View {
                             ? "本次恢复使用本地已有副本，未重复下载云端"
                             : "本地无该备份，已自动从云端下载到本地后恢复"
                         BackupLogStore.log(category: "恢复", action: "云端恢复", result: "成功", detail: "\(stats.summaryLines.joined(separator: " / "))；来源：\((localHit != nil) ? "本地已有副本" : "云端下载")", cloud: true)
+                        // v1.63：恢复（含媒体）完成后通知房源列表/详情刷新
+                        NotificationCenter.default.post(name: HouseListView.houseStoreChanged, object: nil)
                     }
                 } else if let url = target.localURL {
                     let stats = try await BackupV5Manager.restore(
@@ -772,6 +774,8 @@ struct BackupFileBrowseViewV5: View {
                         restoreStats = stats
                         restoreSourceNote = "本次恢复使用本地备份文件"
                         BackupLogStore.log(category: "恢复", action: "本地恢复", result: "成功", detail: stats.summaryLines.joined(separator: " / "))
+                        // v1.63：恢复（含媒体）完成后通知房源列表/详情刷新
+                        NotificationCenter.default.post(name: HouseListView.houseStoreChanged, object: nil)
                     }
                 } else if let data = target.legacyData, let scope = target.legacyScope {
                     let stats = try await BackupV5Manager.restoreLegacyJSON(data: data, mainContext: modelContext, scope: scope)
@@ -780,6 +784,8 @@ struct BackupFileBrowseViewV5: View {
                         restoreStats = stats
                         restoreSourceNote = "本次恢复使用旧版 JSON 备份"
                         BackupLogStore.log(category: "恢复", action: "旧版恢复", result: "成功", detail: stats.summaryLines.joined(separator: " / "))
+                        // v1.63：恢复（含媒体）完成后通知房源列表/详情刷新
+                        NotificationCenter.default.post(name: HouseListView.houseStoreChanged, object: nil)
                     }
                 } else {
                     throw BackupV5Error.invalidBackup("未选择备份")
@@ -910,6 +916,9 @@ struct BackupLogsView: View {
                 ToolbarItem(placement: .topBarLeading) {
                     if isEditing {
                         Button("取消") { exitEdit() }
+                    } else if section == 1 {
+                        // v1.63：云端操作记录不支持一键清空，只能单选/多选删除 → 进入多选模式
+                        Button("多选") { isEditing = true }
                     } else {
                         Button("清空") { showClearConfirm = true }
                     }
@@ -1007,11 +1016,8 @@ struct BackupLogsView: View {
     }
     private func exitEdit() { isEditing = false; selectedLocal = []; selectedCloud = [] }
     private func performClear() {
-        if section == 0 {
-            BackupLogStore.clear(); reloadLocal()
-        } else {
-            exportTip = "云端操作记录请在本页左滑或勾选后逐条删除（云端不提供一键清空）"
-        }
+        // v1.63：云端不再提供一键清空（仅本机日志可清空；云端只能左滑/多选逐条删除）
+        BackupLogStore.clear(); reloadLocal()
         showClearConfirm = false
     }
     private func deleteSelected() {

@@ -103,11 +103,11 @@ enum MediaStore {
         if FileManager.default.fileExists(atPath: newURL.path) {
             return newURL
         }
-        // v1.62：兼容带「1-」前缀的手工目录（media/1-<roomKey>/）——用户手动拖入的文件夹常带 1- 前缀，
-        // 未跑迁移前读取也能命中
-        let prefixedURL = houseDirectory(roomKey: "1-\(roomKey)").appendingPathComponent(fileName)
-        if FileManager.default.fileExists(atPath: prefixedURL.path) {
-            return prefixedURL
+        // v1.63：兼容 v1.62 时期遗留的无前缀目录（media/<房号>/）——roomKey 现为带前缀，剥掉前缀再试
+        let stripped = roomKey.hasPrefix("1-") || roomKey.hasPrefix("2-") ? String(roomKey.dropFirst(2)) : roomKey
+        let plainURL = houseDirectory(roomKey: stripped).appendingPathComponent(fileName)
+        if FileManager.default.fileExists(atPath: plainURL.path) {
+            return plainURL
         }
         // v1.40 兼容：升级前旧目录 备份/Media/<房号>/<文件>（迁移未完成或读取旧备份时）
         let legacyHouseURL = legacyMediaDirectory.appendingPathComponent(roomKey, isDirectory: true).appendingPathComponent(fileName)
@@ -168,13 +168,14 @@ enum MediaStore {
     }
 
     /// v1.37：列出某房号目录下实际存在的媒体文件名（用于检测本地媒体是否缺失、是否需要从云端回补）
-    /// v1.62：无前缀目录为空时回退带「1-」前缀目录（用户手工文件夹命名场景）
+    /// v1.63：带前缀目录（media/1-<房号>/）为空时回退 v1.62 时期遗留的无前缀目录
     static func existingFileNames(roomKey: String) -> Set<String> {
         let dir = houseDirectory(roomKey: roomKey)
         var names = Set((try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? [])
         if names.isEmpty {
-            let prefixed = houseDirectory(roomKey: "1-\(roomKey)")
-            names = Set((try? FileManager.default.contentsOfDirectory(atPath: prefixed.path)) ?? [])
+            let stripped = roomKey.hasPrefix("1-") || roomKey.hasPrefix("2-") ? String(roomKey.dropFirst(2)) : roomKey
+            let plain = houseDirectory(roomKey: stripped)
+            names = Set((try? FileManager.default.contentsOfDirectory(atPath: plain.path)) ?? [])
         }
         return names
     }
@@ -262,27 +263,32 @@ enum MediaStore {
         return (tempRoot, keys)
     }
 
-    /// v1.62：房号目录归一——把带「1-」前缀的目录（如 media/1-2245上）合并到无前缀目录（media/2245上），删除空源目录。
-    /// 用户手动整理/媒体包里的文件夹常带 1- 前缀，而 House.mediaRoomKey 为无前缀（tower=1），
+    /// v1.63：房号目录归一到带座号前缀——1 座媒体目录应为 media/1-<房号>（与 House.mediaRoomKey 一致）。
+    /// 若带前缀目录不存在而 v1.62 时期遗留的无前缀目录存在 → 整目录迁移/合并到带前缀目录。
     /// 导入/扫描时调用保证目录名与房源一致，防止媒体读不到、恢复错乱、双目录并存。
     @discardableResult
-    static func migratePrefixedDir(rawKey: String, normalized: String) -> URL {
-        let target = houseDirectory(roomKey: normalized)
-        guard rawKey != normalized else { return target }
-        let source = houseDirectory(roomKey: rawKey)
+    static func migrateDirToPrefixed(roomNo: String, tower: Int) -> URL {
+        let key = tower == 2 ? "2-\(roomNo)" : "1-\(roomNo)"
+        let target = houseDirectory(roomKey: key)
+        guard tower == 1 else { return target }   // 2 座本就带前缀，无需迁移
+        let plain = houseDirectory(roomKey: roomNo)
         var isDir: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: source.path, isDirectory: &isDir), isDir.boolValue else { return target }
-        try? FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
-        if let names = try? FileManager.default.contentsOfDirectory(atPath: source.path) {
-            for name in names {
-                let dest = target.appendingPathComponent(name)
-                if !FileManager.default.fileExists(atPath: dest.path) {
-                    try? FileManager.default.moveItem(at: source.appendingPathComponent(name), to: dest)
+        guard FileManager.default.fileExists(atPath: plain.path, isDirectory: &isDir), isDir.boolValue else { return target }
+        if !FileManager.default.fileExists(atPath: target.path) {
+            try? FileManager.default.moveItem(at: plain, to: target)
+        } else {
+            try? FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
+            if let names = try? FileManager.default.contentsOfDirectory(atPath: plain.path) {
+                for name in names {
+                    let dest = target.appendingPathComponent(name)
+                    if !FileManager.default.fileExists(atPath: dest.path) {
+                        try? FileManager.default.moveItem(at: plain.appendingPathComponent(name), to: dest)
+                    }
                 }
             }
+            let rest = (try? FileManager.default.contentsOfDirectory(atPath: plain.path)) ?? []
+            if rest.isEmpty { try? FileManager.default.removeItem(at: plain) }
         }
-        let rest = (try? FileManager.default.contentsOfDirectory(atPath: source.path)) ?? []
-        if rest.isEmpty { try? FileManager.default.removeItem(at: source) }
         return target
     }
 

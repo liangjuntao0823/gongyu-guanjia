@@ -535,8 +535,10 @@ struct HouseListView: View {
                 .scrollContentBackground(.hidden)
                 .background(AppTheme.background)
                 // v1.19：下拉刷新 = 从云端拉取房源（与左上角手动同步同效果）
+                // v1.63：下拉刷新改本地刷新——媒体补全检测（磁盘与记录对账），不再触发云端同步；
+                //        左上角刷新按钮保持云端同步不变
                 .refreshable {
-                    await syncCloudHouses()
+                    await localRefreshWithMediaCheck()
                 }
             }
         }
@@ -737,6 +739,70 @@ struct HouseListView: View {
     /// v1.41：
     ///  - 「更新」判定改为字段级对比（cloudRecordDiffers），不再依赖时间戳（时间戳精度/恢复备份导致误判）
     ///  - 媒体差异双向识别：云端有本地缺（要下载）与 本地有云端缺（要跟随删除）都算变化并弹确认
+    /// v1.63：下拉刷新 = 本地刷新（媒体补全检测）：
+    /// 磁盘有而记录没有 → 自动补建媒体记录；记录有而磁盘没有 → 提示待云端回补；
+    /// 无对应房源的目录 → 提示可扫描补录。有变化列明细，无变化提示「已刷新，无变化」。
+    private func localRefreshWithMediaCheck() async {
+        guard let ctx = houseModelContext else { return }
+        let all = (try? ctx.fetch(FetchDescriptor<House>())) ?? []
+        let active = all.filter { !$0.isTrashed }
+        var addedLines: [String] = []
+        var missingLines: [String] = []
+        var addedCount = 0
+        var addedFiles = 0
+        await MainActor.run {
+            var inserted: [MediaItem] = []
+            for house in active {
+                let dir = MediaStore.migrateDirToPrefixed(roomNo: house.roomNo, tower: house.tower)
+                let disk = Set(MediaStore.mediaFileNames(in: dir))
+                let recorded = Set(house.mediaItems.map { $0.fileName })
+                let toAdd = disk.subtracting(recorded)
+                let missing = recorded.subtracting(disk)
+                if !toAdd.isEmpty {
+                    for f in toAdd.sorted() {
+                        let lower = f.lowercased()
+                        let media = MediaItem(fileName: f, kind: (lower.hasSuffix(".mp4") || lower.hasSuffix(".mov")) ? "video" : "image")
+                        media.house = house
+                        ctx.insert(media)
+                        inserted.append(media)
+                        addedFiles += 1
+                    }
+                    addedCount += 1
+                    addedLines.append("\(house.displayRoomNo)：补全 \(toAdd.count) 个媒体")
+                }
+                if !missing.isEmpty {
+                    missingLines.append("\(house.displayRoomNo)：本地缺 \(missing.count) 个文件（云端回补）")
+                }
+            }
+            if !inserted.isEmpty { try? ctx.save() }
+            // 未收录目录：media 下有目录但无对应房源
+            let keys = MediaStore.scanMediaDirectoryKeys()
+            let orphanKeys = keys.filter { key in
+                let (roomNo, tower) = BatchImporter.parseRoom(key, explicitTower: key.hasPrefix("2-") ? 2 : 0)
+                guard !roomNo.isEmpty else { return true }
+                return !active.contains { $0.tower == tower && $0.roomNo == roomNo }
+            }
+            var lines: [String] = []
+            if addedCount > 0 {
+                lines.append("媒体补全 \(addedCount) 间（\(addedFiles) 个文件）：")
+                lines.append(contentsOf: addedLines)
+            }
+            if !missingLines.isEmpty {
+                lines.append("待云端回补：" + missingLines.joined(separator: "；"))
+            }
+            if !orphanKeys.isEmpty {
+                lines.append("未收录目录 \(orphanKeys.count) 个：\(orphanKeys.prefix(5).joined(separator: "、"))（可去批量录入-扫描补录导入）")
+            }
+            if lines.isEmpty {
+                infoMessage = "已刷新，无变化"
+            } else {
+                infoMessage = lines.joined(separator: "\n")
+            }
+            showInfoAlert = true
+            NotificationCenter.default.post(name: Self.houseStoreChanged, object: nil)
+        }
+    }
+
     private func syncCloudHouses() async {
         let config = CosConfig.load()
         guard let config else {

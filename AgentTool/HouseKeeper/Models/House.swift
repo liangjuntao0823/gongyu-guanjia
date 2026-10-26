@@ -121,15 +121,23 @@ final class MediaItem {
 extension House {
     var towerLabel: String { "\(tower)座" }
 
-    /// 房号展示：2座带「2-」前缀，1座不带（1座若录入时带了「1-」前缀则原样显示，兼容历史数据）
+    /// 房号展示：v1.63 起 1 座、2 座都保留座号前缀（用户要求：恢复清单/媒体文件夹均带 1-/2- 前缀，显示保持一致）
+    /// 历史数据若 roomNo 本身已带前缀则原样显示，避免双前缀
     var displayRoomNo: String {
-        if tower == 2 && !roomNo.hasPrefix("2-") { return "2-\(roomNo)" }
-        return roomNo
+        if tower == 2 {
+            return roomNo.hasPrefix("2-") ? roomNo : "2-\(roomNo)"
+        }
+        return roomNo.hasPrefix("1-") ? roomNo : "1-\(roomNo)"
     }
 
-    /// 媒体存储目录名（按房号，去除文件系统非法字符）
+    /// 媒体存储目录名（v1.63：1 座也带「1-」前缀，与 2 座「2-」对称；与用户文件夹/清单命名一致）
     var mediaRoomKey: String {
-        let raw = tower == 2 ? "2-\(roomNo)" : roomNo
+        let raw: String
+        if tower == 2 {
+            raw = roomNo.hasPrefix("2-") ? roomNo : "2-\(roomNo)"
+        } else {
+            raw = roomNo.hasPrefix("1-") ? roomNo : "1-\(roomNo)"
+        }
         let illegal = CharacterSet(charactersIn: "/:\\?%*|\u{22}<>") 
         return raw.components(separatedBy: illegal).joined(separator: "-")
     }
