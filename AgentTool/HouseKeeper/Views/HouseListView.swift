@@ -922,20 +922,23 @@ struct HouseListView: View {
             } else {
                 showToast(lines.joined(separator: "\n"))
             }
-            // v1.75：本地刷新（含媒体补全）后同步重建本地账本镜像
-            rebuildLocalLedgers()
+            // v1.77：下拉刷新（本地刷新）不再重建本地账本镜像——重建只在左上角云端同步后执行
             NotificationCenter.default.post(name: Self.houseStoreChanged, object: nil)
         }
     }
 
-    /// v1.75：重建/刷新全部本地账本镜像（media/<房号>/info.json），保证与本地房源记录一致。
-    /// 在同步的所有成功出口调用（含「已刷新，无变化」）——用户要求：刷新即把账本同步到本地。
-    private func rebuildLocalLedgers() {
-        guard let ctx = houseModelContext else { return }
+    /// v1.76：重建/刷新全部本地账本镜像（media/<房号>/info.json），保证与本地房源记录一致。
+    /// v1.77：仅由「左上角云端同步」触发（下拉刷新不再调用）；返回重建套数，调用方负责提示与写操作日志。
+    @discardableResult
+    private func rebuildLocalLedgers() -> Int {
+        guard let ctx = houseModelContext else { return 0 }
         let all = (try? ctx.fetch(FetchDescriptor<House>())) ?? []
+        var n = 0
         for h in all where !h.isTrashed {
             LocalHouseLedger.save(h)
+            n += 1
         }
+        return n
     }
 
     private func syncCloudHouses() async {
@@ -1009,9 +1012,14 @@ struct HouseListView: View {
                 // 房源页顶部进度条 + 可最小化收起到「设置 → 待补传媒体」随时查看进度。
                 let pending = await preflightMediaSnapshots(config: config, ctx: ctx)
                 if pending.isEmpty {
-                    showToast("已刷新，无变化")
-                    // v1.75：无变化也重建本地账本镜像（刷新即同步账本到本地）
-                    rebuildLocalLedgers()
+                    // v1.77：无变化也重建本地账本镜像，完成后提示套数并写操作日志（不再静默）
+                    let ledgerN = rebuildLocalLedgers()
+                    if ledgerN > 0 {
+                        showToast("已刷新，无变化\n本地账本已同步 \(ledgerN) 套")
+                        BackupLogStore.log(category: "同步", action: "重建本地账本镜像", result: "成功", detail: "\(ledgerN) 套", cloud: true)
+                    } else {
+                        showToast("已刷新，无变化")
+                    }
                     return
                 }
                 pendingMediaSnaps = pending
@@ -1377,11 +1385,17 @@ struct HouseListView: View {
             if removedMediaCount > 0 { parts.append("删除媒体\(removedMediaCount)个（本地多余跟随删）") }
             if !mediaDiffRoomNo.isEmpty { parts.append("媒体同步：\(Array(Set(mediaDiffRoomNo)).joined(separator: "，"))") }
             let msg = "已同步：\(parts.joined(separator: "，"))"
-            showToast(msg)
-            // v1.75：同步完成后重建/刷新全部本地账本镜像（media/<房号>/info.json）——
-            // 覆盖历史版本误删（对账把 info.json 当多余媒体删掉）与新增/变化，保证本地镜像与云端一致
-            rebuildLocalLedgers()
+            // v1.77：同步完成后重建本地账本镜像，套数并入提示并写操作日志（不再静默）
+            let ledgerN = rebuildLocalLedgers()
+            if ledgerN > 0 {
+                showToast(msg + "\n本地账本已同步 \(ledgerN) 套")
+            } else {
+                showToast(msg)
+            }
             BackupLogStore.log(category: "同步", action: "同步房源（云端→本地）", result: "成功", detail: msg, cloud: true)
+            if ledgerN > 0 {
+                BackupLogStore.log(category: "同步", action: "重建本地账本镜像", result: "成功", detail: "\(ledgerN) 套", cloud: true)
+            }
             HouseSyncProgress.shared.clear()
         } catch {
             showToast("同步失败：\(error.localizedDescription)", isError: true)
