@@ -1,9 +1,9 @@
 import SwiftUI
 
-// MARK: - v1.81 远程配置原生化：App 内管理后台第 4 个 tab
+// MARK: - v1.82 远程配置原生化（中文显示 + 排版优化）
 /// 读取：云函数 act=configGet（带口令）→ 未配置/为空时用默认模板填充
 /// 保存：POST act=configSave（自动 version+1）→ 云端生效 + 写本地缓存（断网兜底）
-/// 与云端网页后台（admin.html「远程配置」页）完全同源，免跳浏览器、免下载文件
+/// 所有配置项显示中文名称（英文 key 以小字副标题展示，便于对照后台文档）
 struct RemoteConfigAdminView: View {
     @State private var config = RemoteConfig.Payload()
     @State private var loading = false
@@ -18,89 +18,127 @@ struct RemoteConfigAdminView: View {
 
     var body: some View {
         Form {
+            // ── 顶部：状态 + 操作 ──
             Section {
                 HStack {
-                    Text("配置版本").foregroundStyle(.secondary)
+                    Label("配置版本", systemImage: "number")
+                        .foregroundStyle(.secondary)
                     Spacer()
-                    Text(config.version > 0 ? "\(config.version)" : "未加载")
+                    Text(config.version > 0 ? "v\(config.version)" : "未加载")
+                        .fontWeight(.semibold)
                 }
                 if let ua = config.updatedAt, !ua.isEmpty {
                     HStack {
-                        Text("更新时间").foregroundStyle(.secondary)
+                        Label("更新时间", systemImage: "clock")
+                            .foregroundStyle(.secondary)
                         Spacer()
                         Text(ua)
                     }
                 }
-                Button {
-                    loadConfig()
-                } label: {
-                    Label(loading ? "加载中…" : "从云端加载", systemImage: "arrow.down.circle")
-                }
-                .disabled(loading || saving)
-                Button {
-                    saveConfig()
-                } label: {
-                    Label(saving ? "保存中…" : "保存到云端", systemImage: "checkmark.circle")
-                }
-                .disabled(loading || saving)
                 if !statusText.isEmpty {
                     Text(statusText)
                         .font(.footnote)
-                        .foregroundStyle(statusText.contains("失败") ? .red : .secondary)
+                        .foregroundStyle(statusText.contains("失败") || statusText.contains("无效") ? .red : .green)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                HStack(spacing: 12) {
+                    Button {
+                        loadConfig()
+                    } label: {
+                        Label(loading ? "加载中…" : "从云端加载", systemImage: "arrow.down.circle")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(loading || saving)
+                    Button {
+                        saveConfig()
+                    } label: {
+                        Label(saving ? "保存中…" : "保存到云端", systemImage: "checkmark.circle.fill")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(loading || saving)
                 }
             } header: {
-                Text("远程配置中心")
+                Label("远程配置中心", systemImage: "gearshape.2")
             } footer: {
                 Text("保存后立即写入云端，App 下次启动 / 同步自动生效；断网时 App 使用本地缓存，不受影响。")
             }
 
-            Section("公告横幅") {
-                Toggle("显示公告", isOn: Binding(get: {
+            // ── 基础设置 ──
+            Section {
+                Toggle("显示公告横幅", isOn: Binding(get: {
                     config.announcement?.enabled ?? false
                 }, set: { v in
                     var a = config.announcement ?? RemoteConfig.Announcement(enabled: false, text: "", link: nil)
                     a.enabled = v
                     config.announcement = a
                 }))
-                TextField("公告文字", text: Binding(get: {
-                    config.announcement?.text ?? ""
-                }, set: { v in
-                    var a = config.announcement ?? RemoteConfig.Announcement(enabled: false, text: "", link: nil)
-                    a.text = v
-                    config.announcement = a
-                }))
-                TextField("公告链接（可选）", text: Binding(get: {
-                    config.announcement?.link ?? ""
-                }, set: { v in
-                    var a = config.announcement ?? RemoteConfig.Announcement(enabled: false, text: "", link: nil)
-                    a.link = v.isEmpty ? nil : v
-                    config.announcement = a
-                }))
-                .keyboardType(.URL)
-                .autocapitalization(.none)
-            }
-
-            Section("最低版本") {
-                TextField("如 1.79，低于此版本提示升级", text: Binding(get: {
-                    config.minimumVersion ?? ""
-                }, set: { config.minimumVersion = $0.isEmpty ? nil : $0 }))
-                    .keyboardType(.numbersAndPunctuation)
-            }
-
-            Section("功能开关") {
-                ForEach(config.features.keys.sorted(), id: \.self) { key in
-                    Toggle(key, isOn: Binding(get: {
-                        config.features[key] ?? false
-                    }, set: { config.features[key] = $0 }))
+                .tint(.green)
+                if config.announcement?.enabled == true {
+                    LabeledContent {
+                        TextField("公告文字", text: Binding(get: {
+                            config.announcement?.text ?? ""
+                        }, set: { v in
+                            var a = config.announcement ?? RemoteConfig.Announcement(enabled: false, text: "", link: nil)
+                            a.text = v
+                            config.announcement = a
+                        }), axis: .vertical)
+                        .lineLimit(1...3)
+                        .multilineTextAlignment(.trailing)
+                    } label: {
+                        Text("公告文字").foregroundStyle(.secondary)
+                    }
+                    LabeledContent {
+                        TextField("选填，点击可跳转", text: Binding(get: {
+                            config.announcement?.link ?? ""
+                        }, set: { v in
+                            var a = config.announcement ?? RemoteConfig.Announcement(enabled: false, text: "", link: nil)
+                            a.link = v.isEmpty ? nil : v
+                            config.announcement = a
+                        }))
+                        .keyboardType(.URL)
+                        .autocapitalization(.none)
+                        .multilineTextAlignment(.trailing)
+                    } label: {
+                        Text("公告链接").foregroundStyle(.secondary)
+                    }
                 }
+                LabeledContent {
+                    TextField("如 1.79", text: Binding(get: {
+                        config.minimumVersion ?? ""
+                    }, set: { config.minimumVersion = $0.isEmpty ? nil : $0 }))
+                    .keyboardType(.numbersAndPunctuation)
+                    .multilineTextAlignment(.trailing)
+                } label: {
+                    Text("最低版本").foregroundStyle(.secondary)
+                }
+            } header: {
+                Label("基础设置", systemImage: "slider.horizontal.3")
             }
 
-            Section("参数") {
+            // ── 功能开关 ──
+            Section {
+                ForEach(config.features.keys.sorted(), id: \.self) { key in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Toggle(Self.label(key), isOn: Binding(get: {
+                            config.features[key] ?? false
+                        }, set: { config.features[key] = $0 }))
+                        .tint(.green)
+                        if Self.label(key) != key {
+                            Text(key).font(.caption2).foregroundStyle(.tertiary)
+                        }
+                    }
+                }
+            } header: {
+                Label("功能开关", systemImage: "switch.2")
+            }
+
+            // ── 数值参数 ──
+            Section {
                 ForEach(config.params.keys.sorted(), id: \.self) { key in
-                    HStack {
-                        Text(key)
-                        Spacer()
-                        TextField("数值", text: Binding(get: {
+                    LabeledContent {
+                        TextField("", text: Binding(get: {
                             let v = config.params[key] ?? 0
                             return v == v.rounded() ? String(Int(v)) : String(v)
                         }, set: { t in
@@ -108,54 +146,116 @@ struct RemoteConfigAdminView: View {
                         }))
                         .keyboardType(.decimalPad)
                         .multilineTextAlignment(.trailing)
-                        .frame(width: 100)
+                        .frame(width: 90)
+                    } label: {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(Self.label(key))
+                            if Self.label(key) != key {
+                                Text(key).font(.caption2).foregroundStyle(.tertiary)
+                            }
+                        }
                     }
                 }
+            } header: {
+                Label("数值参数", systemImage: "number.circle")
             }
 
-            Section("提示文案") {
+            // ── 提示文案 ──
+            Section {
                 ForEach(config.tips.keys.sorted(), id: \.self) { key in
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(key).font(.footnote).foregroundStyle(.secondary)
+                        HStack(spacing: 4) {
+                            Text(Self.label(key)).font(.subheadline).fontWeight(.medium)
+                            if Self.label(key) != key {
+                                Text(key).font(.caption2).foregroundStyle(.tertiary)
+                            }
+                        }
                         TextField("提示内容", text: Binding(get: {
                             config.tips[key] ?? ""
                         }, set: { config.tips[key] = $0 }), axis: .vertical)
                             .lineLimit(1...3)
+                            .font(.footnote)
+                            .textFieldStyle(.roundedBorder)
                     }
                 }
+            } header: {
+                Label("提示文案（App 内各处提示语）", systemImage: "text.bubble")
             }
 
-            Section("帮助文本") {
+            // ── 帮助说明 ──
+            Section {
                 ForEach(config.helpTexts.keys.sorted(), id: \.self) { key in
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(key).font(.footnote).foregroundStyle(.secondary)
+                        HStack(spacing: 4) {
+                            Text(Self.label(key)).font(.subheadline).fontWeight(.medium)
+                            if Self.label(key) != key {
+                                Text(key).font(.caption2).foregroundStyle(.tertiary)
+                            }
+                        }
                         TextField("帮助内容", text: Binding(get: {
                             config.helpTexts[key] ?? ""
                         }, set: { config.helpTexts[key] = $0 }), axis: .vertical)
-                            .lineLimit(1...4)
+                            .lineLimit(1...5)
+                            .font(.footnote)
+                            .textFieldStyle(.roundedBorder)
                     }
                 }
+            } header: {
+                Label("帮助说明（设置页长文案）", systemImage: "questionmark.circle")
             }
 
-            Section("更新日志") {
-                ForEach(config.changelog ?? []) { entry in
+            // ── 版本更新记录 ──
+            Section {
+                let list = Binding<[RemoteConfig.ChangelogEntry]>(
+                    get: { config.changelog ?? [] },
+                    set: { config.changelog = $0 }
+                )
+                ForEach(list.wrappedValue) { entry in
                     VStack(alignment: .leading, spacing: 2) {
                         Text("\(entry.version)\(entry.date.map { " · \($0)" } ?? "")")
                             .font(.footnote).fontWeight(.semibold)
                         ForEach(entry.changes, id: \.self) { c in
-                            Text("· \(c)").font(.footnote).foregroundStyle(.secondary)
+                            Text("· \(c)").font(.caption).foregroundStyle(.secondary)
                         }
                     }
                 }
+                .onDelete { offsets in
+                    var arr = list.wrappedValue
+                    arr.remove(atOffsets: offsets)
+                    config.changelog = arr
+                }
                 VStack(alignment: .leading, spacing: 6) {
                     Text("新增一条（添加到顶部）").font(.footnote).foregroundStyle(.secondary)
-                    TextField("版本号", text: $newCLVersion)
-                    TextField("日期（可选）", text: $newCLDate)
+                    HStack(spacing: 8) {
+                        TextField("版本号", text: $newCLVersion)
+                            .textFieldStyle(.roundedBorder)
+                        TextField("日期（可选）", text: $newCLDate)
+                            .textFieldStyle(.roundedBorder)
+                    }
                     TextField("改动内容，每行一条", text: $newCLChanges, axis: .vertical)
                         .lineLimit(1...4)
+                        .textFieldStyle(.roundedBorder)
                     Button("添加到日志") { addChangelog() }
+                        .buttonStyle(.borderedProminent)
                         .disabled(newCLVersion.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
+                .padding(.vertical, 2)
+            } header: {
+                Label("版本更新记录（App 设置页展示）", systemImage: "list.bullet.clipboard")
+            } footer: {
+                Text("左滑条目可删除。新增条目会显示在 App 设置页的版本记录顶部。")
+            }
+
+            // ── 底部保存 ──
+            Section {
+                Button {
+                    saveConfig()
+                } label: {
+                    Label(saving ? "保存中…" : "保存全部配置到云端", systemImage: "checkmark.circle.fill")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(loading || saving)
             }
         }
         .navigationTitle("远程配置")
@@ -188,11 +288,10 @@ struct RemoteConfigAdminView: View {
                 if let fetched = obj.config {
                     config = fetched
                 } else {
-                    // 云端未创建配置：用内置默认模板填充，保证全部可编辑
                     config = Self.defaultTemplate()
                 }
                 loaded = true
-                statusText = "已加载（云端配置版本 \(config.version)）"
+                statusText = "已加载云端配置 v\(config.version)"
             }
         }.resume()
     }
@@ -225,9 +324,8 @@ struct RemoteConfigAdminView: View {
                     statusText = "保存失败：云函数未确认（请检查网络与口令）"
                     return
                 }
-                // 云端确认：同步更新本地缓存（断网兜底）
                 RemoteConfig.apply(body)
-                statusText = "已保存 ✓ 配置版本 \(obj.version ?? body.version)，App 下次启动/同步即生效"
+                statusText = "已保存 ✓ 配置版本 v\(obj.version ?? body.version)，App 下次启动/同步即生效"
             }
         }.resume()
     }
@@ -244,6 +342,60 @@ struct RemoteConfigAdminView: View {
         newCLDate = ""
         newCLChanges = ""
     }
+
+    // MARK: 配置项中文名（英文 key → 中文显示）
+
+    private static func label(_ key: String) -> String {
+        LABELS[key] ?? key
+    }
+
+    private static let LABELS: [String: String] = [
+        // 功能开关
+        "compressUpload": "上传压缩",
+        "watermark": "分享水印",
+        "autoBackup": "自动备份",
+        "showOfflineRestore": "离线重建入口",
+        "showRoomsShare": "选房分享入口",
+        // 数值参数
+        "autoBackupKeepDays": "自动备份保留天数（天）",
+        "roomsLinkExpiryDays": "选房链接有效期（天）",
+        "videoCompressHeight": "视频压缩高度（px）",
+        "imageCompressQuality": "图片压缩质量（0-1）",
+        "syncRetryCount": "同步失败重试次数",
+        // 提示文案
+        "refreshDone": "刷新完成提示",
+        "refreshNoChange": "刷新无变化提示",
+        "refreshFail": "刷新失败提示",
+        "syncFail": "同步失败提示",
+        "noCloudConfig": "未配置云端提示",
+        "containerUnavailable": "数据容器不可用提示",
+        "deletingCloud": "删除云端中提示",
+        "bulkDeleteDone": "批量删除完成提示",
+        "cloudCopyDeleted": "云端副本已删除提示",
+        "cloudDeleteFail": "云端删除失败提示",
+        "bulkRentDone": "批量已租完成提示",
+        "backfillFail": "补传云端失败提示",
+        "quickBackupOk": "快速备份成功提示",
+        "quickBackupFail": "快速备份失败提示",
+        "fullBackupOk": "全量备份成功提示",
+        "fullBackupFail": "全量备份失败提示",
+        "fullBackupSpace": "全量备份空间不足提示",
+        "fullBackupRunning": "全量备份进行中提示",
+        "offlineRestoreOk": "离线重建完成提示",
+        "noLocalLedger": "无本地账本提示",
+        "noPreviewRooms": "无可预览房源提示",
+        "billPreviewFail": "账单预览失败提示",
+        // 帮助说明
+        "houseShareFooter": "云端配置与名片说明",
+        "backupIntro": "备份体系说明",
+        "autoBackupIntro": "自动备份说明",
+        "cloudSetupIntro": "云端配置说明",
+        "passwordIntro": "后台口令说明",
+        "multiShareIntro": "多用户共享说明",
+        "clearConfigWarn": "清空配置警告",
+        "tencentTutorial": "腾讯云部署教程",
+        "backupConfigFile": "备份配置文件说明"
+    ]
 
     // MARK: 默认模板（与云端后台 CFG_DEFAULT 同源，云端未配置时保证全部可编辑）
 
