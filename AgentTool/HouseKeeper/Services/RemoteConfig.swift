@@ -9,7 +9,7 @@ enum RemoteConfig {
     struct Announcement: Codable {
         var enabled: Bool
         var text: String
-        var link: String
+        var link: String?
     }
     struct ChangelogEntry: Codable, Identifiable {
         var id: String { version + (date ?? "") }
