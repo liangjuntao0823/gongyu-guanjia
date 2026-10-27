@@ -2480,6 +2480,7 @@ struct AdminDashboardView: View {
                     Text("获客分析").tag(0)
                     Text("分享记录").tag(1)
                     Text("桶管理").tag(2)
+                    Text("远程配置").tag(3)
                 }
                 .pickerStyle(.segmented)
                 .padding(.horizontal)
@@ -2489,8 +2490,11 @@ struct AdminDashboardView: View {
                     statsView
                 } else if tab == 1 {
                     sharesView
-                } else {
+                } else if tab == 2 {
                     bucketView
+                } else {
+                    // v1.81 远程配置原生化：App 内直接编辑（公告/开关/参数/文案/帮助/更新日志）
+                    RemoteConfigAdminView()
                 }
             }
             .navigationTitle("管理后台")

@@ -48,6 +48,14 @@ enum RemoteConfig {
         _current = p
     }
 
+    /// v1.81 原生后台保存成功后调用：写入内存 + 本地缓存（断网兜底）
+    static func apply(_ p: Payload) {
+        _current = p
+        if let data = try? JSONEncoder().encode(p) {
+            try? data.write(to: cacheURL, options: .atomic)
+        }
+    }
+
     /// 拉取云端最新配置并更新缓存（联网时调用：App 启动 + 每次云端同步成功后）
     static func refresh() async {
         guard let config = CosConfig.load() else { return }
