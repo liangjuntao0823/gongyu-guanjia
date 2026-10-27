@@ -15,6 +15,8 @@ struct AgentToolApp: App {
     // v1.44：外部传入配置备份 json（文件 App「用其他 App 打开」）识别后的提示
     @State private var configImportTip: String?
     @StateObject private var tabRouter = TabRouter()
+    // v1.80：远程配置——最低版本提示（云端配置低于当前版本时弹窗引导更新）
+    @State private var showUpdateTip = false
 
     init() {
         // 强制应用内系统控件使用中文
@@ -142,6 +144,11 @@ struct AgentToolApp: App {
                 .environment(\.calendar, Calendar(identifier: .gregorian))
                 .environmentObject(tabRouter)
                 .environment(\.houseModelContext, houseContainer.mainContext)
+                .alert("有新版本可用", isPresented: $showUpdateTip) {
+                    Button("知道了") { }
+                } message: {
+                    Text("当前版本低于云端要求的最低版本 \(RemoteConfig.minimumVersion ?? "")，请更新到最新版后使用。")
+                }
                 .alert("存储异常", isPresented: Binding(
                     get: { storageWarning != nil },
                     set: { _ in }
@@ -401,6 +408,10 @@ struct MainTabView: View {
             GlobalAlertOverlay()
         }
         .onAppear {
+            // v1.80：远程配置——先读本地缓存（断网可用），再异步拉取云端最新（联网更新缓存）
+            RemoteConfig.loadCache()
+            Task { await RemoteConfig.refresh() }
+            checkMinimumVersion()
             UNUserNotificationCenter.current().setBadgeCount(0)
             // v1.12：启动时安装崩溃日志、同步日志桥、清理恢复残留、重试未上传的云端备份
             CrashLogCollector.install()
@@ -588,6 +599,24 @@ struct MainTabView: View {
 
     // 自动补偿备份：启动和回前台时检查最近一个计划时间槽（v1.12 改造：自动备份 = 快速备份 + 自动上传云端）。
     // D2 方案保留：到点 App 不在前台不备份，下次打开时按 latestDueSlot 自动补做；过点不丢。
+
+    /// v1.80：远程配置——最低版本检查（云端 minimumVersion 高于当前版本 → 提示更新）
+    private func checkMinimumVersion() {
+        guard let minVer = RemoteConfig.minimumVersion else { return }
+        let cur = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
+        func parts(_ v: String) -> [Int] { v.split(separator: ".").compactMap { Int($0) } }
+        let c = parts(cur), m = parts(minVer)
+        let isLower: Bool = {
+            for i in 0..<max(c.count, m.count) {
+                let a = i < c.count ? c[i] : 0
+                let b = i < m.count ? m[i] : 0
+                if a != b { return a < b }
+            }
+            return false
+        }()
+        if isLower { showUpdateTip = true }
+    }
+
     private func checkAutoBackup() {
         guard !isCheckingAutomaticBackup else { return }
         guard let data = UserDefaults.standard.data(forKey: "autoBackupSettings"),

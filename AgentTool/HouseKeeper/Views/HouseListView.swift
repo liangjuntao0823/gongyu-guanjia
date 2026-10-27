@@ -143,6 +143,7 @@ struct HouseListView: View {
 
                 VStack(spacing: 0) {
                     syncTaskBanner
+                    announcementBanner
                     statsBar
                     searchBar
                     filterBar
@@ -732,7 +733,7 @@ struct HouseListView: View {
     /// 保留二次确认弹窗；backups/media 镜像保留；云端失败写操作日志（不阻塞本地删除）
     private func softDeleteHouse(_ house: House) {
         guard let ctx = houseModelContext else {
-            showToast("数据容器不可用，无法删除", isError: true)
+            showToast(RemoteConfig.tip("containerUnavailable", "数据容器不可用，无法删除"), isError: true)
             return
         }
         let roomKey = house.mediaRoomKey
@@ -744,16 +745,16 @@ struct HouseListView: View {
             try ctx.save()
             NotificationCenter.default.post(name: Self.houseStoreChanged, object: nil)
         } catch {
-            showToast("删除失败：\(error.localizedDescription)", isError: true)
+            showToast(RemoteConfig.tip("deleteFail", "删除失败：{error}").replacingOccurrences(of: "{error}", with: error.localizedDescription), isError: true)
         }
         // v1.19 补全：删除成功提示——区分删了本地 / 云端 / 双端
         switch wasCloud {
         case .local:
-            showToast("已删除本地房源")
+            showToast(RemoteConfig.tip("deletedLocal", "已删除本地房源"))
         case .both:
-            showToast("已删除本地房源，正在同步删除云端…")
+            showToast(RemoteConfig.tip("deletingCloud", "已删除本地房源，正在同步删除云端…"))
         case .cloud:
-            showToast("已删除云端同步副本")
+            showToast(RemoteConfig.tip("cloudCopyDeleted", "已删除云端同步副本"))
         }
         // 云端同步删除（v1.69 规范：单条日志「彻底删除（本地+云端）」）
         if let config = config, config.isValid {
@@ -766,7 +767,7 @@ struct HouseListView: View {
                 } catch {
                     BackupLogStore.log(category: "删除", action: "彻底删除（本地+云端）", result: "失败", detail: "\(roomKey) \(error.localizedDescription)", cloud: true)
                     await MainActor.run {
-                        showToast("云端删除失败：\(error.localizedDescription)。可在「设置 → 桶管理」手动清理 h/\(roomKey)/", isError: true)
+                        showToast(RemoteConfig.tip("cloudDeleteFail", "云端删除失败：{error}。可在「设置 → 桶管理」手动清理 h/\(roomKey)/").replacingOccurrences(of: "{error}", with: error.localizedDescription), isError: true)
                     }
                 }
             }
@@ -813,6 +814,38 @@ struct HouseListView: View {
     }
 
     /// v1.73（#1）：原生悬浮横幅提示——2.8 秒自动消失；重复调用只刷新最新一条。
+    /// v1.80：公告横幅——读云端远程配置 announcement（后台「远程配置」页可编辑，改动即时生效）
+    @ViewBuilder
+    private var announcementBanner: some View {
+        if let ann = RemoteConfig.announcement, ann.enabled, !ann.text.isEmpty {
+            Button {
+                if let link = ann.link, !link.isEmpty, let url = URL(string: link) {
+                    UIApplication.shared.open(url)
+                }
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "megaphone.fill")
+                        .font(.footnote)
+                    Text(ann.text)
+                        .font(.footnote.weight(.medium))
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                    Spacer(minLength: 0)
+                    if !(ann.link ?? "").isEmpty {
+                        Image(systemName: "chevron.right")
+                            .font(.caption2)
+                    }
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.orange.opacity(0.14))
+                .foregroundColor(.orange)
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
     private func showToast(_ msg: String, isError: Bool = false) {
         withAnimation(.easeOut(duration: 0.18)) {
             infoToast = msg
@@ -918,7 +951,7 @@ struct HouseListView: View {
                 lines.append("未收录目录 \(orphanKeys.count) 个：\(orphanKeys.prefix(5).joined(separator: "、"))（可去批量录入-扫描补录导入）")
             }
             if lines.isEmpty {
-                showToast("已刷新，无变化")
+                showToast(RemoteConfig.tip("refreshNoChange", "已刷新，无变化"))
             } else {
                 showToast(lines.joined(separator: "\n"))
             }
@@ -972,12 +1005,14 @@ struct HouseListView: View {
         defer { isSyncing = false }
         let config = CosConfig.load()
         guard let config else {
-            showToast("未配置云存储，无法同步云端房源", isError: true)
+            showToast(RemoteConfig.tip("noCloudConfig", "未配置云存储，无法同步云端房源"), isError: true)
             return
         }
         guard let ctx = houseModelContext else { return }
         do {
             let recs = try await CloudHouseSync.fetchAll(config: config)
+            // v1.80：云端同步成功 → 顺带拉取远程配置（公告/文案/开关/参数），失败不影响同步
+            Task { await RemoteConfig.refresh() }
             // v1.40 第11点：先算 diff 弹确认，确认后才应用（此前直接执行后才弹结果，用户无法拦截误覆盖）
             // v1.42：新增/更新/删除/补传/媒体差异全部带具体房号（用户要求：只要对比有差别就列出房号）
             var added: [(roomNo: String, roomKey: String, mediaNames: [String])] = []
@@ -1041,10 +1076,10 @@ struct HouseListView: View {
                     // v1.77：无变化也同步本地账本镜像；v1.78：增量写，只报实际写入套数
                     let ledger = rebuildLocalLedgers()
                     if ledger.written > 0 {
-                        showToast("已刷新，无变化\n本地账本已同步 \(ledger.written) 套")
+                        showToast(RemoteConfig.tip("refreshNoChangeLedger", "已刷新，无变化\n本地账本已同步 {n} 套").replacingOccurrences(of: "{n}", with: String(ledger.written)))
                         BackupLogStore.log(category: "同步", action: "重建本地账本镜像", result: "成功", detail: "\(ledger.written) 套", cloud: true)
                     } else {
-                        showToast("已刷新，无变化")
+                        showToast(RemoteConfig.tip("refreshNoChange", "已刷新，无变化"))
                     }
                     return
                 }
@@ -1059,7 +1094,7 @@ struct HouseListView: View {
             pendingSyncPushed = pushed
             showSyncConfirm = true
         } catch {
-            showToast("同步失败：\(error.localizedDescription)", isError: true)
+            showToast(RemoteConfig.tip("syncFail", "同步失败：{error}").replacingOccurrences(of: "{error}", with: error.localizedDescription), isError: true)
             BackupLogStore.log(category: "同步", action: "同步房源（云端→本地）", result: "失败", detail: error.localizedDescription, cloud: true)
         }
     }
@@ -1351,7 +1386,7 @@ struct HouseListView: View {
                     BackupLogStore.log(category: "同步", action: "补传房源（本地→云端）", result: "成功", detail: pushedRoomNo.joined(separator: "，"), cloud: true)
                 } catch {
                     await MainActor.run {
-                        showToast("补传云端失败：\(error.localizedDescription)。本地房源保持「仅本地」，可稍后重新同步补传", isError: true)
+                        showToast(RemoteConfig.tip("backfillFail", "补传云端失败：{error}。本地房源保持「仅本地」，可稍后重新同步补传").replacingOccurrences(of: "{error}", with: error.localizedDescription), isError: true)
                     }
                     BackupLogStore.log(category: "同步", action: "补传房源（本地→云端）", result: "失败", detail: error.localizedDescription, cloud: true)
                 }
@@ -1424,7 +1459,7 @@ struct HouseListView: View {
             }
             HouseSyncProgress.shared.clear()
         } catch {
-            showToast("同步失败：\(error.localizedDescription)", isError: true)
+            showToast(RemoteConfig.tip("syncFail", "同步失败：{error}").replacingOccurrences(of: "{error}", with: error.localizedDescription), isError: true)
             BackupLogStore.log(category: "同步", action: "同步房源（云端→本地）", result: "失败", detail: error.localizedDescription, cloud: true)
             HouseSyncProgress.shared.clear()
         }
@@ -1444,13 +1479,13 @@ struct HouseListView: View {
         NotificationCenter.default.post(name: Self.houseStoreChanged, object: nil)
         let total = selectedHouseIDs.count
         exitMultiSelect()
-        showToast("已将 \(changed) 套标记为已租（共选中 \(total) 套）")
+        showToast(RemoteConfig.tip("bulkRentDone", "已将 {changed} 套标记为已租（共选中 {total} 套）").replacingOccurrences(of: "{changed}", with: String(changed)).replacingOccurrences(of: "{total}", with: String(total)))
     }
 
     /// v1.36 需求1：批量删除 → 彻底删除（本地文件+数据库记录+云端桶一并删除，不再进回收站）
     private func batchSoftDelete() {
         guard !selectedHouseIDs.isEmpty, let ctx = houseModelContext else {
-            showToast("数据容器不可用，无法删除", isError: true)
+            showToast(RemoteConfig.tip("containerUnavailable", "数据容器不可用，无法删除"), isError: true)
             return
         }
         var changed = 0
@@ -1467,7 +1502,7 @@ struct HouseListView: View {
             try ctx.save()
             NotificationCenter.default.post(name: Self.houseStoreChanged, object: nil)
         } catch {
-            showToast("删除失败：\(error.localizedDescription)", isError: true)
+            showToast(RemoteConfig.tip("deleteFail", "删除失败：{error}").replacingOccurrences(of: "{error}", with: error.localizedDescription), isError: true)
         }
         // 云端同步删除（v1.69 规范）：单 Task 内**串行**逐套执行——此前每套一个并发 Task 同时
         // 读改写云端账本 h/_houses.json，并发互相覆盖导致删除不彻底（实测 7 套删完账本仍剩 3 套）。
@@ -1514,7 +1549,7 @@ struct HouseListView: View {
         let total = selectedHouseIDs.count
         exitMultiSelect()
         // v1.19 补全：批量删除成功提示（含云端同步）
-        showToast("已彻底删除 \(changed) 套本地房源（共选中 \(total) 套）；云端同步删除中…")
+        showToast(RemoteConfig.tip("bulkDeleteDone", "已彻底删除 {changed} 套本地房源（共选中 {total} 套）；云端同步删除中…").replacingOccurrences(of: "{changed}", with: String(changed)).replacingOccurrences(of: "{total}", with: String(total)))
     }
 
     /// v1.7：卡片左滑「分享」→ 单套分享卡片（脱敏 / 完整），生成链接后弹系统分享面板

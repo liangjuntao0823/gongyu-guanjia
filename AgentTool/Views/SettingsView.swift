@@ -219,7 +219,7 @@ struct SettingsView: View {
                 Label("打开「文件」App 查看数据文件夹", systemImage: "folder")
             }
         } footer: {
-            Text(Self.houseShareFooter)
+            Text(RemoteConfig.help("houseShareFooter", Self.houseShareFooter))
         }
     }
 
@@ -247,13 +247,16 @@ struct SettingsView: View {
                 Label("恢复数据", systemImage: "square.and.arrow.up")
             }
             // v1.75：离线重建房源——无需联网，从本地账本（media/<房号>/info.json）重建房源记录
-            VStack(alignment: .leading, spacing: 3) {
-                Button { showOfflineRestoreConfirm = true } label: {
-                    Label("离线重建房源", systemImage: "arrow.clockwise.circle")
+            // v1.80：入口显隐由云端远程配置控制（features.showOfflineRestore），小字说明也可云端改
+            if RemoteConfig.feature("showOfflineRestore", true) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Button { showOfflineRestoreConfirm = true } label: {
+                        Label("离线重建房源", systemImage: "arrow.clockwise.circle")
+                    }
+                    Text(RemoteConfig.help("offlineRestoreIntro", "无需联网：从本机 media 文件夹的账本（每套 info.json）重建房源记录，数据库丢失或断网时可用，不删除现有数据。"))
+                        .font(.caption)
+                        .foregroundColor(.secondary)
                 }
-                Text("无需联网：从本机 media 文件夹的账本（每套 info.json）重建房源记录，数据库丢失或断网时可用，不删除现有数据。")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
             }
             // v1.12：备份文件查看器（快速/全量 zip + 云端 + 旧版 JSON）
             Button { showBackupCenterBrowse = true } label: {
@@ -286,7 +289,7 @@ struct SettingsView: View {
                 }
             }
         } footer: {
-            Text("备份数据 = 快速备份（账本 + 媒体清单，不含房源与照片视频，自动上传云端；房源统一从云端同步恢复）或全量备份（额外含全部房源与照片视频）。恢复会覆盖当前数据，恢复前自动打包当前数据做安全备份，失败自动还原。旧版分板块 JSON 备份仍可在「查看备份文件」中恢复，不会丢失。")
+            Text(RemoteConfig.help("backupIntro", "备份数据 = 快速备份（账本 + 媒体清单，不含房源与照片视频，自动上传云端；房源统一从云端同步恢复）或全量备份（额外含全部房源与照片视频）。恢复会覆盖当前数据，恢复前自动打包当前数据做安全备份，失败自动还原。旧版分板块 JSON 备份仍可在「查看备份文件」中恢复，不会丢失。"))
         }
     }
 
@@ -390,7 +393,7 @@ struct SettingsView: View {
                 .onChange(of: backupRetentionDays) { _, _ in saveAutoSettings() }
             }
         } footer: {
-            Text("自动备份 = 快速备份（账本 + 房源 + 清单），备份成功后自动上传云端；超过保留天数（默认 7 天）的自动备份会自动清理，手动备份不会被删除。若到点 App 未在前台，会等下次打开 App 时自动补做。")
+            Text(RemoteConfig.help("autoBackupIntro", "自动备份 = 快速备份（账本 + 房源 + 清单），备份成功后自动上传云端；超过保留天数（默认 7 天）的自动备份会自动清理，手动备份不会被删除。若到点 App 未在前台，会等下次打开 App 时自动补做。"))
         }
     }
 
@@ -592,7 +595,7 @@ struct SettingsView: View {
                 loadAutoSettings()
                 // v1.55：读取选房链接有效期设置（默认 2 天）
                 let d = UserDefaults.standard.integer(forKey: "roomsLinkExpiryDays")
-                roomsLinkExpiry = d > 0 ? d : 2
+                roomsLinkExpiry = d > 0 ? d : Int(RemoteConfig.param("roomsLinkExpiryDays", 2))
             }
             .alert("提示", isPresented: $showAlert) {
                 Button("确定", role: .cancel) { }
@@ -779,14 +782,14 @@ struct SettingsView: View {
                 Task {
                     await CloudBackupService.autoUploadFastBackup(zipURL: url, config: nil)
                 }
-                showMessage = "快速备份成功：\(url.lastPathComponent)\n已自动上传云端（若网络失败会在下次打开 App 时自动重试）"
+                showMessage = RemoteConfig.tip("quickBackupOk", "快速备份成功：{file}\n已自动上传云端（若网络失败会在下次打开 App 时自动重试）").replacingOccurrences(of: "{file}", with: url.lastPathComponent)
             } else {
                 showMessage = "快速备份失败，请检查存储空间"
             }
             showAlert = true
         } else {
             if !BackupV5Manager.hasFreeSpace(needed: BackupV5Manager.collectMediaFileEntries().reduce(0) { $0 + (BackupV5Manager.fileSize(at: $1.fileURL)) }) {
-                showMessage = "存储空间不足，全量备份至少需要与照片视频等量的剩余空间"
+                showMessage = RemoteConfig.tip("fullBackupSpace", "存储空间不足，全量备份至少需要与照片视频等量的剩余空间")
                 showAlert = true
                 return
             }
@@ -797,7 +800,7 @@ struct SettingsView: View {
                 await MainActor.run {
                     if let url = url {
                         BackupLogStore.log(category: "备份", action: "全量备份", result: "成功", detail: url.lastPathComponent, checksum: BackupV5Manager.sha1OfFile(at: url) ?? "")
-                        showMessage = "全量备份成功：\(url.lastPathComponent)\n可在「查看备份文件」中手动上传到云端"
+                        showMessage = RemoteConfig.tip("fullBackupOk", "全量备份成功：{file}\n可在「查看备份文件」中手动上传到云端").replacingOccurrences(of: "{file}", with: url.lastPathComponent)
                     } else {
                         showMessage = "全量备份失败，请检查存储空间"
                     }
@@ -1017,6 +1020,7 @@ struct InterconnectionInfoView: View {
 // MARK: - 版本更新介绍
 struct VersionHistoryView: View {
     let versions: [(version: String, date: String, changes: [String])] = [
+        ("v1.80", "2026-10-27", ["新增「远程配置中心」：云端后台可可视化编辑提示文案/功能开关/参数/公告/最低版本/帮助说明/版本更新记录，保存后 App 启动或同步即生效，无需重新安装", "新增公告横幅：后台填写公告 → App 房源页顶部即时显示（可带链接）", "新增最低版本检查：云端可设置最低版本，低于该版本启动提示更新", "远程配置三级兜底：云端 → 本地缓存 → 内置默认；断网时用本地缓存，首次安装用内置默认，功能不受影响", "提示文案（同步/删除/备份/离线重建等 20+ 条）改为云端可配，不再需要发版改文案"]),
         ("v1.79", "2026-10-27", ["修复账本增量未真正生效：增量对比从「字节全等」改为「业务字段+媒体清单语义」判断，updatedAt 等元数据不再干扰，真正无变化的房源刷新时零写入、不记日志"]),
         ("v1.78", "2026-10-27", ["本地账本镜像改为增量同步：每次刷新逐套与现有账本对比，有差异才写入、无差异跳过（房源再多也只写变化的套数），提示与实际写入套数一致"]),
         ("v1.77", "2026-10-27", ["本地账本镜像改为仅在「左上角云端同步」后重建（下拉刷新不再触发），重建完成有提示并写入操作日志（同步-重建本地账本镜像）"]),
@@ -1517,10 +1521,20 @@ struct VersionHistoryView: View {
             "基础房产中介管理功能"
         ])
     ]
+    // v1.80：远程配置——版本记录合并云端更新日志（后台「远程配置」新增条目即出现在 App 设置 → 关于，无需发版）
+    var displayVersions: [(version: String, date: String, changes: [String])] {
+        var list = versions
+        if let cloud = RemoteConfig.changelog, !cloud.isEmpty {
+            let cloudItems = cloud.map { (version: $0.version, date: $0.date ?? "", changes: $0.changes) }
+            let localVers = Set(list.map { $0.version })
+            list = cloudItems.filter { !localVers.contains($0.version) } + list
+        }
+        return list
+    }
     var body: some View {
         NavigationStack {
             List {
-                ForEach(versions, id: \.version) { ver in
+                ForEach(displayVersions, id: \.version) { ver in
                     Section(header: HStack {
                         Text(ver.version)
                             .font(.system(size: 16, weight: .bold))

@@ -10,15 +10,19 @@ import WebKit
 // MARK: - 钥匙串存取（COS 密钥等敏感配置）
 
 /// v1.3：分享压缩开关默认开启——未设置过时按开启处理（省流量、省 COS 费用）
+/// v1.80：用户未手动设置时，默认值改读云端远程配置（后台「远程配置」可改，改后 App 同步即生效）
 var shareCompressionEnabled: Bool {
-    UserDefaults.standard.object(forKey: "compressOnShare") == nil || UserDefaults.standard.bool(forKey: "compressOnShare")
+    if let v = UserDefaults.standard.object(forKey: "compressOnShare") as? Bool { return v }
+    return RemoteConfig.feature("compressUpload", true)
 }
 
 /// v1.55：公开选房链接有效期（天）。默认 2 天；可在「设置 → 房源分享」里动态调整（1/2/3/7/15/30 天）。
 /// 链接到期后签名失效，租客打开旧链接会提示无法访问，需要重新生成新链接发给租客。
 var roomsLinkExpiryDays: Int {
     let d = UserDefaults.standard.integer(forKey: "roomsLinkExpiryDays")
-    return d > 0 ? d : 2
+    if d > 0 { return d }
+    // v1.80：未设置时默认值读云端远程配置（后台可改，App 同步即生效）
+    return Int(RemoteConfig.param("roomsLinkExpiryDays", 2))
 }
 
 enum KeychainKey {

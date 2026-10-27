@@ -576,7 +576,7 @@ struct BackupFileBrowseViewV5: View {
                     await CloudBackupService.autoUploadFastBackup(zipURL: url, config: nil)
                     await MainActor.run { reloadTick += 1 }
                 }
-                showMessageInContext("快速备份成功：\(url.lastPathComponent)\n已自动上传云端（若网络失败会在下次打开 App 时自动重试）")
+                showMessageInContext(RemoteConfig.tip("quickBackupOk", "快速备份成功：{file}\n已自动上传云端（若网络失败会在下次打开 App 时自动重试）").replacingOccurrences(of: "{file}", with: url.lastPathComponent))
             } else {
                 showMessageInContext("快速备份失败，请检查存储空间")
             }
@@ -595,7 +595,7 @@ struct BackupFileBrowseViewV5: View {
                     uploadingName = nil
                     if let url = url {
                         BackupLogStore.log(category: "备份", action: "全量备份", result: "成功", detail: url.lastPathComponent, checksum: BackupV5Manager.sha1OfFile(at: url) ?? "")
-                        showMessageInContext("全量备份成功：\(url.lastPathComponent)\n可在备份列表中手动上传到云端")
+                        showMessageInContext(RemoteConfig.tip("fullBackupOk", "全量备份成功：{file}\n可在备份列表中手动上传到云端").replacingOccurrences(of: "{file}", with: url.lastPathComponent))
                         reloadTick += 1
                     } else {
                         showMessageInContext("全量备份失败，请检查存储空间")
