@@ -41,7 +41,7 @@
 		A10000010000000000000100 /* House.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000100 /* House.swift */; };
 		A10000010000000000000101 /* CosUploader.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000101 /* CosUploader.swift */; };
 		A10000010000000000000102 /* MediaStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000102 /* MediaStore.swift */; };
-		A10000010000000000000103 /* RemoteConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000103 /* RemoteConfig.swift */; };
+		A10000010000000000000199 /* RemoteConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000199 /* RemoteConfig.swift */; };
 		A10000010000000000000103 /* HouseComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000103 /* HouseComponents.swift */; };
 		A10000010000000000000104 /* HouseDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000104 /* HouseDetailView.swift */; };
 		A10000010000000000000105 /* HouseEditView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000105 /* HouseEditView.swift */; };
@@ -98,7 +98,7 @@
 		B10000010000000000000100 /* House.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = House.swift; sourceTree = "<group>"; };
 		B10000010000000000000101 /* CosUploader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CosUploader.swift; sourceTree = "<group>"; };
 		B10000010000000000000102 /* MediaStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaStore.swift; sourceTree = "<group>"; };
-		B10000010000000000000103 /* RemoteConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteConfig.swift; sourceTree = "<group>"; };
+		B10000010000000000000199 /* RemoteConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteConfig.swift; sourceTree = "<group>"; };
 		B10000010000000000000103 /* HouseComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HouseComponents.swift; sourceTree = "<group>"; };
 		B10000010000000000000104 /* HouseDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HouseDetailView.swift; sourceTree = "<group>"; };
 		B10000010000000000000105 /* HouseEditView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HouseEditView.swift; sourceTree = "<group>"; };
@@ -289,7 +289,7 @@
 			children = (
 				B10000010000000000000101 /* CosUploader.swift */,
 				B10000010000000000000102 /* MediaStore.swift */,
-				B10000010000000000000103 /* RemoteConfig.swift */,
+				B10000010000000000000199 /* RemoteConfig.swift */,
 				B10000010000000000000114 /* HouseMediaUploadQueue.swift */,
 				B10000010000000000000117 /* NetworkMonitor.swift */,
 				B10000010000000000000141 /* SyncTaskCenter.swift */,
@@ -418,7 +418,7 @@
 				A10000010000000000000100 /* House.swift in Sources */,
 				A10000010000000000000101 /* CosUploader.swift in Sources */,
 				A10000010000000000000102 /* MediaStore.swift in Sources */,
-				A10000010000000000000103 /* RemoteConfig.swift in Sources */,
+				A10000010000000000000199 /* RemoteConfig.swift in Sources */,
 				A10000010000000000000103 /* HouseComponents.swift in Sources */,
 				A10000010000000000000104 /* HouseDetailView.swift in Sources */,
 				A10000010000000000000105 /* HouseEditView.swift in Sources */,

@@ -15,8 +15,6 @@ struct AgentToolApp: App {
     // v1.44：外部传入配置备份 json（文件 App「用其他 App 打开」）识别后的提示
     @State private var configImportTip: String?
     @StateObject private var tabRouter = TabRouter()
-    // v1.80：远程配置——最低版本提示（云端配置低于当前版本时弹窗引导更新）
-    @State private var showUpdateTip = false
 
     init() {
         // 强制应用内系统控件使用中文
@@ -144,11 +142,6 @@ struct AgentToolApp: App {
                 .environment(\.calendar, Calendar(identifier: .gregorian))
                 .environmentObject(tabRouter)
                 .environment(\.houseModelContext, houseContainer.mainContext)
-                .alert("有新版本可用", isPresented: $showUpdateTip) {
-                    Button("知道了") { }
-                } message: {
-                    Text("当前版本低于云端要求的最低版本 \(RemoteConfig.minimumVersion ?? "")，请更新到最新版后使用。")
-                }
                 .alert("存储异常", isPresented: Binding(
                     get: { storageWarning != nil },
                     set: { _ in }
@@ -287,6 +280,8 @@ struct MainTabView: View {
     @Environment(\.modelContext) private var modelContext
     // v1.12：自动备份快速备份需要房源容器（保存快照中的房源 JSON）
     @Environment(\.houseModelContext) private var houseModelContext
+    // v1.80：远程配置——最低版本提示（云端 minimumVersion 高于当前版本 → 弹窗引导更新）
+    @State private var showUpdateTip = false
 
     private let tabs = [
         (title: "工作台", icon: "house.fill"),
@@ -451,6 +446,11 @@ struct MainTabView: View {
         }
         .overlay {
             Color.clear.frame(width: 1, height: 1)
+                .alert("有新版本可用", isPresented: $showUpdateTip) {
+                    Button("知道了") { }
+                } message: {
+                    Text("当前版本低于云端要求的最低版本 \(RemoteConfig.minimumVersion ?? "")，请更新到最新版后使用。")
+                }
                 .alert("自动备份成功", isPresented: Binding(
                     get: { automaticBackupMessage != nil },
                     set: { if !$0 { automaticBackupMessage = nil } }
