@@ -929,8 +929,25 @@ struct HouseListView: View {
 
     /// v1.76：重建/刷新本地账本镜像（media/<房号>/info.json），保证与本地房源记录一致。
     /// v1.77：仅由「左上角云端同步」触发（下拉刷新不再调用）。
-    /// v1.78：改为增量——每套先读取现有账本并与当前记录编码对比，有差异才写盘，无差异跳过；
-    /// 房源增多后每次刷新只写有变化的套数，其余零写入。返回(实际写入套数, 已校验套数)。
+    /// v1.78：改为增量——每套与现有账本对比，有差异才写盘，无差异跳过。
+    /// v1.79：增量对比改为「语义字段」判断（v1.78 的字节全等对比太脆弱：媒体清单顺序/元数据微变都会
+    /// 判为有差异，导致每次同步仍全量重写）。现只对比业务字段 + 排序后的媒体清单，
+    /// updatedAt/updatedBy 不参与判断；真正无变化的套数零写入。返回(实际写入套数, 已校验套数)。
+    /// 判断「账本是否已是当前状态」：业务字段一致且媒体清单（排序后）一致 → 视为无变化
+    private func ledgerIsCurrent(_ h: House, existing: CloudHouseRecord?) -> Bool {
+        guard let existing else { return false }
+        return existing.roomKey == h.mediaRoomKey
+            && existing.roomNo == h.roomNo
+            && existing.tower == h.tower
+            && existing.landlord == h.landlord
+            && existing.layout == h.layout
+            && existing.price == h.price
+            && existing.password == h.password
+            && existing.remark == h.remark
+            && existing.status == h.statusRaw
+            && existing.mediaNames.sorted() == h.mediaItems.map { $0.fileName }.sorted()
+    }
+
     @discardableResult
     private func rebuildLocalLedgers() -> (written: Int, checked: Int) {
         guard let ctx = houseModelContext else { return (0, 0) }
@@ -940,12 +957,11 @@ struct HouseListView: View {
         for h in all where !h.isTrashed {
             checked += 1
             let url = MediaStore.houseDirectory(roomKey: h.mediaRoomKey).appendingPathComponent("info.json")
-            let newRecord = CloudHouseSync.record(from: h, username: CloudUser.username)
-            guard let newData = try? JSONEncoder().encode(newRecord) else { continue }
-            if let oldData = try? Data(contentsOf: url), oldData == newData {
+            let existing = (try? Data(contentsOf: url)).flatMap { try? JSONDecoder().decode(CloudHouseRecord.self, from: $0) }
+            if ledgerIsCurrent(h, existing: existing) {
                 continue   // 账本已是最新，跳过写入
             }
-            try? newData.write(to: url, options: .atomic)
+            LocalHouseLedger.save(h)
             written += 1
         }
         return (written, checked)
