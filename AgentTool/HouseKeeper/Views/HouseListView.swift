@@ -922,7 +922,19 @@ struct HouseListView: View {
             } else {
                 showToast(lines.joined(separator: "\n"))
             }
+            // v1.75：本地刷新（含媒体补全）后同步重建本地账本镜像
+            rebuildLocalLedgers()
             NotificationCenter.default.post(name: Self.houseStoreChanged, object: nil)
+        }
+    }
+
+    /// v1.75：重建/刷新全部本地账本镜像（media/<房号>/info.json），保证与本地房源记录一致。
+    /// 在同步的所有成功出口调用（含「已刷新，无变化」）——用户要求：刷新即把账本同步到本地。
+    private func rebuildLocalLedgers() {
+        guard let ctx = houseModelContext else { return }
+        let all = (try? ctx.fetch(FetchDescriptor<House>())) ?? []
+        for h in all where !h.isTrashed {
+            LocalHouseLedger.save(h)
         }
     }
 
@@ -998,6 +1010,8 @@ struct HouseListView: View {
                 let pending = await preflightMediaSnapshots(config: config, ctx: ctx)
                 if pending.isEmpty {
                     showToast("已刷新，无变化")
+                    // v1.75：无变化也重建本地账本镜像（刷新即同步账本到本地）
+                    rebuildLocalLedgers()
                     return
                 }
                 pendingMediaSnaps = pending
@@ -1366,12 +1380,7 @@ struct HouseListView: View {
             showToast(msg)
             // v1.75：同步完成后重建/刷新全部本地账本镜像（media/<房号>/info.json）——
             // 覆盖历史版本误删（对账把 info.json 当多余媒体删掉）与新增/变化，保证本地镜像与云端一致
-            await MainActor.run {
-                let all = (try? ctx.fetch(FetchDescriptor<House>())) ?? []
-                for h in all where !h.isTrashed {
-                    LocalHouseLedger.save(h)
-                }
-            }
+            rebuildLocalLedgers()
             BackupLogStore.log(category: "同步", action: "同步房源（云端→本地）", result: "成功", detail: msg, cloud: true)
             HouseSyncProgress.shared.clear()
         } catch {
