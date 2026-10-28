@@ -76,18 +76,18 @@ struct DashboardView: View {
         }
     }
 
-    /// 解析工作台动作顺序（空/损坏回退默认；旧版本缓存自动补入安居客/AI 助手，让新入口可见）
+    /// 解析工作台动作顺序（空/损坏回退默认；旧缓存自动补入安居客/AI 助手，让新入口可见）
+    /// 注意：仅计算不写回，持久化写回由 onAppear 的 migrateQuickActionOrdersIfNeeded 完成，
+    /// 避免在视图渲染期间修改 @AppStorage 导致 SwiftUI 运行时崩溃。
     private var dashboardActionIDs: [String] {
         if qaDashOrder.isEmpty { return QuickActionRegistry.defaultDashboard }
         if let data = qaDashOrder.data(using: .utf8),
            let arr = try? JSONDecoder().decode([String].self, from: data) {
             var valid = arr.filter { QuickActionRegistry.meta($0) != nil }
             if valid.isEmpty { return QuickActionRegistry.defaultDashboard }
-            // 迁移：旧缓存缺安居客/AI 助手 → 补入（先电表后，满 7 个后多出的收进「更多」）
-            var migrated = false
+            // 迁移计算：旧缓存缺安居客/AI 助手 → 补入（先电表后，满 7 个后多出的收进「更多」）
             var more = moreActionIDs
             for id in ["ajk", "ai"] where !valid.contains(id) {
-                migrated = true
                 if valid.count < 7 {
                     if let idx = valid.firstIndex(of: "meter") { valid.insert(id, at: idx + 1) }
                     else { valid.append(id) }
@@ -98,17 +98,43 @@ struct DashboardView: View {
             // 超 7 个的收进「更多」（旧缓存可能超过 7）
             while valid.count > 7 {
                 guard let last = valid.last else { break }
-                migrated = true
                 valid.removeLast()
                 if !more.contains(last) { more.insert(last, at: 0) }
-            }
-            if migrated {
-                writeDashOrder(valid)
-                writeMoreOrder(more)
             }
             return valid
         }
         return QuickActionRegistry.defaultDashboard
+    }
+
+    /// 旧版本快捷操作缓存自动迁移（补入安居客/AI 助手；超 7 个收进「更多」）
+    /// 只在 onAppear 执行一次写回，避免渲染期间修改状态导致崩溃
+    private func migrateQuickActionOrdersIfNeeded() {
+        guard !qaDashOrder.isEmpty else { return }
+        guard let data = qaDashOrder.data(using: .utf8),
+              let arr = try? JSONDecoder().decode([String].self, from: data) else { return }
+        var valid = arr.filter { QuickActionRegistry.meta($0) != nil }
+        if valid.isEmpty { return }
+        var migrated = false
+        var more = moreActionIDs
+        for id in ["ajk", "ai"] where !valid.contains(id) {
+            migrated = true
+            if valid.count < 7 {
+                if let idx = valid.firstIndex(of: "meter") { valid.insert(id, at: idx + 1) }
+                else { valid.append(id) }
+            } else {
+                if !more.contains(id) { more.insert(id, at: 0) }
+            }
+        }
+        while valid.count > 7 {
+            guard let last = valid.last else { break }
+            migrated = true
+            valid.removeLast()
+            if !more.contains(last) { more.insert(last, at: 0) }
+        }
+        if migrated {
+            writeDashOrder(valid)
+            writeMoreOrder(more)
+        }
     }
 
     /// 解析「更多」收纳顺序
@@ -680,6 +706,7 @@ struct DashboardView: View {
             refreshDashboard()
             loadUserProfile()
             currentTime = Date()
+            migrateQuickActionOrdersIfNeeded()
         }
         .onReceive(timer) { _ in
             guard isActive else { return }
