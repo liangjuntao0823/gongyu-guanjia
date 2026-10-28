@@ -16,6 +16,9 @@ final class SyncTaskCenter: ObservableObject {
         var total: Int             // 总媒体数
         var done: Int = 0          // 已完成媒体数
         var current: String = ""   // 当前正在处理的房号
+        // v1.83：当前房号内的文件级进度（本套共几个文件、已处理几个）——解决「进度条卡在一套房分不清是图多还是卡」
+        var currentFilesTotal: Int = 0
+        var currentFilesDone: Int = 0
         var isRunning: Bool = true
         var success: Bool = false
 
@@ -44,6 +47,16 @@ final class SyncTaskCenter: ObservableObject {
         guard let t = task else { return }
         t.done = done
         t.current = current
+        objectWillChange.send()
+    }
+
+    /// v1.83：推进进度并携带「当前房号内的文件级进度」（filesTotal=本套文件总数，filesDone=本套已处理数）
+    func advanceHouse(done: Int, current: String, filesTotal: Int, filesDone: Int) {
+        guard let t = task else { return }
+        t.done = done
+        t.current = current
+        t.currentFilesTotal = filesTotal
+        t.currentFilesDone = filesDone
         objectWillChange.send()
     }
 

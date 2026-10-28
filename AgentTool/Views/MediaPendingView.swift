@@ -30,7 +30,10 @@ struct MediaPendingView: View {
                         ProgressView(value: t.fraction)
                         HStack {
                             if t.isRunning {
-                                Text("\(t.done)/\(t.total) 个媒体 · 正在处理 \(t.current)")
+                                // v1.83：文件级进度——全局 n/m 个媒体 + 当前房号 + 本套文件进度
+                                Text(t.currentFilesTotal > 0
+                                     ? "\(t.done)/\(t.total) 个媒体 · 正在处理 \(t.current)（本套 \(t.currentFilesDone)/\(t.currentFilesTotal) 个文件）"
+                                     : "\(t.done)/\(t.total) 个媒体 · 正在处理 \(t.current)")
                                     .font(.caption2).foregroundColor(.secondary)
                             } else {
                                 Text("共 \(t.total) 个媒体").font(.caption2).foregroundColor(.secondary)

@@ -7,9 +7,12 @@ struct HouseEditView: View {
     @Environment(\.houseModelContext) private var houseModelContext
     @Environment(\.dismiss) private var dismiss
 
-    /// 当前可用的房源数据上下文（App 内必然已注入）
+    /// 当前可用的房源数据上下文（App 内必然已注入；缺失属程序 bug，崩溃前留痕便于定位）
     private var modelContext: ModelContext {
-        guard let ctx = houseModelContext else { fatalError("houseModelContext 未注入") }
+        guard let ctx = houseModelContext else {
+            CrashLogCollector.logFatal(title: "HouseEditView 缺少 houseModelContext 注入", body: "house 房号：\(house?.roomNo ?? "新增")")
+            fatalError("houseModelContext 未注入")
+        }
         return ctx
     }
 

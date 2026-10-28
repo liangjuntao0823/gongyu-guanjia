@@ -37,6 +37,12 @@ enum CrashLogCollector {
         }
     }
 
+    /// v1.83：可预期的致命错误（数据库双重初始化失败、视图上下文缺失等）在 fatalError/温和降级前主动留痕，
+    /// 供下次启动提示「上次异常退出」并可在设置页导出定位。与系统 crash handler 独立，保证必写成功。
+    static func logFatal(title: String, body: String) {
+        writeLog(title: title, body: body)
+    }
+
     /// 写入崩溃日志（异常 handler 调用；只做文件写入，不做高开销操作）
     private static func writeLog(title: String, body: String) {
         let fm = FileManager.default

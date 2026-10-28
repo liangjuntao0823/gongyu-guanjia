@@ -819,7 +819,10 @@ struct HouseListView: View {
     private var announcementBanner: some View {
         if let ann = RemoteConfig.announcement, ann.enabled, !ann.text.isEmpty {
             Button {
-                if let link = ann.link, !link.isEmpty, let url = URL(string: link) {
+                // v1.83：只放行 http/https 链接，其他 scheme（javascript: 等）一律忽略，防异常链接
+                if let link = ann.link, !link.isEmpty,
+                   let url = URL(string: link),
+                   let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" {
                     UIApplication.shared.open(url)
                 }
             } label: {
@@ -1000,7 +1003,9 @@ struct HouseListView: View {
         return (written, checked)
     }
 
-    private func syncCloudHouses() async {
+    /// v1.83：同步失败自动重试一次——网络瞬断/弱网（如电梯信号切换）时第一次失败会在 1 秒后自动重跑，
+    /// 第二次仍失败才提示。retriedOnce 防止重试套娃无限递归。
+    private func syncCloudHouses(retriedOnce: Bool = false) async {
         isSyncing = true   // v1.72（#5）：点击立即反馈「正在刷新」
         defer { isSyncing = false }
         let config = CosConfig.load()
@@ -1094,6 +1099,12 @@ struct HouseListView: View {
             pendingSyncPushed = pushed
             showSyncConfirm = true
         } catch {
+            // v1.83：自动重试一次（弱网瞬断场景），第二次失败才提示并记录
+            if !retriedOnce {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                await syncCloudHouses(retriedOnce: true)
+                return
+            }
             showToast(RemoteConfig.tip("syncFail", "同步失败：{error}").replacingOccurrences(of: "{error}", with: error.localizedDescription), isError: true)
             BackupLogStore.log(category: "同步", action: "同步房源（云端→本地）", result: "失败", detail: error.localizedDescription, cloud: true)
         }
@@ -1114,22 +1125,52 @@ struct HouseListView: View {
 
     /// v1.68：云端媒体对账「干跑」——只列桶比对，不传任何东西，返回「云端缺媒体」的房源快照列表。
     /// 供同步无变化时弹确认框前预检；列桶失败视为待补（确认后可重试，不丢数据）。
+    /// v1.83：一次递归列桶替代逐房号串行列桶——房源多时不再每次刷新发起 N 次 COS 请求。
+    /// 整桶 h/ 平铺拉回（自动分页），按房号前缀分组比对；仅命中差异的房号进入待补列表。
     private func preflightMediaSnapshots(config: CosConfig, ctx: ModelContext) async -> [PendingMediaHouseSnapshot] {
         var snapshots: [PendingMediaHouseSnapshot] = []
         await MainActor.run {
             let local = (try? ctx.fetch(FetchDescriptor<House>())) ?? []
             snapshots = local.filter { !$0.isTrashed && $0.cloudStatus != .cloud && !$0.mediaItems.isEmpty }.map { makePendingSnapshot(from: $0) }
         }
+        guard !snapshots.isEmpty else { return [] }
+        // 一次列桶拉回 h/ 全部对象（自动分页），按「h/<房号>/」前缀归组
+        var cloudByRoom: [String: Set<String>] = [:]
+        do {
+            let objs = try await CosUploader.listObjects(prefix: "h/", config: config)
+            let prefixLen = "h/".count
+            for obj in objs {
+                var name = obj.name
+                guard name.hasPrefix("h/") else { continue }
+                name.removeFirst(prefixLen)
+                // 只处理 h/<房号>/ 下的对象（目录子项/根散文件跳过）
+                guard let slash = name.firstIndex(of: "/") else { continue }
+                let roomKey = String(name[..<slash])
+                guard !roomKey.isEmpty, !roomKey.hasPrefix("_") else { continue }
+                let file = String(name[name.index(after: slash)...])
+                guard !file.isEmpty else { continue }
+                cloudByRoom[roomKey, default: []].insert(Self.mediaNormKey(file))
+            }
+        } catch {
+            // 整桶列桶失败（网络/限流）：退回逐房号列桶（原逻辑），仍失败则视为待补（不丢数据）
+            var pending: [PendingMediaHouseSnapshot] = []
+            for snap in snapshots {
+                do {
+                    let objs = try await CosUploader.listObjects(prefix: "h/\(snap.roomKey)/", config: config)
+                    let cloudNames = Set(objs.map { Self.mediaNormKey(($0.name as NSString).lastPathComponent) })
+                    let localNames = Set(snap.files.map { Self.mediaNormKey($0.name) })
+                    if !localNames.isSubset(of: cloudNames) { pending.append(snap) }
+                } catch {
+                    pending.append(snap)
+                }
+            }
+            return pending
+        }
         var pending: [PendingMediaHouseSnapshot] = []
         for snap in snapshots {
-            do {
-                let objs = try await CosUploader.listObjects(prefix: "h/\(snap.roomKey)/", config: config)
-                let cloudNames = Set(objs.map { Self.mediaNormKey(($0.name as NSString).lastPathComponent) })
-                let localNames = Set(snap.files.map { Self.mediaNormKey($0.name) })
-                if !localNames.isSubset(of: cloudNames) { pending.append(snap) }
-            } catch {
-                pending.append(snap)
-            }
+            let cloudNames = cloudByRoom[snap.roomKey] ?? []
+            let localNames = Set(snap.files.map { Self.mediaNormKey($0.name) })
+            if !localNames.isSubset(of: cloudNames) { pending.append(snap) }
         }
         return pending
     }
@@ -1144,15 +1185,17 @@ struct HouseListView: View {
         var failed: [String] = []
         var done = 0
         for snap in snaps {
-            syncCenter.advance(done: done, current: snap.displayRoomNo)
+            // v1.83：显示当前房号内的文件级进度（本套共 n 个文件，处理完置满）
+            syncCenter.advanceHouse(done: done, current: snap.displayRoomNo, filesTotal: snap.files.count, filesDone: 0)
+            let fileCount = snap.files.count
             do {
                 _ = try await CosUploader.autoRegenerateMaskedShare(mediaFiles: snap.files, roomKey: snap.roomKey, info: snap.info, config: config)
                 uploaded.append(snap.displayRoomNo)
+                syncCenter.advanceHouse(done: done + fileCount, current: snap.displayRoomNo, filesTotal: fileCount, filesDone: fileCount)
             } catch {
                 failed.append(snap.displayRoomNo)
             }
-            done += snap.files.count
-            syncCenter.advance(done: done, current: snap.displayRoomNo)
+            done += fileCount
         }
         syncCenter.finish(success: failed.isEmpty)
         // v1.70：完成后进度条自动收起（不再需要手动点「完成」）——任务已结束，弹窗已告知结果；
@@ -1209,7 +1252,10 @@ struct HouseListView: View {
                 ProgressView(value: t.fraction)
                 HStack {
                     if t.isRunning {
-                        Text("\(t.done)/\(t.total) 个媒体 · 正在处理 \(t.current)")
+                        // v1.83：文件级进度（本套文件数上下文，区分「图多」还是「卡住」）
+                        Text(t.currentFilesTotal > 0
+                             ? "\(t.done)/\(t.total) 个媒体 · 正在处理 \(t.current)（本套 \(t.currentFilesDone)/\(t.currentFilesTotal) 个文件）"
+                             : "\(t.done)/\(t.total) 个媒体 · 正在处理 \(t.current)")
                             .font(.caption2)
                             .foregroundColor(.secondary)
                     } else {

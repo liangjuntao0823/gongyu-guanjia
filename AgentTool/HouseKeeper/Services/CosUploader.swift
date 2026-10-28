@@ -3218,23 +3218,29 @@ enum CloudHouseSync {
             roomKeys.append(name)
         }
         var records: [CloudHouseRecord] = []
-        try await withThrowingTaskGroup(of: CloudHouseRecord?.self) { group in
-            for rk in roomKeys {
-                group.addTask {
-                    let data: Data
-                    do {
-                        data = try await CosUploader.fetchObjectData(path: recordPath(roomKey: rk), config: config)
-                    } catch let e as CosObjectNotFoundError {
-                        return nil   // 该套无账本记录 → 跳过
+        // v1.83：并发限流——每次最多并发下载 8 套账本，避免房源多时瞬时并发过高触发 COS 限流/超时。
+        // 分批执行：一批 8 个并发 Task，全部收完后进入下一批；错误在批次内立即上抛。
+        let batchSize = 8
+        for start in stride(from: 0, to: roomKeys.count, by: batchSize) {
+            let batch = Array(roomKeys[start..<min(start + batchSize, roomKeys.count)])
+            try await withThrowingTaskGroup(of: CloudHouseRecord?.self) { group in
+                for rk in batch {
+                    group.addTask {
+                        let data: Data
+                        do {
+                            data = try await CosUploader.fetchObjectData(path: recordPath(roomKey: rk), config: config)
+                        } catch let e as CosObjectNotFoundError {
+                            return nil   // 该套无账本记录 → 跳过
+                        }
+                        guard let rec = try? JSONDecoder().decode(CloudHouseRecord.self, from: data) else {
+                            throw NSError(domain: "CloudHouseSync", code: -1, userInfo: [NSLocalizedDescriptionKey: "云端房源账本解析失败：\(rk)/info.json 格式异常"])
+                        }
+                        return rec
                     }
-                    guard let rec = try? JSONDecoder().decode(CloudHouseRecord.self, from: data) else {
-                        throw NSError(domain: "CloudHouseSync", code: -1, userInfo: [NSLocalizedDescriptionKey: "云端房源账本解析失败：\(rk)/info.json 格式异常"])
-                    }
-                    return rec
                 }
-            }
-            for try await rec in group {
-                if let rec { records.append(rec) }
+                for try await rec in group {
+                    if let rec { records.append(rec) }
+                }
             }
         }
         return records

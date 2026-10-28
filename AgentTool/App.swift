@@ -73,6 +73,8 @@ struct AgentToolApp: App {
                     (mainContainer, houseContainer) = try Self.makeMemoryContainers()
                     storageWarning = "本地数据库无法打开，当前为临时模式；本次新增或修改的数据不会永久保存。请先导出可用数据并重启 APP。错误：\(persistentError.localizedDescription)"
                 } catch {
+                    // v1.83：双容器全部初始化失败前的最后留痕——写崩溃日志（设置页可导出），下次启动提示异常退出
+                    CrashLogCollector.logFatal(title: "数据库与临时存储双重初始化失败", body: "错误：\(error.localizedDescription)")
                     fatalError("数据库和临时存储均无法初始化：\(error.localizedDescription)")
                 }
             }
@@ -282,6 +284,8 @@ struct MainTabView: View {
     @Environment(\.houseModelContext) private var houseModelContext
     // v1.80：远程配置——最低版本提示（云端 minimumVersion 高于当前版本 → 弹窗引导更新）
     @State private var showUpdateTip = false
+    // v1.83：上次异常退出提示（检测到崩溃日志时弹一次，设置页可查看/导出）
+    @State private var showCrashTip = false
 
     private let tabs = [
         (title: "工作台", icon: "house.fill"),
@@ -407,6 +411,8 @@ struct MainTabView: View {
             RemoteConfig.loadCache()
             Task { await RemoteConfig.refresh() }
             checkMinimumVersion()
+            // v1.83：上次异常退出提示（崩溃日志存在时弹一次；设置→崩溃日志可导出定位）
+            if CrashLogCollector.hasLogs() { showCrashTip = true }
             UNUserNotificationCenter.current().setBadgeCount(0)
             // v1.12：启动时安装崩溃日志、同步日志桥、清理恢复残留、重试未上传的云端备份
             CrashLogCollector.install()
@@ -434,7 +440,12 @@ struct MainTabView: View {
             WidgetDataSync.sync(modelContext: modelContext)
         }
         .onReceive(automaticBackupTimer) { _ in
+            // v1.83：30 秒定时器只做自动备份到点检查；通知重建/小组件同步改由「数据保存时」触发（见下方 didSave），
+            // 避免每 30 秒无条件执行无关的后台工作（耗电 + 无谓开销）。
             checkAutoBackup()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: ModelContext.didSaveNotification)) { _ in
+            // v1.83：任何 ModelContext 保存（记账/房源/待办等）后才重建本地通知与小组件数据，替代原来的 30 秒轮询
             LocalNotificationManager.shared.rebuildAll(modelContext: modelContext)
             WidgetDataSync.sync(modelContext: modelContext)
         }
@@ -458,6 +469,11 @@ struct MainTabView: View {
                     Button("知道了", role: .cancel) { automaticBackupMessage = nil }
                 } message: {
                     Text(automaticBackupMessage ?? "")
+                }
+                .alert("上次异常退出", isPresented: $showCrashTip) {
+                    Button("知道了", role: .cancel) { }
+                } message: {
+                    Text("App 上次运行时意外退出，已自动记录崩溃日志。你可以在「设置 → 崩溃日志」查看或导出，帮助排查原因。")
                 }
         }
         .onReceive(NotificationCenter.default.publisher(for: .backupZipImported)) { note in
