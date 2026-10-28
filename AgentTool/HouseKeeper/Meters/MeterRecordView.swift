@@ -13,7 +13,7 @@ struct MeterRecordView: View {
     @State private var records: [MeterPayRecord] = []
     @State private var loading = false
     @State private var errorText: String?
-    @State private var sharePath: String?
+    @State private var sharePath: MeterShareFile?
 
     var body: some View {
         Group {
@@ -83,8 +83,8 @@ struct MeterRecordView: View {
         } message: {
             Text(errorText ?? "")
         }
-        .sheet(item: $sharePath) { path in
-            ShareSheet(items: [URL(fileURLWithPath: path)])
+        .sheet(item: $sharePath) { file in
+            MeterShareSheet(items: [URL(fileURLWithPath: file.path)])
         }
     }
 
@@ -115,7 +115,7 @@ struct MeterRecordView: View {
             let url = FileManager.default.temporaryDirectory
                 .appendingPathComponent("充值记录_\(meter.uid)_\(DateFormatter.exportStamp.string(from: Date())).csv")
             try Data(("\u{FEFF}" + csv).utf8).write(to: url)
-            sharePath = url.path
+            sharePath = MeterShareFile(path: url.path)
         } catch {
             errorText = error.localizedDescription
         }

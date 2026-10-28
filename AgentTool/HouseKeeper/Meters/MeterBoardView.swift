@@ -324,11 +324,9 @@ struct MeterBoardView: View {
         defer { refreshing = false }
         do {
             let ok = try await MeterQueryService.shared.refreshAll(store: store) { done, total, label in
-                await MainActor.run {
-                    refreshProgress = done
-                    refreshTotal = total
-                    refreshLabel = label
-                }
+                refreshProgress = done
+                refreshTotal = total
+                refreshLabel = label
             }
             if ok > 0 {
                 // 刷新完成（静默成功，靠卡片数据变化呈现）

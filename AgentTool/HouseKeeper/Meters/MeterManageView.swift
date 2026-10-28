@@ -14,7 +14,7 @@ struct MeterManageView: View {
     @State private var importText = ""
     @State private var errorText: String?
     @State private var showAdd = false
-    @State private var editingUID: String?
+    @State private var editingUID: MeterEditTarget?
 
     var body: some View {
         List {
@@ -69,7 +69,7 @@ struct MeterManageView: View {
                             }
                         }
                         Spacer()
-                        Button("备注") { editingUID = meter.uid }
+                        Button("备注") { editingUID = MeterEditTarget(uid: meter.uid) }
                             .font(.system(size: 12))
                             .foregroundColor(.themeAccentDark)
                     }
@@ -116,8 +116,8 @@ struct MeterManageView: View {
             }
         }
         .sheet(isPresented: $showAdd) { MeterAddSheet() }
-        .sheet(item: $editingUID) { uid in
-            MeterRoomNoteSheet(uid: uid)
+        .sheet(item: $editingUID) { t in
+            MeterRoomNoteSheet(uid: t.uid)
         }
         .alert("提示", isPresented: Binding(get: { errorText != nil }, set: { if !$0 { errorText = nil } })) {
             Button("好", role: .cancel) { errorText = nil }
@@ -199,4 +199,10 @@ struct MeterRoomNoteSheet: View {
             room = store.meters.first { $0.uid == uid }?.room ?? ""
         }
     }
+}
+
+/// 备注弹窗的 sheet item 包装（String 自身不满足 Identifiable）
+struct MeterEditTarget: Identifiable {
+    let id = UUID()
+    let uid: String
 }

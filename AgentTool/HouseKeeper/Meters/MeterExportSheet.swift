@@ -16,7 +16,7 @@ struct MeterExportSheet: View {
     @State private var exporting = false
     @State private var progressText = ""
     @State private var errorText: String?
-    @State private var sharePath: String?
+    @State private var sharePath: MeterShareFile?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -136,8 +136,8 @@ struct MeterExportSheet: View {
         } message: {
             Text(errorText ?? "")
         }
-        .sheet(item: $sharePath) { path in
-            ShareSheet(items: [URL(fileURLWithPath: path)])
+        .sheet(item: $sharePath) { file in
+            MeterShareSheet(items: [URL(fileURLWithPath: file.path)])
         }
     }
 
@@ -191,7 +191,7 @@ struct MeterExportSheet: View {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
         do {
             try Data(("\u{FEFF}" + csv).utf8).write(to: url)
-            sharePath = url.path
+            sharePath = MeterShareFile(path: url.path)
         } catch {
             errorText = "CSV 生成失败：\(error.localizedDescription)"
         }
@@ -206,14 +206,15 @@ private extension DateFormatter {
     }
 }
 
-struct ShareSheet: UIViewControllerRepresentable {
+struct MeterShareFile: Identifiable {
+    let id = UUID()
+    let path: String
+}
+
+struct MeterShareSheet: UIViewControllerRepresentable {
     let items: [Any]
     func makeUIViewController(context: Context) -> UIActivityViewController {
         UIActivityViewController(activityItems: items, applicationActivities: nil)
     }
     func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
-}
-
-extension String: Identifiable {
-    public var id: String { self }
 }
