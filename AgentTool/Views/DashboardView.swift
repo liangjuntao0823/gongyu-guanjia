@@ -469,7 +469,7 @@ struct DashboardView: View {
                                 // v1.85：按自定义顺序渲染工作台动作（默认第一行 成交/收入/支出/收租，第二行 待办/电表管理/安居客/AI 助手/更多）
                                 ForEach(dashboardActionIDs, id: \.self) { id in
                                     if let spec = quickActionSpec(id) {
-                                        QuickActionItem(imageName: spec.imageName, icon: spec.icon, label: spec.label, color: spec.color, action: spec.action)
+                                        QuickActionItem(icon: spec.icon, label: spec.label, color: spec.color, action: spec.action, imageName: spec.imageName)
                                     }
                                 }
                                 // 第 8 位固定「更多」入口
@@ -1292,11 +1292,11 @@ struct KpiCard: View {
 }
 
 struct QuickActionItem: View {
-    var imageName: String? = nil
     let icon: String
     let label: String
     let color: Color
     let action: () -> Void
+    var imageName: String? = nil
     var body: some View {
         Button(action: action) {
             VStack(spacing: 4) {
@@ -1341,10 +1341,10 @@ struct MoreActionsSheet: View {
             } else {
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 4), spacing: 8) {
                     ForEach(Array(specs.enumerated()), id: \.offset) { _, spec in
-                        QuickActionItem(imageName: spec.imageName, icon: spec.icon, label: spec.label, color: spec.color) {
+                        QuickActionItem(icon: spec.icon, label: spec.label, color: spec.color, action: {
                             dismiss()
                             spec.action()
-                        }
+                        }, imageName: spec.imageName)
                     }
                 }
                 .padding(.horizontal, 16)

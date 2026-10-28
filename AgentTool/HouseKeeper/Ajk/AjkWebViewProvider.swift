@@ -153,7 +153,10 @@ final class AjkWebViewProvider: NSObject, WKNavigationDelegate {
         """
         webView.evaluateJavaScript(js) { _, error in
             if let error = error {
-                self.finish(error: "脚本执行失败：\(error.localizedDescription)")
+                // evaluateJavaScript 回调为非隔离上下文，需切回主 actor 再调用 @MainActor 方法
+                Task { @MainActor in
+                    self.finish(error: "脚本执行失败：\(error.localizedDescription)")
+                }
             }
         }
     }
