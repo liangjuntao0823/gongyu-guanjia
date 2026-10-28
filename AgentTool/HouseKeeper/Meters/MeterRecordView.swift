@@ -291,12 +291,6 @@ private struct TrendLineView: View {
         let h = max(size.height - pad * 2, 1)
         let n = points.count
 
-        func xy(_ i: Int) -> CGPoint {
-            let x = pad + w * CGFloat(i) / CGFloat(max(n - 1, 1))
-            let y = pad + h * (1 - CGFloat((points[i].s - minVal) / range))
-            return CGPoint(x: x, y: y)
-        }
-
         ZStack {
             // 网格线（3 条水平）
             ForEach(0..<4, id: \.self) { i in
@@ -309,20 +303,20 @@ private struct TrendLineView: View {
             }
             // 折线
             Path { p in
-                p.move(to: xy(0))
+                p.move(to: xy(0, pad: pad, w: w, h: h, n: n, minVal: minVal, range: range))
                 for i in 1..<n {
-                    p.addLine(to: xy(i))
+                    p.addLine(to: xy(i, pad: pad, w: w, h: h, n: n, minVal: minVal, range: range))
                 }
             }
             .stroke(Color.themeAccentDark, style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
             // 渐变填充
             Path { p in
-                p.move(to: xy(0))
+                p.move(to: xy(0, pad: pad, w: w, h: h, n: n, minVal: minVal, range: range))
                 for i in 1..<n {
-                    p.addLine(to: xy(i))
+                    p.addLine(to: xy(i, pad: pad, w: w, h: h, n: n, minVal: minVal, range: range))
                 }
-                p.addLine(to: CGPoint(x: xy(n - 1).x, y: pad + h))
-                p.addLine(to: CGPoint(x: xy(0).x, y: pad + h))
+                p.addLine(to: CGPoint(x: xy(n - 1, pad: pad, w: w, h: h, n: n, minVal: minVal, range: range).x, y: pad + h))
+                p.addLine(to: CGPoint(x: xy(0, pad: pad, w: w, h: h, n: n, minVal: minVal, range: range).x, y: pad + h))
                 p.closeSubpath()
             }
             .fill(LinearGradient(colors: [Color.themeAccent.opacity(0.22), Color.themeAccent.opacity(0.02)],
@@ -334,34 +328,27 @@ private struct TrendLineView: View {
                         .fill(Color.white)
                         .overlay(Circle().stroke(Color.themeAccentDark, lineWidth: 1.5))
                         .frame(width: 7, height: 7)
-                        .position(xy(i))
+                        .position(xy(i, pad: pad, w: w, h: h, n: n, minVal: minVal, range: range))
                 }
             } else {
                 // 密集时显示首尾两点
                 Circle().fill(Color.white)
                     .overlay(Circle().stroke(Color.themeAccentDark, lineWidth: 1.5))
                     .frame(width: 7, height: 7)
-                    .position(xy(0))
+                    .position(xy(0, pad: pad, w: w, h: h, n: n, minVal: minVal, range: range))
                 Circle().fill(Color.white)
                     .overlay(Circle().stroke(Color.themeAccentDark, lineWidth: 1.5))
                     .frame(width: 7, height: 7)
-                    .position(xy(n - 1))
-            }
-            // 最新值标注
-            VStack(alignment: .trailing, spacing: 0) {
-                Text(String(format: "%.1f", points[n - 1].s))
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundColor(.themeAccentDark)
-                    .padding(.horizontal, 5)
-                    .padding(.vertical, 2)
-                    .background(Color.white.opacity(0.9))
-                    .clipShape(RoundedRectangle(cornerRadius: 6))
-                    .position(x: min(xy(n - 1).x + 16, size.width - 40), y: max(xy(n - 1).y - 18, 8))
-                Color.clear.frame(width: 1, height: 1)
+                    .position(xy(n - 1, pad: pad, w: w, h: h, n: n, minVal: minVal, range: range))
             }
         }
         .frame(width: size.width, height: size.height)
-        .clipped()
+    }
+
+    private func xy(_ i: Int, pad: CGFloat, w: CGFloat, h: CGFloat, n: Int, minVal: Double, range: Double) -> CGPoint {
+        let x = pad + w * CGFloat(i) / CGFloat(max(n - 1, 1))
+        let y = pad + h * (1 - CGFloat((points[i].s - minVal) / range))
+        return CGPoint(x: x, y: y)
     }
 }
 
