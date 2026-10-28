@@ -201,7 +201,7 @@ extension AjkWebViewProvider: WKScriptMessageHandler {
             result.houses = pendingHouses
             result.overview = pendingOverview
             // 登录态判定：一张卡片都没抓到且概览不含房源特征 → 可能未登录
-            if result.houses.isEmpty && result.overview.isEmpty {
+            if result.houses.isEmpty && result.overview == .empty {
                 result.needLogin = true
             }
             c.resume(returning: result)

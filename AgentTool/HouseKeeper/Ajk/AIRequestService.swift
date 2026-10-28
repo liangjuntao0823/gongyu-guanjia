@@ -47,7 +47,7 @@ struct AIRequestService {
         guard let http = resp as? HTTPURLResponse else { throw AIRequestError.parse }
         guard (200..<300).contains(http.statusCode) else {
             let msg = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String
-                ?? String(data: data, encoding: .utf8)?.prefix(200).map(String.init) ?? "未知错误"
+                ?? String(String(data: data, encoding: .utf8)?.prefix(200) ?? "")
             throw AIRequestError.http(http.statusCode, msg)
         }
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
