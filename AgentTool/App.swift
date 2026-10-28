@@ -445,9 +445,9 @@ struct MainTabView: View {
             // 避免每 30 秒无条件执行无关的后台工作（耗电 + 无谓开销）。
             checkAutoBackup()
         }
-        .onReceive(NotificationCenter.default.publisher(for: NSManagedObjectContext.didSaveNotification)) { _ in
+        .onReceive(NotificationCenter.default.publisher(for: .NSManagedObjectContextDidSave)) { _ in
             // v1.83：任何 ModelContext 保存（记账/房源/待办等）后才重建本地通知与小组件数据，替代原来的 30 秒轮询
-            // 注：SwiftData 的 ModelContext 底层即 CoreData context，didSave 通知由 NSManagedObjectContext 发出
+            // 注：SwiftData 的 ModelContext 底层即 CoreData context，didSave 通知名即 NSManagedObjectContextDidSave
             LocalNotificationManager.shared.rebuildAll(modelContext: modelContext)
             WidgetDataSync.sync(modelContext: modelContext)
         }
