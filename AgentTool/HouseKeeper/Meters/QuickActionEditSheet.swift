@@ -12,10 +12,20 @@ struct QuickActionMeta: Identifiable {
     let label: String
     let icon: String
     let color: Color
+    /// 自定义图片名（Assets 里的 imageset）；nil 时使用 SF Symbol
+    let imageName: String?
+
+    init(id: String, label: String, icon: String, color: Color, imageName: String? = nil) {
+        self.id = id
+        self.label = label
+        self.icon = icon
+        self.color = color
+        self.imageName = imageName
+    }
 }
 
 enum QuickActionRegistry {
-    /// 全部 10 个动作的固定定义（顺序即默认展示顺序参考）
+    /// 全部 12 个动作的固定定义（顺序即默认展示顺序参考）
     static let all: [QuickActionMeta] = [
         QuickActionMeta(id: "deal",     label: "新增成交", icon: "plus.circle.fill",        color: .themeAccent),
         QuickActionMeta(id: "income",   label: "新增收入", icon: "dollarsign.circle.fill",  color: Color(hex: "CD5C5C")),
@@ -23,15 +33,17 @@ enum QuickActionRegistry {
         QuickActionMeta(id: "rent",     label: "新增收租", icon: "creditcard.fill",         color: .themeBlue),
         QuickActionMeta(id: "todo",     label: "新增待办", icon: "checklist",               color: .themeAccentDark),
         QuickActionMeta(id: "meter",    label: "电表管理", icon: "bolt.batteryblock.fill",  color: .themeBlue),
+        QuickActionMeta(id: "ajk",      label: "安居客",   icon: "building.2.fill",         color: .themeBlue, imageName: "AjkIcon"),
+        QuickActionMeta(id: "ai",       label: "AI 助手",  icon: "sparkles",               color: .themeAccentDark, imageName: "DoubaoIcon"),
         QuickActionMeta(id: "admin",    label: "后台管理", icon: "gauge",                   color: .themeBlue),
         QuickActionMeta(id: "payout",   label: "新增包租", icon: "arrow.up.circle.fill",    color: Color(hex: "6B3FA0")),
         QuickActionMeta(id: "utility",  label: "水电结算", icon: "drop.circle.fill",        color: .themeBlue),
         QuickActionMeta(id: "house",    label: "新增房源", icon: "building.2.fill",         color: .themeAccentDark)
     ]
 
-    /// v1.84 默认布局：第一行 成交/收入/支出/收租；第二行 待办/电表管理/后台管理/更多；更多收纳 包租/水电结算/新增房源
-    static let defaultDashboard: [String] = ["deal", "income", "expense", "rent", "todo", "meter", "admin"]
-    static let defaultMore: [String] = ["payout", "utility", "house"]
+    /// v1.85 默认布局：第一行 成交/收入/支出/收租；第二行 待办/电表管理/安居客/AI 助手；更多收纳 后台管理/包租/水电结算/新增房源
+    static let defaultDashboard: [String] = ["deal", "income", "expense", "rent", "todo", "meter", "ajk", "ai"]
+    static let defaultMore: [String] = ["admin", "payout", "utility", "house"]
 
     static func meta(_ id: String) -> QuickActionMeta? {
         all.first { $0.id == id }
@@ -143,12 +155,19 @@ struct QuickActionEditSheet: View {
 
     private func row(meta: QuickActionMeta?) -> some View {
         HStack(spacing: 10) {
-            Image(systemName: meta?.icon ?? "questionmark.circle")
-                .font(.system(size: 15))
-                .foregroundColor(.white)
-                .frame(width: 30, height: 30)
-                .background(meta?.color ?? .gray)
-                .clipShape(RoundedRectangle(cornerRadius: 8))
+            if let img = meta?.imageName {
+                Image(img)
+                    .resizable()
+                    .frame(width: 30, height: 30)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+            } else {
+                Image(systemName: meta?.icon ?? "questionmark.circle")
+                    .font(.system(size: 15))
+                    .foregroundColor(.white)
+                    .frame(width: 30, height: 30)
+                    .background(meta?.color ?? .gray)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+            }
             Text(meta?.label ?? "未知")
                 .font(.system(size: 15, weight: .medium))
             Spacer()

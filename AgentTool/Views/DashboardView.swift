@@ -17,6 +17,8 @@ struct DashboardView: View {
     @State private var showUtility = false
     @State private var showAdmin = false   // v1.36 需求4：管理后台（App 内原生后台）
     @State private var showMeter = false   // v1.84：电表监控板块
+    @State private var showAjk = false     // v1.85：安居客经纪人后台数据
+    @State private var showAI = false      // v1.85：AI 助手（对话驱动动作）
     @State private var showMoreActions = false  // v1.84：更多收纳面板
     @State private var showQuickActionEdit = false // v1.84：快捷操作自定义排序
     @AppStorage("qa.dashboardOrder") private var qaDashOrder = ""
@@ -85,7 +87,7 @@ struct DashboardView: View {
     }
 
     /// 动作 id → 图标/文案/颜色/触发闭包
-    private func quickActionSpec(_ id: String) -> (icon: String, label: String, color: Color, action: () -> Void)? {
+    private func quickActionSpec(_ id: String) -> (imageName: String?, icon: String, label: String, color: Color, action: () -> Void)? {
         guard let meta = QuickActionRegistry.meta(id) else { return nil }
         let action: () -> Void
         switch id {
@@ -95,13 +97,15 @@ struct DashboardView: View {
         case "rent": action = { showAddRent = true }
         case "todo": action = { showAddTodo = true }
         case "meter": action = { showMeter = true }
+        case "ajk": action = { showAjk = true }
+        case "ai": action = { showAI = true }
         case "admin": action = { showAdmin = true }
         case "payout": action = { showAddPayout = true }
         case "utility": action = { showUtility = true }
         case "house": action = { showAddHouse = true }
         default: return nil
         }
-        return (meta.icon, meta.label, meta.color, action)
+        return (meta.imageName, meta.icon, meta.label, meta.color, action)
     }
 
     private var currentMonth: Int {
@@ -462,10 +466,10 @@ struct DashboardView: View {
                         }
                         if !quickActionsCollapsed {
                             LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 4), spacing: 8) {
-                                // v1.84：按自定义顺序渲染工作台动作（默认第一行 成交/收入/支出/收租，第二行 待办/电表管理/后台管理/更多）
+                                // v1.85：按自定义顺序渲染工作台动作（默认第一行 成交/收入/支出/收租，第二行 待办/电表管理/安居客/AI 助手/更多）
                                 ForEach(dashboardActionIDs, id: \.self) { id in
                                     if let spec = quickActionSpec(id) {
-                                        QuickActionItem(icon: spec.icon, label: spec.label, color: spec.color, action: spec.action)
+                                        QuickActionItem(imageName: spec.imageName, icon: spec.icon, label: spec.label, color: spec.color, action: spec.action)
                                     }
                                 }
                                 // 第 8 位固定「更多」入口
@@ -680,6 +684,12 @@ struct DashboardView: View {
         }
         .sheet(isPresented: $showMeter) {
             NavigationStack { MeterBoardView() }
+        }
+        .sheet(isPresented: $showAjk) {
+            NavigationStack { AjkBoardView() }
+        }
+        .sheet(isPresented: $showAI) {
+            NavigationStack { AIAssistantView() }
         }
         .sheet(isPresented: $showMoreActions) {
             MoreActionsSheet(specs: moreActionIDs.compactMap { quickActionSpec($0) })
@@ -1282,6 +1292,7 @@ struct KpiCard: View {
 }
 
 struct QuickActionItem: View {
+    var imageName: String? = nil
     let icon: String
     let label: String
     let color: Color
@@ -1289,9 +1300,16 @@ struct QuickActionItem: View {
     var body: some View {
         Button(action: action) {
             VStack(spacing: 4) {
-                Image(systemName: icon)
-                    .font(.system(size: 26))
-                    .foregroundColor(color)
+                if let img = imageName {
+                    Image(img)
+                        .resizable()
+                        .frame(width: 34, height: 34)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                } else {
+                    Image(systemName: icon)
+                        .font(.system(size: 26))
+                        .foregroundColor(color)
+                }
                 Text(label)
                     .font(.system(size: 11))
                     .foregroundColor(.themeText)
@@ -1306,7 +1324,7 @@ struct QuickActionItem: View {
 /// v1.84：「更多」收纳面板（放不下的快捷操作入口）
 struct MoreActionsSheet: View {
     @Environment(\.dismiss) private var dismiss
-    let specs: [(icon: String, label: String, color: Color, action: () -> Void)]
+    let specs: [(imageName: String?, icon: String, label: String, color: Color, action: () -> Void)]
 
     var body: some View {
         VStack(spacing: 0) {
@@ -1323,7 +1341,7 @@ struct MoreActionsSheet: View {
             } else {
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 4), spacing: 8) {
                     ForEach(Array(specs.enumerated()), id: \.offset) { _, spec in
-                        QuickActionItem(icon: spec.icon, label: spec.label, color: spec.color) {
+                        QuickActionItem(imageName: spec.imageName, icon: spec.icon, label: spec.label, color: spec.color) {
                             dismiss()
                             spec.action()
                         }

@@ -145,6 +145,7 @@ struct AgentToolApp: App {
                 .environment(\.calendar, Calendar(identifier: .gregorian))
                 .environmentObject(tabRouter)
                 .environmentObject(MeterStore.shared)
+                .environmentObject(AjkStore.shared)
                 .environment(\.houseModelContext, houseContainer.mainContext)
                 .alert("存储异常", isPresented: Binding(
                     get: { storageWarning != nil },
