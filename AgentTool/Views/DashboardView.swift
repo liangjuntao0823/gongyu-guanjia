@@ -85,7 +85,7 @@ struct DashboardView: View {
             if valid.isEmpty { return QuickActionRegistry.defaultDashboard }
             // 迁移：旧缓存缺安居客/AI 助手 → 补入（先电表后，满 7 个后多出的收进「更多」）
             var migrated = false
-            var more = moreIDs
+            var more = moreActionIDs
             for id in ["ajk", "ai"] where !valid.contains(id) {
                 migrated = true
                 if valid.count < 7 {
@@ -96,7 +96,8 @@ struct DashboardView: View {
                 }
             }
             // 超 7 个的收进「更多」（旧缓存可能超过 7）
-            while valid.count > 7, let last = valid.last {
+            while valid.count > 7 {
+                guard let last = valid.last else { break }
                 migrated = true
                 valid.removeLast()
                 if !more.contains(last) { more.insert(last, at: 0) }
