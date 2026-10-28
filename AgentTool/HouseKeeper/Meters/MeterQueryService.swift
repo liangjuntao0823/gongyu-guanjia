@@ -17,7 +17,7 @@ struct MeterQueryError: LocalizedError {
 }
 
 @MainActor
-final class MeterQueryService {
+final class MeterQueryService: MeterQuerying {
 
     static let shared = MeterQueryService()
 

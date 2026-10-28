@@ -132,11 +132,18 @@ struct MeterManageView: View {
         return String(id.prefix(4)) + "****" + String(id.suffix(4))
     }
 
+    private func currentProvider() -> MeterQuerying {
+        switch store.settings.provider {
+        case .webView: return MeterWebViewProvider.shared
+        default: return MeterQueryService.shared
+        }
+    }
+
     private func doImport() async {
         importing = true
         defer { importing = false }
         do {
-            let bindings = try await MeterQueryService.shared.fetchBindings(store: store)
+            let bindings = try await currentProvider().fetchBindings(store: store)
             let before = store.meters.count
             store.importBindings(bindings)
             let added = store.meters.count - before

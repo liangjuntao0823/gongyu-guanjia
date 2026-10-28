@@ -59,13 +59,22 @@ struct MeterPayRecord: Codable, Identifiable, Equatable {
 /// 电表数据源方案（设置页可切换）
 enum MeterProviderKind: String, Codable, CaseIterable {
     case direct = "direct"      // 直连官方接口（默认，已验证无签名，仅需微信 UA）
-    case webView = "webview"    // WebView 渲染 + DOM 抓取兜底
+    case webView = "webview"    // WebView 页面环境执行接口（官方只放行页面请求时的兜底）
     var label: String {
         switch self {
         case .direct: return "直连接口（推荐）"
         case .webView: return "网页抓取（兜底）"
         }
     }
+}
+
+/// 电表数据源统一协议：直连与 WebView 兜底共用同一出口
+@MainActor
+protocol MeterQuerying {
+    func fetchBindings(store: MeterStore) async throws -> [String]
+    func refreshAll(store: MeterStore, progress: @escaping (Int, Int, String) -> Void) async throws -> Int
+    func query(store: MeterStore, uid: String) async throws -> MeterQueryResult
+    func payRecords(store: MeterStore, uid: String) async throws -> [MeterPayRecord]
 }
 
 /// 电表板块设置（本地持久化 + 随备份迁移）

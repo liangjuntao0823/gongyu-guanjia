@@ -311,7 +311,7 @@ struct MeterBoardView: View {
         guard !store.meters.isEmpty else {
             // 清单为空：尝试一键拉取绑定
             do {
-                let bindings = try await MeterQueryService.shared.fetchBindings(store: store)
+                let bindings = try await currentProvider().fetchBindings(store: store)
                 store.importBindings(bindings)
             } catch {
                 errorText = error.localizedDescription
@@ -323,7 +323,7 @@ struct MeterBoardView: View {
         refreshTotal = store.meters.count
         defer { refreshing = false }
         do {
-            let ok = try await MeterQueryService.shared.refreshAll(store: store) { done, total, label in
+            let ok = try await currentProvider().refreshAll(store: store) { done, total, label in
                 refreshProgress = done
                 refreshTotal = total
                 refreshLabel = label
@@ -338,10 +338,18 @@ struct MeterBoardView: View {
 
     private func refreshOne(_ meter: MeterLedger) async {
         do {
-            let result = try await MeterQueryService.shared.query(store: store, uid: meter.uid)
+            let result = try await currentProvider().query(store: store, uid: meter.uid)
             store.applyQueryResult(uid: meter.uid, result: result)
         } catch {
             errorText = "刷新 \(meter.room.isEmpty ? meter.uid : meter.room) 失败：\(error.localizedDescription)"
+        }
+    }
+
+    /// 按设置切换数据源：直连接口（默认）/ 网页抓取（兜底）
+    private func currentProvider() -> MeterQuerying {
+        switch store.settings.provider {
+        case .webView: return MeterWebViewProvider.shared
+        default: return MeterQueryService.shared
         }
     }
 

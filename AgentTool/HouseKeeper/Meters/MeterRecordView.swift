@@ -88,11 +88,18 @@ struct MeterRecordView: View {
         }
     }
 
+    private func currentProvider() -> MeterQuerying {
+        switch store.settings.provider {
+        case .webView: return MeterWebViewProvider.shared
+        default: return MeterQueryService.shared
+        }
+    }
+
     private func load() async {
         loading = true
         defer { loading = false }
         do {
-            records = try await MeterQueryService.shared.payRecords(store: store, uid: meter.uid)
+            records = try await currentProvider().payRecords(store: store, uid: meter.uid)
         } catch {
             errorText = error.localizedDescription
         }
@@ -100,7 +107,7 @@ struct MeterRecordView: View {
 
     private func exportCSV() async {
         do {
-            let recs = try await MeterQueryService.shared.payRecords(store: store, uid: meter.uid)
+            let recs = try await currentProvider().payRecords(store: store, uid: meter.uid)
             let room = meter.room.isEmpty ? meter.uid : meter.room
             var rows: [[String]] = [["房号", "电表用户号", "订单号", "充值金额", "充值时间", "状态"]]
             for r in recs {

@@ -148,6 +148,13 @@ struct MeterExportSheet: View {
         if selected.contains(uid) { selected.remove(uid) } else { selected.insert(uid) }
     }
 
+    private func currentProvider() -> MeterQuerying {
+        switch store.settings.provider {
+        case .webView: return MeterWebViewProvider.shared
+        default: return MeterQueryService.shared
+        }
+    }
+
     private func doExport() async {
         var uids = selected.sorted()
         let manualUids = manual.split(whereSeparator: \.isNewline)
@@ -166,7 +173,7 @@ struct MeterExportSheet: View {
             let room = store.meters.first { $0.uid == uid }?.room ?? ""
             progressText = "正在拉取 \(i + 1)/\(uids.count) · \(uid)"
             do {
-                let records = try await MeterQueryService.shared.payRecords(store: store, uid: uid)
+                let records = try await currentProvider().payRecords(store: store, uid: uid)
                 if records.isEmpty {
                     rows.append([room, uid, "（无充值记录）", "", "", ""])
                 } else {
