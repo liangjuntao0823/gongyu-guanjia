@@ -64,13 +64,48 @@ struct DashboardView: View {
 
     // MARK: - v1.84 快捷操作自定义排序
 
-    /// 解析工作台动作顺序（空/损坏回退默认）
+    /// 工作台动作顺序写回（迁移用）
+    private func writeDashOrder(_ ids: [String]) {
+        if let data = try? JSONEncoder().encode(ids) {
+            qaDashOrder = String(data: data, encoding: .utf8) ?? ""
+        }
+    }
+    private func writeMoreOrder(_ ids: [String]) {
+        if let data = try? JSONEncoder().encode(ids) {
+            qaMoreOrder = String(data: data, encoding: .utf8) ?? ""
+        }
+    }
+
+    /// 解析工作台动作顺序（空/损坏回退默认；旧版本缓存自动补入安居客/AI 助手，让新入口可见）
     private var dashboardActionIDs: [String] {
         if qaDashOrder.isEmpty { return QuickActionRegistry.defaultDashboard }
         if let data = qaDashOrder.data(using: .utf8),
            let arr = try? JSONDecoder().decode([String].self, from: data) {
-            let valid = arr.filter { QuickActionRegistry.meta($0) != nil }
-            return valid.isEmpty ? QuickActionRegistry.defaultDashboard : Array(valid.prefix(7))
+            var valid = arr.filter { QuickActionRegistry.meta($0) != nil }
+            if valid.isEmpty { return QuickActionRegistry.defaultDashboard }
+            // 迁移：旧缓存缺安居客/AI 助手 → 补入（先电表后，满 7 个后多出的收进「更多」）
+            var migrated = false
+            var more = moreIDs
+            for id in ["ajk", "ai"] where !valid.contains(id) {
+                migrated = true
+                if valid.count < 7 {
+                    if let idx = valid.firstIndex(of: "meter") { valid.insert(id, at: idx + 1) }
+                    else { valid.append(id) }
+                } else {
+                    if !more.contains(id) { more.insert(id, at: 0) }
+                }
+            }
+            // 超 7 个的收进「更多」（旧缓存可能超过 7）
+            while valid.count > 7, let last = valid.last {
+                migrated = true
+                valid.removeLast()
+                if !more.contains(last) { more.insert(last, at: 0) }
+            }
+            if migrated {
+                writeDashOrder(valid)
+                writeMoreOrder(more)
+            }
+            return valid
         }
         return QuickActionRegistry.defaultDashboard
     }
@@ -466,7 +501,7 @@ struct DashboardView: View {
                         }
                         if !quickActionsCollapsed {
                             LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 4), spacing: 8) {
-                                // v1.85：按自定义顺序渲染工作台动作（默认第一行 成交/收入/支出/收租，第二行 待办/电表管理/安居客/AI 助手/更多）
+                                // 按自定义顺序渲染工作台动作（最多 7 个），第 8 位固定「更多」入口
                                 ForEach(dashboardActionIDs, id: \.self) { id in
                                     if let spec = quickActionSpec(id) {
                                         QuickActionItem(icon: spec.icon, label: spec.label, color: spec.color, action: spec.action, imageName: spec.imageName)

@@ -41,9 +41,9 @@ enum QuickActionRegistry {
         QuickActionMeta(id: "house",    label: "新增房源", icon: "building.2.fill",         color: .themeAccentDark)
     ]
 
-    /// v1.85 默认布局：第一行 成交/收入/支出/收租；第二行 待办/电表管理/安居客/AI 助手；更多收纳 后台管理/包租/水电结算/新增房源
-    static let defaultDashboard: [String] = ["deal", "income", "expense", "rent", "todo", "meter", "ajk", "ai"]
-    static let defaultMore: [String] = ["admin", "payout", "utility", "house"]
+    /// 默认布局：工作台 7 个动作 + 第 8 位固定「更多」；更多收纳 后台管理/包租/水电结算/新增房源（安居客/AI 助手按需由用户排序）
+    static let defaultDashboard: [String] = ["deal", "income", "expense", "rent", "todo", "meter", "ajk"]
+    static let defaultMore: [String] = ["ai", "admin", "payout", "utility", "house"]
 
     static func meta(_ id: String) -> QuickActionMeta? {
         all.first { $0.id == id }
