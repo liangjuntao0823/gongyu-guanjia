@@ -167,7 +167,8 @@ final class MeterWebViewProvider: NSObject, MeterQuerying, WKNavigationDelegate 
           function sleep(ms){ return new Promise(function(r){ setTimeout(r, ms); }); }
           async function post(path, obj){
             try {
-              var r = await fetch(path, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(obj)});
+              var parts = Object.keys(obj).map(function(k){ return encodeURIComponent(k)+'='+encodeURIComponent(String(obj[k])); });
+              var r = await fetch(path, {method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body: parts.join('&')});
               var t = await r.text();
               try { return JSON.parse(t); } catch(e){ return {code:-1, raw:t}; }
             } catch(e){ return {code:-2, err:String(e)}; }

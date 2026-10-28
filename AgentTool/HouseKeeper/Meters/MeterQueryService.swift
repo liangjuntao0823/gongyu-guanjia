@@ -38,33 +38,32 @@ final class MeterQueryService: MeterQuerying {
             throw MeterQueryError.msg("未配置电表查询链接，请在设置中粘贴微信查询链接")
         }
         struct IndexResp: Decodable {
-            struct D: Decodable { let wechatId: String? }
+            struct D: Decodable { let wechatId: Int? }
             let code: Int?
             let data: D?
         }
         let body: [String: String] = ["openId": openId]
         let resp: IndexResp = try await post(path: "/kddz/electricmeterpost/index", body: body)
-        guard resp.code == 0, let wid = resp.data?.wechatId, !wid.isEmpty else {
+        guard resp.code == 0, let wid = resp.data?.wechatId else {
             throw MeterQueryError.msg("会话建立失败，请检查查询链接是否仍有效（换微信需更换链接）")
         }
-        store.wechatId = wid
+        store.wechatId = String(wid)
     }
 
     /// 获取当前微信身份下绑定的全部电表用户号（一键导入用）
     func fetchBindings(store: MeterStore) async throws -> [String] {
         try await ensureWechatId(store: store)
         struct ListResp: Decodable {
-            struct D: Decodable { let list: [Item]? }
-            struct Item: Decodable { let electricUserUid: String? }
+            struct Item: Decodable { let bindMeterId: String? }
             let code: Int?
-            let data: D?
+            let data: [Item]?
         }
         let body: [String: String] = ["wechatUserId": store.wechatId]
         let resp: ListResp = try await post(path: "/kddz/electricmeterpost/getBindList", body: body)
         guard resp.code == 0 else {
             throw MeterQueryError.msg("获取绑定列表失败")
         }
-        let list = resp.data?.list?.compactMap { $0.electricUserUid } ?? []
+        let list = resp.data?.compactMap { $0.bindMeterId } ?? []
         guard !list.isEmpty else { throw MeterQueryError.msg("当前微信身份下没有绑定电表") }
         return list
     }
@@ -108,28 +107,30 @@ final class MeterQueryService: MeterQuerying {
     func payRecords(store: MeterStore, uid: String) async throws -> [MeterPayRecord] {
         try await ensureWechatId(store: store)
         struct RResp: Decodable {
-            struct D: Decodable { let list: [MeterPayRecord]? }
             let code: Int?
-            let data: D?
+            let data: [MeterPayRecord]?
         }
         let body: [String: String] = ["wechatUserId": store.wechatId, "electricUserUid": uid]
         let resp: RResp = try await post(path: "/kddz/electricmeterpost/electricPayRecordList", body: body)
         guard resp.code == 0 else { throw MeterQueryError.msg("获取充值记录失败（\(uid)）") }
-        return resp.data?.list ?? []
+        return resp.data ?? []
     }
 
-    // MARK: - 通用 POST
+    // MARK: - 通用 POST（官方接口只认 application/x-www-form-urlencoded 表单格式）
 
-    private func post<Body: Encodable, Resp: Decodable>(path: String, body: Body) async throws -> Resp {
+    private func post<Resp: Decodable>(path: String, body: [String: String]) async throws -> Resp {
         guard let url = URL(string: base + path) else { throw MeterQueryError.msg("地址无效") }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
         req.setValue(Self.wechatUA, forHTTPHeaderField: "User-Agent")
         req.setValue("XMLHttpRequest", forHTTPHeaderField: "X-Requested-With")
+        req.setValue("http://wy.mlh-china.com", forHTTPHeaderField: "Origin")
         req.timeoutInterval = timeout
-        let data = try JSONEncoder().encode(body)
-        req.httpBody = data
+        // 官方接口只认表单格式：键值用 URLComponents 编码为 query 串作 body
+        var comps = URLComponents()
+        comps.queryItems = body.map { URLQueryItem(name: $0.key, value: $0.value) }
+        req.httpBody = comps.query?.data(using: .utf8)
 
         let (respData, response) = try await URLSession.shared.data(for: req)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
