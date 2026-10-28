@@ -114,7 +114,23 @@ final class MeterStore: ObservableObject {
         meters[idx].zhuangtai = result.zhuangtai.isEmpty ? meters[idx].zhuangtai : result.zhuangtai
         meters[idx].shijian = result.shijian.isEmpty ? meters[idx].shijian : result.shijian
         meters[idx].lastRefresh = Date()
+        appendHistory(uid: uid, s: meters[idx].shengyu, l: meters[idx].leiji)
         saveMeters()
+    }
+
+    /// 用电趋势：每次成功刷新追加一个快照，每户最多保留 80 条（旧数据无 history 字段则初始化）
+    private func appendHistory(uid: String, s: Double, l: Double) {
+        guard let idx = meters.firstIndex(where: { $0.uid == uid }) else { return }
+        var hist = meters[idx].history ?? []
+        let now = Date().timeIntervalSince1970
+        // 与最后一条间隔过短（< 30 秒）视为同一次刷新，更新该条而非新增
+        if let last = hist.last, now - last.t < 30 {
+            hist[hist.count - 1] = MeterHistoryPoint(t: now, s: s, l: l)
+        } else {
+            hist.append(MeterHistoryPoint(t: now, s: s, l: l))
+            if hist.count > 80 { hist.removeFirst(hist.count - 80) }
+        }
+        meters[idx].history = hist
     }
 
     /// 一键导入：把云端绑定列表（去重、保留备注）并入清单

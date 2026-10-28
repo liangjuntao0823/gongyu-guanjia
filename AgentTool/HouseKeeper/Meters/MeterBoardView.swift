@@ -27,7 +27,10 @@ struct MeterBoardView: View {
     @State private var showAdd = false
     @State private var showExport = false
     @State private var showManage = false
+    @State private var showSearch = false
     @State private var selectedMeter: MeterLedger?
+    @State private var refreshingUID: String?          // 单台刷新中
+    @State private var toastText: String?
 
     var body: some View {
         ZStack {
@@ -45,6 +48,20 @@ struct MeterBoardView: View {
                 }
                 .refreshable { await refreshAll() }
             }
+            if let t = toastText {
+                VStack {
+                    Spacer()
+                    Text(t)
+                        .font(.system(size: 13))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 18)
+                        .padding(.vertical, 10)
+                        .background(Color.black.opacity(0.82))
+                        .clipShape(Capsule())
+                        .padding(.bottom, 24)
+                }
+                .transition(.opacity)
+            }
         }
         .navigationBarHidden(true)
         .onAppear { autoRefreshOnEnter() }
@@ -52,6 +69,9 @@ struct MeterBoardView: View {
         .sheet(isPresented: $showFilter) { MeterFilterSheet(mode: $filterMode, threshold: $threshold) }
         .sheet(isPresented: $showAdd) { MeterAddSheet() }
         .sheet(isPresented: $showExport) { MeterExportSheet() }
+        .sheet(isPresented: $showSearch) {
+            NavigationStack { MeterSearchSheet() }
+        }
         .sheet(isPresented: $showManage) {
             NavigationStack { MeterManageView() }
         }
@@ -91,6 +111,14 @@ struct MeterBoardView: View {
                 }
                 Spacer()
                 HStack(spacing: 6) {
+                    // 搜索（放大镜）
+                    Button { showSearch = true } label: {
+                        Image(systemName: "magnifyingglass")
+                            .font(.system(size: 15, weight: .semibold))
+                            .frame(width: 36, height: 36)
+                            .background(Color.white.opacity(0.14))
+                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                    }
                     // 导出记录（右上角，刷新左侧）
                     Button { showExport = true } label: {
                         Image(systemName: "square.and.arrow.up")
@@ -271,7 +299,9 @@ struct MeterBoardView: View {
                 .padding(.top, 60)
             } else {
                 ForEach(filteredMeters) { meter in
-                    MeterCardRow(meter: meter, threshold: threshold) { action in
+                    MeterCardRow(meter: meter,
+                                 threshold: threshold,
+                                 isRefreshing: refreshingUID == meter.uid) { action in
                         handleCardAction(action, meter: meter)
                     }
                 }
@@ -337,11 +367,23 @@ struct MeterBoardView: View {
     }
 
     private func refreshOne(_ meter: MeterLedger) async {
+        refreshingUID = meter.uid
+        defer { refreshingUID = nil }
+        let display = meter.room.isEmpty ? meter.uid : meter.room
         do {
             let result = try await currentProvider().query(store: store, uid: meter.uid)
             store.applyQueryResult(uid: meter.uid, result: result)
+            showToast("\(display) 刷新完成")
         } catch {
-            errorText = "刷新 \(meter.room.isEmpty ? meter.uid : meter.room) 失败：\(error.localizedDescription)"
+            showToast("\(display) 刷新失败：\(error.localizedDescription)")
+        }
+    }
+
+    /// 单台/轻量操作底部提示（自动消失）
+    private func showToast(_ text: String) {
+        withAnimation { toastText = text }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+            withAnimation { self.toastText = nil }
         }
     }
 
@@ -370,6 +412,7 @@ enum MeterCardAction {
 struct MeterCardRow: View {
     let meter: MeterLedger
     let threshold: Double
+    var isRefreshing: Bool = false
     let onAction: (MeterCardAction) -> Void
 
     private var isLow: Bool { meter.isLow(threshold: threshold) }
@@ -378,10 +421,11 @@ struct MeterCardRow: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // 第一行：户号（稍大）+ 房号备注 + 状态徽章
+            // 第一行：户号（稍大）+ 房号备注 + 状态徽章（低电量/拉闸时户号与备注同步变红）
             HStack(spacing: 7) {
                 Text(meter.uid)
                     .font(.system(size: 16, weight: .heavy, design: .rounded))
+                    .foregroundColor(warn ? .red : .themeText)
                 if !meter.room.isEmpty {
                     Text(meter.room)
                         .font(.system(size: 12))
@@ -422,9 +466,15 @@ struct MeterCardRow: View {
                     onAction(.refresh)
                 } label: {
                     HStack(spacing: 3) {
-                        Image(systemName: "arrow.clockwise")
-                            .font(.system(size: 11, weight: .semibold))
-                        Text("刷新")
+                        if isRefreshing {
+                            ProgressView()
+                                .controlSize(.mini)
+                                .tint(.themeAccentDark)
+                        } else {
+                            Image(systemName: "arrow.clockwise")
+                                .font(.system(size: 11, weight: .semibold))
+                        }
+                        Text(isRefreshing ? "刷新中" : "刷新")
                             .font(.system(size: 12, weight: .semibold))
                     }
                     .padding(.horizontal, 13)
@@ -434,6 +484,7 @@ struct MeterCardRow: View {
                     .clipShape(RoundedRectangle(cornerRadius: 8))
                 }
                 .buttonStyle(.plain)
+                .disabled(isRefreshing)
             }
             .padding(.top, 7)
         }
@@ -475,6 +526,87 @@ struct MeterCardRow: View {
         guard raw.count >= 16 else { return raw.isEmpty ? "--" : raw }
         let start = raw.index(raw.startIndex, offsetBy: 5)
         return String(raw[start...])
+    }
+}
+
+// MARK: - 电表搜索（顶栏放大镜）
+
+struct MeterSearchSheet: View {
+    @EnvironmentObject private var store: MeterStore
+    @Environment(\.dismiss) private var dismiss
+    @State private var keyword = ""
+    @State private var selectedMeter: MeterLedger?
+
+    private var matches: [MeterLedger] {
+        let k = keyword.trimmingCharacters(in: .whitespaces)
+        guard !k.isEmpty else { return store.meters }
+        return store.meters.filter {
+            $0.uid.contains(k) || $0.room.contains(k)
+        }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 15))
+                    .foregroundColor(.themeText3)
+                TextField("搜索户号或房号", text: $keyword)
+                    .font(.system(size: 15))
+                    .autocorrectionDisabled()
+                if !keyword.isEmpty {
+                    Button {
+                        keyword = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 15))
+                            .foregroundColor(.themeText3)
+                    }
+                }
+            }
+            .padding(10)
+            .background(Color.themeBorder.opacity(0.3))
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .padding(.horizontal, 14)
+            .padding(.top, 12)
+
+            List(matches) { meter in
+                Button {
+                    selectedMeter = meter
+                } label: {
+                    HStack(spacing: 10) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(meter.uid)
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundColor(.themeText)
+                            if !meter.room.isEmpty {
+                                Text(meter.room)
+                                    .font(.system(size: 12))
+                                    .foregroundColor(.themeText3)
+                            }
+                        }
+                        Spacer()
+                        Text(String(format: "%.2f 度", meter.shengyu))
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(meter.isLow(threshold: store.settings.lowThreshold) || meter.isOff ? .red : .themeAccentDark)
+                    }
+                }
+                .buttonStyle(.plain)
+            }
+            .listStyle(.plain)
+            .overlay {
+                if matches.isEmpty {
+                    Text("没有匹配的电表")
+                        .font(.system(size: 13))
+                        .foregroundColor(.themeText3)
+                }
+            }
+        }
+        .navigationTitle("搜索电表")
+        .navigationBarTitleDisplayMode(.inline)
+        .sheet(item: $selectedMeter) { meter in
+            NavigationStack { MeterRecordView(meter: meter) }
+        }
     }
 }
 

@@ -16,9 +16,11 @@ struct MeterLedger: Codable, Identifiable, Equatable {
     var zhuangtai: String    // 合闸 / 拉闸
     var shijian: String      // 最新抄表时间（原始字符串，如 2026-10-28 14:39:22）
     var lastRefresh: Date?   // 本机最后成功刷新时间
+    var history: [MeterHistoryPoint]?   // 用电趋势快照（每次成功刷新追加，旧数据无此字段兼容解码）
 
     init(uid: String, room: String = "", shengyu: Double = 0, leiji: Double = 0,
-         zhuangtai: String = "合闸", shijian: String = "", lastRefresh: Date? = nil) {
+         zhuangtai: String = "合闸", shijian: String = "", lastRefresh: Date? = nil,
+         history: [MeterHistoryPoint]? = nil) {
         self.uid = uid
         self.room = room
         self.shengyu = shengyu
@@ -26,10 +28,18 @@ struct MeterLedger: Codable, Identifiable, Equatable {
         self.zhuangtai = zhuangtai
         self.shijian = shijian
         self.lastRefresh = lastRefresh
+        self.history = history
     }
 
     var isOff: Bool { zhuangtai == "拉闸" }
     func isLow(threshold: Double) -> Bool { !isOff && shengyu < threshold }
+}
+
+/// 用电趋势单点：时间戳 + 剩余电量 + 累计用量
+struct MeterHistoryPoint: Codable, Equatable {
+    let t: TimeInterval   // 记录时间（Unix 秒）
+    let s: Double         // 剩余电量
+    let l: Double         // 累计用量
 }
 
 /// 官方返回的单表查询结果（electricMeterQuery）
