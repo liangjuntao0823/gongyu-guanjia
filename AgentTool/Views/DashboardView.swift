@@ -16,6 +16,11 @@ struct DashboardView: View {
     @State private var currentTime = Date()
     @State private var showUtility = false
     @State private var showAdmin = false   // v1.36 需求4：管理后台（App 内原生后台）
+    @State private var showMeter = false   // v1.84：电表监控板块
+    @State private var showMoreActions = false  // v1.84：更多收纳面板
+    @State private var showQuickActionEdit = false // v1.84：快捷操作自定义排序
+    @AppStorage("qa.dashboardOrder") private var qaDashOrder = ""
+    @AppStorage("qa.moreOrder") private var qaMoreOrder = ""
     @State private var showAddDeal = false
     @State private var showAddRent = false
     @State private var showAddPayout = false
@@ -54,6 +59,50 @@ struct DashboardView: View {
     @State private var editText = ""
 
     private let timer = Timer.publish(every: 15, on: .main, in: .common).autoconnect()
+
+    // MARK: - v1.84 快捷操作自定义排序
+
+    /// 解析工作台动作顺序（空/损坏回退默认）
+    private var dashboardActionIDs: [String] {
+        if qaDashOrder.isEmpty { return QuickActionRegistry.defaultDashboard }
+        if let data = qaDashOrder.data(using: .utf8),
+           let arr = try? JSONDecoder().decode([String].self, from: data) {
+            let valid = arr.filter { QuickActionRegistry.meta($0) != nil }
+            return valid.isEmpty ? QuickActionRegistry.defaultDashboard : Array(valid.prefix(7))
+        }
+        return QuickActionRegistry.defaultDashboard
+    }
+
+    /// 解析「更多」收纳顺序
+    private var moreActionIDs: [String] {
+        if qaMoreOrder.isEmpty { return QuickActionRegistry.defaultMore }
+        if let data = qaMoreOrder.data(using: .utf8),
+           let arr = try? JSONDecoder().decode([String].self, from: data) {
+            let valid = arr.filter { QuickActionRegistry.meta($0) != nil }
+            return valid.isEmpty ? QuickActionRegistry.defaultMore : valid
+        }
+        return QuickActionRegistry.defaultMore
+    }
+
+    /// 动作 id → 图标/文案/颜色/触发闭包
+    private func quickActionSpec(_ id: String) -> (icon: String, label: String, color: Color, action: () -> Void)? {
+        guard let meta = QuickActionRegistry.meta(id) else { return nil }
+        let action: () -> Void
+        switch id {
+        case "deal": action = { showAddDeal = true }
+        case "income": action = { showAddIncome = true }
+        case "expense": action = { showAddExpense = true }
+        case "rent": action = { showAddRent = true }
+        case "todo": action = { showAddTodo = true }
+        case "meter": action = { showMeter = true }
+        case "admin": action = { showAdmin = true }
+        case "payout": action = { showAddPayout = true }
+        case "utility": action = { showUtility = true }
+        case "house": action = { showAddHouse = true }
+        default: return nil
+        }
+        return (meta.icon, meta.label, meta.color, action)
+    }
 
     private var currentMonth: Int {
         Calendar.current.component(.month, from: currentTime)
@@ -392,20 +441,36 @@ struct DashboardView: View {
                 LazyVStack(spacing: 16) {
                     // 快捷操作
                     VStack(alignment: .leading, spacing: 8) {
-                        DashboardSectionHeader(title: "快捷操作", subtitle: "", isCollapsed: $quickActionsCollapsed)
+                        HStack {
+                            DashboardSectionHeader(title: "快捷操作", subtitle: "", isCollapsed: $quickActionsCollapsed)
+                            Spacer()
+                            Button {
+                                showQuickActionEdit = true
+                            } label: {
+                                HStack(spacing: 3) {
+                                    Image(systemName: "arrow.up.arrow.down")
+                                        .font(.system(size: 11, weight: .semibold))
+                                    Text("排序")
+                                        .font(.system(size: 12, weight: .semibold))
+                                }
+                                .padding(.horizontal, 9)
+                                .padding(.vertical, 5)
+                                .background(Color.themeBorder.opacity(0.4))
+                                .clipShape(Capsule())
+                            }
+                            .buttonStyle(.plain)
+                        }
                         if !quickActionsCollapsed {
                             LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 4), spacing: 8) {
-                                QuickActionItem(icon: "plus.circle.fill", label: "新增成交", color: .themeAccent) { showAddDeal = true }
-                                QuickActionItem(icon: "dollarsign.circle.fill", label: "新增收入", color: Color(hex: "CD5C5C")) { showAddIncome = true }
-                                QuickActionItem(icon: "dollarsign.circle.fill", label: "新增支出", color: Color(hex: "2E8B57")) { showAddExpense = true }
-                                QuickActionItem(icon: "arrow.up.circle.fill", label: "新增包租", color: Color(hex: "6B3FA0")) { showAddPayout = true }
-                                QuickActionItem(icon: "checklist", label: "新增待办", color: .themeAccentDark) { showAddTodo = true }
-                                QuickActionItem(icon: "creditcard.fill", label: "新增收租", color: .themeBlue) { showAddRent = true }
-                                // v1.36 需求4：移除「水电结算」快捷入口（功能保留在收租详情）；新增「管理后台」，排在「新增房源」之前
-                                QuickActionItem(icon: "gauge", label: "管理后台", color: .themeBlue) { showAdmin = true }
-                                // v1.3：回收站已移至设置页右上角；空位改为「新增房源」——直接弹出登记表单
-                                QuickActionItem(icon: "building.2.fill", label: "新增房源", color: AppTheme.primary) {
-                                    showAddHouse = true
+                                // v1.84：按自定义顺序渲染工作台动作（默认第一行 成交/收入/支出/收租，第二行 待办/电表管理/后台管理/更多）
+                                ForEach(dashboardActionIDs, id: \.self) { id in
+                                    if let spec = quickActionSpec(id) {
+                                        QuickActionItem(icon: spec.icon, label: spec.label, color: spec.color, action: spec.action)
+                                    }
+                                }
+                                // 第 8 位固定「更多」入口
+                                QuickActionItem(icon: "ellipsis.circle.fill", label: "更多", color: .themeText3) {
+                                    showMoreActions = true
                                 }
                             }
                         }
@@ -612,6 +677,15 @@ struct DashboardView: View {
         }
         .sheet(isPresented: $showUtility) {
             NavigationStack { UtilityView(onWriteSuccess: { refreshDashboard() }) }
+        }
+        .sheet(isPresented: $showMeter) {
+            NavigationStack { MeterBoardView() }
+        }
+        .sheet(isPresented: $showMoreActions) {
+            MoreActionsSheet(specs: moreActionIDs.compactMap { quickActionSpec($0) })
+        }
+        .sheet(isPresented: $showQuickActionEdit) {
+            QuickActionEditSheet(dashOrder: $qaDashOrder, moreOrder: $qaMoreOrder)
         }
         .sheet(isPresented: $showAdmin) {
             // v1.37：App 内管理后台改用原生后台（获客分析/分享记录/桶管理），完全免登录、不走网页、无缓存问题；
@@ -1212,7 +1286,6 @@ struct QuickActionItem: View {
     let label: String
     let color: Color
     let action: () -> Void
-
     var body: some View {
         Button(action: action) {
             VStack(spacing: 4) {
@@ -1227,6 +1300,42 @@ struct QuickActionItem: View {
             .padding(.vertical, 4)
         }
         .buttonStyle(.plain)
+    }
+}
+
+/// v1.84：「更多」收纳面板（放不下的快捷操作入口）
+struct MoreActionsSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let specs: [(icon: String, label: String, color: Color, action: () -> Void)]
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Capsule().fill(Color.themeBorder).frame(width: 40, height: 4).padding(.top, 10)
+            Text("更多")
+                .font(.system(size: 16, weight: .bold))
+                .padding(.top, 12)
+                .padding(.bottom, 6)
+            if specs.isEmpty {
+                Text("暂无更多入口，可在「快捷操作 → 排序」里收纳")
+                    .font(.system(size: 13))
+                    .foregroundColor(.themeText3)
+                    .padding(.top, 30)
+            } else {
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 4), spacing: 8) {
+                    ForEach(Array(specs.enumerated()), id: \.offset) { _, spec in
+                        QuickActionItem(icon: spec.icon, label: spec.label, color: spec.color) {
+                            dismiss()
+                            spec.action()
+                        }
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+            }
+            Spacer()
+        }
+        .presentationDetents([.height(240)])
+        .presentationDragIndicator(.visible)
     }
 }
 

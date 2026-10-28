@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>电表监控 · 公寓管家</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%23166534' d='M13 2 3 14h7l-1 8 10-12h-7l1-8z'/%3E%3C/svg%3E">
+<style>
+  :root{
+    --green:#166534; --green-d:#14532d;
+    --bg:#f2f7f3; --card:#ffffff; --line:#e3ece5;
+    --red:#dc2626; --red-bg:#fee2e2;
+    --amber:#d97706;
+    --ink:#0f172a; --sub:#64748b;
+    --radius:12px;
+  }
+  *{box-sizing:border-box; margin:0; padding:0; -webkit-tap-highlight-color:transparent}
+  html,body{background:var(--bg); color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Helvetica Neue","Microsoft YaHei",sans-serif;}
+  body{max-width:430px; margin:0 auto; min-height:100vh; padding-bottom:40px;}
+
+  /* ===== 顶部导航 ===== */
+  .topbar{position:sticky; top:0; z-index:30; background:linear-gradient(180deg,var(--green) 0%,var(--green-d) 100%);
+    color:#fff; padding:14px 12px 12px;}
+  .topbar-row{display:flex; align-items:center; gap:8px;}
+  .tb-btn{width:38px; height:38px; display:flex; align-items:center; justify-content:center;
+    background:rgba(255,255,255,.14); border-radius:11px; cursor:pointer; border:none; color:#fff; flex:none;}
+  .tb-btn:active{background:rgba(255,255,255,.28);}
+  .tb-title{flex:1; font-size:17px; font-weight:700; letter-spacing:.5px; min-width:0;}
+  .tb-sub{font-size:10.5px; opacity:.75; margin-top:1px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  .tb-actions{display:flex; gap:6px; flex:none;}
+
+  /* ===== 刷新进度 ===== */
+  .refresh-bar{display:none; height:5px; background:rgba(255,255,255,.25); overflow:hidden; margin-top:10px; border-radius:99px;}
+  .refresh-bar.show{display:block;}
+  .refresh-bar i{display:block; height:100%; width:30%; background:#fff; border-radius:99px; animation:slide 1s ease-in-out infinite;}
+  @keyframes slide{0%{transform:translateX(-120%)}100%{transform:translateX(380%)}}
+
+  /* ===== 统计卡 ===== */
+  .stats{display:grid; grid-template-columns:repeat(3,1fr); gap:8px; padding:12px 12px 2px;}
+  .stat{background:var(--card); border:1px solid var(--line); border-radius:var(--radius); padding:10px 9px;}
+  .stat .k{font-size:11px; color:var(--sub); display:flex; align-items:center; gap:4px;}
+  .stat .v{font-size:22px; font-weight:800; margin-top:4px; font-variant-numeric:tabular-nums;}
+  .stat .v.red{color:var(--red);} .stat .v.green{color:var(--green);} .stat .v.amber{color:var(--amber);}
+  .stat .hint{font-size:10px; color:var(--sub); margin-top:2px;}
+
+  /* ===== 工具行 ===== */
+  .tools{display:flex; gap:8px; padding:10px 12px 4px; align-items:center;}
+  .chip{display:inline-flex; align-items:center; gap:5px; padding:7px 11px; background:var(--card);
+    border:1px solid var(--line); border-radius:99px; font-size:13px; color:var(--ink); cursor:pointer; min-height:34px;}
+  .chip:active{background:#eef6ef;}
+  .chip svg{flex:none;}
+  .tools .flex1{flex:1;}
+
+  /* ===== 电表卡片（三行布局） ===== */
+  .list{padding:8px 12px 0; display:flex; flex-direction:column; gap:8px;}
+  .card{background:var(--card); border:1px solid var(--line); border-radius:var(--radius); padding:9px 10px 8px;}
+  .card.warn{border-color:#fca5a5; background:linear-gradient(180deg,#fff 0%,#fff7f7 100%);}
+  .card.off{border-color:#fca5a5; background:linear-gradient(180deg,#fff 0%,#fff7f7 100%);}
+  /* 第一行：户号 + 房号 + 徽章 */
+  .r1{display:flex; align-items:center; gap:7px;}
+  .c-uid{font-size:16px; font-weight:800; font-variant-numeric:tabular-nums;}
+  .c-room{font-size:12px; color:var(--sub);}
+  .c-room.red{color:var(--red); font-weight:600;}
+  .badge{margin-left:auto; font-size:10.5px; font-weight:700; padding:2px 8px; border-radius:99px; flex:none;}
+  .badge.on{background:#dcfce7; color:var(--green);}
+  .badge.off{background:var(--red-bg); color:var(--red);}
+  .badge.low{background:var(--red-bg); color:var(--red);}
+  /* 第二行：剩余电量 + 累计抄表 + 记录/充值按钮 */
+  .r2{display:flex; align-items:center; gap:8px; margin-top:7px;}
+  .c-bal{font-size:26px; font-weight:800; font-variant-numeric:tabular-nums; letter-spacing:-.5px; flex:none;}
+  .c-bal.red{color:var(--red);}
+  .c-bal-unit{font-size:11px; color:var(--sub); font-weight:600; margin-left:2px;}
+  .c-info{flex:1; min-width:0; font-size:11px; color:var(--sub); line-height:1.35;}
+  .c-info b{color:var(--ink); font-variant-numeric:tabular-nums;}
+  .c-btns{display:flex; gap:6px; flex:none;}
+  .mini-btn{display:inline-flex; align-items:center; justify-content:center; gap:3px; min-height:31px; padding:0 11px;
+    border-radius:8px; font-size:12px; font-weight:600; cursor:pointer; border:1px solid var(--line); background:#fff; color:var(--ink);}
+  .mini-btn:active{background:#f1f5f9;}
+  .mini-btn.pay{background:var(--green); color:#fff; border-color:var(--green);}
+  .mini-btn.pay:active{background:var(--green-d);}
+  .mini-btn svg{flex:none;}
+  /* 第三行：抄表时间 + 单独刷新 */
+  .r3{display:flex; align-items:center; gap:8px; margin-top:7px; padding-top:7px; border-top:1px dashed var(--line);}
+  .c-time{flex:1; font-size:11px; color:#94a3b8; display:flex; align-items:center; gap:4px;}
+  .mini-btn.solo{min-height:30px; padding:0 13px; color:var(--green); border-color:#c8e0d0; background:#f6faf7;}
+
+  /* ===== 面板 ===== */
+  .mask{position:fixed; inset:0; background:rgba(15,23,42,.45); z-index:40; opacity:0; pointer-events:none; transition:opacity .18s;}
+  .mask.show{opacity:1; pointer-events:auto;}
+  .sheet{display:none; position:fixed; left:50%; transform:translateX(-50%); bottom:0; z-index:50;
+    width:min(430px,100%); background:#fff; border-radius:20px 20px 0 0; padding:16px 16px calc(18px + env(safe-area-inset-bottom));
+    max-height:86vh; overflow:auto;}
+  .sheet.show{display:block;}
+  .sheet-grab{width:40px; height:4px; border-radius:99px; background:#e2e8f0; margin:0 auto 12px;}
+  .sheet h3{font-size:16px; font-weight:700; margin-bottom:12px;}
+  .sheet .row{display:flex; align-items:center; gap:10px; padding:12px 4px; border-bottom:1px solid var(--line); cursor:pointer;}
+  .sheet .row:last-child{border-bottom:none;}
+  .sheet .row.active{color:var(--green); font-weight:700;}
+  .sheet .row .desc{font-size:11px; color:var(--sub); font-weight:400; margin-left:auto;}
+  .sheet label.f{font-size:13px; color:var(--sub); display:block; margin:6px 2px 6px;}
+  .f-input{width:100%; min-height:44px; border:1.5px solid var(--line); border-radius:10px; padding:0 12px; font-size:16px; outline:none;}
+  .f-input:focus{border-color:var(--green);}
+  .f-area{width:100%; min-height:92px; border:1.5px solid var(--line); border-radius:10px; padding:10px 12px; font-size:16px; outline:none; resize:none; font-family:inherit;}
+  .f-area:focus{border-color:var(--green);}
+  .f-row{display:flex; gap:8px; margin-top:14px;}
+  .f-btn{flex:1; min-height:46px; border-radius:12px; font-size:15px; font-weight:700; cursor:pointer; border:none;}
+  .f-btn.cancel{background:#f1f5f9; color:var(--ink);}
+  .f-btn.ok{background:var(--green); color:#fff;}
+  /* 导出面板：多选列表 */
+  .pick-list{max-height:30vh; overflow:auto; border:1px solid var(--line); border-radius:10px; margin-top:6px;}
+  .pick-item{display:flex; align-items:center; gap:9px; padding:9px 10px; border-bottom:1px solid var(--line); cursor:pointer;}
+  .pick-item:last-child{border-bottom:none;}
+  .pick-item .ck{width:20px; height:20px; border-radius:6px; border:1.5px solid #cbd5e1; flex:none; display:flex; align-items:center; justify-content:center;}
+  .pick-item.sel .ck{background:var(--green); border-color:var(--green);}
+  .pick-item.sel .ck svg{display:block;}
+  .pick-item .p-uid{font-weight:700; font-size:14px; font-variant-numeric:tabular-nums;}
+  .pick-item .p-room{font-size:11px; color:var(--sub); margin-left:auto;}
+
+  /* ===== toast ===== */
+  .toast{position:fixed; left:50%; transform:translateX(-50%) translateY(20px); bottom:40px; z-index:60;
+    background:#0f172a; color:#fff; font-size:13px; padding:10px 18px; border-radius:12px; opacity:0;
+    pointer-events:none; transition:all .2s; max-width:86%; text-align:center;}
+  .toast.show{opacity:1; transform:translateX(-50%) translateY(0);}
+
+  .empty{padding:60px 20px; text-align:center; color:#94a3b8; font-size:14px;}
+  .demo-note{font-size:11px; color:#94a3b8; text-align:center; padding:10px 12px 0;}
+</style>
+</head>
+<body>
+
+  <!-- ===== 顶部导航 ===== -->
+  <header class="topbar">
+    <div class="topbar-row">
+      <button class="tb-btn" id="btnBack" aria-label="返回"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg></button>
+      <div class="tb-title">电表监控
+        <div class="tb-sub">米兰公馆 · 自动刷新中</div>
+      </div>
+      <div class="tb-actions">
+        <button class="tb-btn" id="btnExportTop" aria-label="导出记录" title="导出充值记录"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg></button>
+        <button class="tb-btn" id="btnRefreshTop" aria-label="刷新全部"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36M21 3v6h-6"/></svg></button>
+        <button class="tb-btn" id="btnAddTop" aria-label="添加电表"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button>
+      </div>
+    </div>
+    <div class="refresh-bar" id="refreshBar"><i></i></div>
+  </header>
+
+  <!-- ===== 统计卡 ===== -->
+  <section class="stats">
+    <div class="stat"><div class="k"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="3"/></svg>电表总数</div><div class="v" id="stTotal">21</div><div class="hint">全部已绑定</div></div>
+    <div class="stat"><div class="k"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2 3 14h7l-1 8 10-12h-7l1-8z"/></svg>低电量 &lt;<span id="stTh">30</span></div><div class="v red" id="stLow">0</div><div class="hint">需及时充值</div></div>
+    <div class="stat"><div class="k"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4m0 4h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>拉闸</div><div class="v amber" id="stOff">0</div><div class="hint">已断电</div></div>
+  </section>
+
+  <!-- ===== 工具行 ===== -->
+  <div class="tools">
+    <button class="chip" id="chipSort"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M11 5h10M11 9h7M11 13h4M11 17h2"/><path d="M4 5l2-2 2 2M6 3v10"/></svg>剩余低→高</button>
+    <button class="chip" id="chipFilter"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M3 5h18M6 12h12M10 19h4"/></svg>筛选</button>
+    <div class="flex1"></div>
+    <span class="chip" id="chipAll" style="cursor:default">全部 21</span>
+  </div>
+
+  <!-- ===== 电表列表（三行卡片） ===== -->
+  <div class="list" id="list"></div>
+  <div class="demo-note">原型演示数据 · 房号备注与电量值仅供界面展示</div>
+
+  <!-- ===== 筛选面板 ===== -->
+  <div class="mask" id="maskFilter"></div>
+  <div class="sheet" id="sheetFilter">
+    <div class="sheet-grab"></div>
+    <h3>筛选电表</h3>
+    <div class="row active" data-f="all">显示全部<span class="desc">全部电表</span></div>
+    <div class="row" data-f="low">只看低电量
+      <span class="desc">剩余 &lt; <input class="thresh-in" id="threshInput" type="number" value="30" min="1" max="999" inputmode="numeric" style="color:var(--red); width:52px; border:none; outline:none; font-size:13px; font-weight:700; background:transparent"> 度</span>
+    </div>
+    <div class="row" data-f="off">只看拉闸<span class="desc">已断电电表</span></div>
+    <div style="margin-top:10px"><button class="f-btn ok" id="btnFilterDone">完成</button></div>
+  </div>
+
+  <!-- ===== 添加面板 ===== -->
+  <div class="mask" id="maskAdd"></div>
+  <div class="sheet" id="sheetAdd">
+    <div class="sheet-grab"></div>
+    <h3>添加电表</h3>
+    <label class="f">电表用户号</label>
+    <input class="f-input" id="addUid" placeholder="如 012348" inputmode="numeric">
+    <label class="f">备注房号（选填）</label>
+    <input class="f-input" id="addRoom" placeholder="如 1座2334上">
+    <div class="f-row">
+      <button class="f-btn cancel" id="btnAddCancel">取消</button>
+      <button class="f-btn ok" id="btnAddOk">添加</button>
+    </div>
+  </div>
+
+  <!-- ===== 排序面板 ===== -->
+  <div class="mask" id="maskSort"></div>
+  <div class="sheet" id="sheetSort">
+    <div class="sheet-grab"></div>
+    <h3>排序方式</h3>
+    <div class="row active" data-s="balAsc">剩余电量 低→高<span class="desc">欠费风险优先看</span></div>
+    <div class="row" data-s="balDesc">剩余电量 高→低<span class="desc"></span></div>
+    <div class="row" data-s="usageDesc">累计用量 高→低<span class="desc">耗电大户优先</span></div>
+    <div class="row" data-s="roomAsc">房号 升序<span class="desc"></span></div>
+  </div>
+
+  <!-- ===== 导出面板 ===== -->
+  <div class="mask" id="maskExport"></div>
+  <div class="sheet" id="sheetExport">
+    <div class="sheet-grab"></div>
+    <h3>导出充值记录</h3>
+    <label class="f">选择电表（默认全选已绑定）</label>
+    <div class="pick-list" id="pickList"></div>
+    <label class="f">手动输入户号（可选，一行一个）</label>
+    <textarea class="f-area" id="exportManual" placeholder="012348&#10;011747"></textarea>
+    <div class="f-row">
+      <button class="f-btn cancel" id="btnExportCancel">取消</button>
+      <button class="f-btn ok" id="btnExportOk">导出</button>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+<script>
+/* ============ 演示数据（真实接口结构 + 示例值） ============ */
+var RAW = [
+  {uid:"012348", room:"1座2334上", shengyu:87.36, leiji:4707.90, zhuangtai:"合闸", shijian:"2026-10-28 14:39:22"},
+  {uid:"011747", room:"1座2059",   shengyu:12.08, leiji:3210.55, zhuangtai:"合闸", shijian:"2026-10-28 14:40:01"},
+  {uid:"011359", room:"2座1418下", shengyu:45.30, leiji:1987.20, zhuangtai:"合闸", shijian:"2026-10-28 14:41:10"},
+  {uid:"011748", room:"1座2325下", shengyu:6.50,  leiji:2654.10, zhuangtai:"合闸", shijian:"2026-10-28 14:42:33"},
+  {uid:"011546", room:"1座2309上", shengyu:156.20, leiji:5420.80, zhuangtai:"合闸", shijian:"2026-10-28 14:43:05"},
+  {uid:"012450", room:"2座1006",   shengyu:0.00,  leiji:8890.30, zhuangtai:"拉闸", shijian:"2026-10-28 14:44:18"},
+  {uid:"012246", room:"1座2245上", shengyu:29.90, leiji:4102.60, zhuangtai:"合闸", shijian:"2026-10-28 14:45:22"},
+  {uid:"021006", room:"2座1418上", shengyu:63.80, leiji:1560.40, zhuangtai:"合闸", shijian:"2026-10-28 14:46:09"},
+  {uid:"011714", room:"1座1543A下", shengyu:88.10, leiji:3760.90, zhuangtai:"合闸", shijian:"2026-10-28 14:47:31"},
+  {uid:"010634", room:"1座2059下", shengyu:21.40, leiji:2980.75, zhuangtai:"合闸", shijian:"2026-10-28 14:48:02"},
+  {uid:"011761", room:"2座1012",   shengyu:142.60, leiji:2330.20, zhuangtai:"合闸", shijian:"2026-10-28 14:49:11"},
+  {uid:"010411", room:"1座2334下", shengyu:9.20,  leiji:5110.40, zhuangtai:"合闸", shijian:"2026-10-28 14:50:33"},
+  {uid:"020613", room:"2座1012上", shengyu:54.70, leiji:3420.15, zhuangtai:"合闸", shijian:"2026-10-28 14:51:05"},
+  {uid:"021613", room:"1座2324下", shengyu:76.30, leiji:2890.60, zhuangtai:"合闸", shijian:"2026-10-28 14:52:44"},
+  {uid:"012340", room:"2座1012下", shengyu:18.60, leiji:4670.30, zhuangtai:"合闸", shijian:"2026-10-28 14:53:17"},
+  {uid:"012219", room:"1座2325上", shengyu:105.40, leiji:1760.90, zhuangtai:"合闸", shijian:"2026-10-28 14:54:01"},
+  {uid:"011431", room:"2座1418",   shengyu:0.40,  leiji:6230.70, zhuangtai:"合闸", shijian:"2026-10-28 14:55:22"},
+  {uid:"012318", room:"1座2245下", shengyu:32.50, leiji:3900.10, zhuangtai:"合闸", shijian:"2026-10-28 14:56:44"},
+  {uid:"012335", room:"2座1006上", shengyu:67.90, leiji:2100.55, zhuangtai:"合闸", shijian:"2026-10-28 14:57:12"},
+  {uid:"020502", room:"1座2059上", shengyu:14.80, leiji:3540.80, zhuangtai:"合闸", shijian:"2026-10-28 14:58:33"},
+  {uid:"011102", room:"2座1418下", shengyu:96.70, leiji:1450.30, zhuangtai:"合闸", shijian:"2026-10-28 14:59:01"}
+];
+
+var state = { sort:"balAsc", filter:"all", thresh:30, list:[], refreshing:false };
+var rooms = {};
+
+function init(){ state.list = RAW.map(function(r){ return Object.assign({}, r, {room: rooms[r.uid] || r.room || ""}); }); }
+
+var $ = function(id){ return document.getElementById(id); };
+function toast(msg){ var t=$("toast"); t.textContent=msg; t.classList.add("show"); clearTimeout(t._h); t._h=setTimeout(function(){t.classList.remove("show");},1900); }
+function esc(s){ return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+
+/* ============ 渲染 ============ */
+function render(){
+  var th = state.thresh, arr = state.list.slice();
+  if(state.filter==="low") arr = arr.filter(function(m){ return m.shengyu < th; });
+  if(state.filter==="off") arr = arr.filter(function(m){ return m.zhuangtai==="拉闸"; });
+  var s = state.sort;
+  arr.sort(function(a,b){
+    if(s==="balAsc")  return a.shengyu - b.shengyu;
+    if(s==="balDesc") return b.shengyu - a.shengyu;
+    if(s==="usageDesc") return b.leiji - a.leiji;
+    return a.room.localeCompare(b.room,"zh") || a.uid.localeCompare(b.uid);
+  });
+  var low = state.list.filter(function(m){return m.shengyu<th;}).length;
+  var off = state.list.filter(function(m){return m.zhuangtai==="拉闸";}).length;
+  $("stTotal").textContent = state.list.length;
+  $("stLow").textContent = low; $("stOff").textContent = off; $("stTh").textContent = th;
+  $("chipAll").textContent = "全部 " + state.list.length;
+
+  var el = $("list"); el.innerHTML = "";
+  if(!arr.length){ el.innerHTML = '<div class="empty">没有符合条件的电表</div>'; return; }
+  arr.forEach(function(m){
+    var isLow = m.shengyu < th;
+    var isOff = m.zhuangtai === "拉闸";
+    var card = document.createElement("div");
+    card.className = "card" + (isOff ? " off" : (isLow ? " warn" : ""));
+    var roomHtml = m.room ? '<span class="c-room'+(isLow||isOff?' red':'')+'">'+esc(m.room)+'</span>' : '';
+    card.innerHTML =
+      '<div class="r1"><span class="c-uid">'+esc(m.uid)+'</span>'+roomHtml+
+        '<span class="badge '+(isOff?'off':(isLow?'low':'on'))+'">'+(isOff?'拉闸':(isLow?'低电量':'合闸'))+'</span></div>'+
+      '<div class="r2"><span class="c-bal'+(isLow||isOff?' red':'')+'">'+m.shengyu.toFixed(2)+'<span class="c-bal-unit">度</span></span>'+
+        '<span class="c-info">累计 <b>'+m.leiji.toFixed(2)+'</b> 度 · 抄表 '+m.shijian.slice(11,16)+'</span>'+
+        '<span class="c-btns"><button class="mini-btn" data-a="rec" data-uid="'+m.uid+'">记录</button>'+
+        '<button class="mini-btn pay" data-a="pay" data-uid="'+m.uid+'">充值</button></span></div>'+
+      '<div class="r3"><span class="c-time"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>抄表 '+m.shijian.slice(5,16)+'</span>'+
+        '<button class="mini-btn solo" data-a="solo" data-uid="'+m.uid+'"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36M21 3v6h-6"/></svg>刷新</button></div>';
+    el.appendChild(card);
+  });
+  bindCardActions();
+}
+
+/* ============ 卡片按钮 ============ */
+function bindCardActions(){
+  document.querySelectorAll("[data-a]").forEach(function(b){
+    b.onclick = function(){
+      var uid = b.getAttribute("data-uid");
+      var m = state.list.find(function(x){return x.uid===uid;});
+      var room = m && m.room ? m.room : uid;
+      var act = b.getAttribute("data-a");
+      if(act==="pay") toast("演示：跳转官方充值页（"+room+"）");
+      else if(act==="rec") toast("演示：打开 "+room+" 充值记录");
+      else {
+        m.shijian = "2026-10-28 " + nowHM();
+        render();
+        toast("已刷新 "+room+"（演示）");
+      }
+    };
+  });
+}
+
+/* ============ 刷新演示 ============ */
+function doRefresh(){
+  if(state.refreshing) return;
+  state.refreshing = true;
+  $("refreshBar").classList.add("show");
+  var n = 0, total = state.list.length;
+  var step = setInterval(function(){
+    n++;
+    if(n <= total){
+      var m = state.list[n-1];
+      if(m){ m.shengyu = Math.max(0, Math.round((m.shengyu - Math.random()*0.3)*100)/100);
+             m.shijian = "2026-10-28 " + nowHM(); }
+    } else {
+      clearInterval(step);
+      $("refreshBar").classList.remove("show");
+      state.refreshing = false;
+      render();
+      toast("刷新完成：" + total + " 台电表已更新");
+    }
+  }, 200);
+}
+function nowHM(){ var d=new Date(); function p(x){return (x<10?"0":"")+x;} return p(d.getHours())+":"+p(d.getMinutes())+":"+p(d.getSeconds()); }
+
+/* ============ 面板控制 ============ */
+function openSheet(id){ $("mask"+id).classList.add("show"); $("sheet"+id).classList.add("show"); }
+function closeSheet(id){ $("mask"+id).classList.remove("show"); $("sheet"+id).classList.remove("show"); }
+
+/* 筛选 */
+$("chipFilter").onclick = function(){ openSheet("Filter"); };
+$("maskFilter").onclick = function(){ closeSheet("Filter"); };
+document.querySelectorAll("#sheetFilter .row[data-f]").forEach(function(r){
+  r.onclick = function(){
+    document.querySelectorAll("#sheetFilter .row[data-f]").forEach(function(x){x.classList.remove("active");});
+    r.classList.add("active");
+    state.filter = r.getAttribute("data-f");
+    render();
+  };
+});
+$("threshInput").addEventListener("input", function(){
+  var v = parseInt(this.value||"0",10);
+  state.thresh = v>0 ? v : 30;
+  render();
+});
+$("btnFilterDone").onclick = function(){ closeSheet("Filter"); };
+
+/* 排序 */
+$("chipSort").onclick = function(){ openSheet("Sort"); };
+$("maskSort").onclick = function(){ closeSheet("Sort"); };
+document.querySelectorAll("#sheetSort .row[data-s]").forEach(function(r){
+  r.onclick = function(){
+    document.querySelectorAll("#sheetSort .row[data-s]").forEach(function(x){x.classList.remove("active");});
+    r.classList.add("active");
+    state.sort = r.getAttribute("data-s");
+    $("chipSort").innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M11 5h10M11 9h7M11 13h4M11 17h2"/><path d="M4 5l2-2 2 2M6 3v10"/></svg>' + r.childNodes[0].textContent.trim();
+    closeSheet("Sort");
+    render();
+  };
+});
+
+/* 添加 */
+$("btnAddTop").onclick = function(){ openSheet("Add"); };
+$("maskAdd").onclick = function(){ closeSheet("Add"); };
+$("btnAddCancel").onclick = function(){ closeSheet("Add"); };
+$("btnAddOk").onclick = function(){
+  var uid = $("addUid").value.trim();
+  if(!uid){ toast("请输入电表用户号"); return; }
+  if(state.list.some(function(m){return m.uid===uid;})){ toast("该电表已存在："+uid); closeSheet("Add"); return; }
+  var room = $("addRoom").value.trim();
+  state.list.push({uid:uid, room:room, shengyu:0, leiji:0, zhuangtai:"合闸", shijian:"2026-10-28 "+nowHM()});
+  rooms[uid] = room;
+  $("addUid").value=""; $("addRoom").value="";
+  closeSheet("Add");
+  render();
+  toast("已添加电表 "+uid+"（演示）");
+};
+
+/* 导出 */
+$("btnExportTop").onclick = function(){ openSheet("Export"); renderPickList(); };
+$("maskExport").onclick = function(){ closeSheet("Export"); };
+$("btnExportCancel").onclick = function(){ closeSheet("Export"); };
+var exportSel = {};
+function renderPickList(){
+  exportSel = {};
+  var el = $("pickList"); el.innerHTML = "";
+  state.list.forEach(function(m){
+    var it = document.createElement("div");
+    it.className = "pick-item sel";
+    it.innerHTML = '<span class="ck"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></span>'+
+      '<span class="p-uid">'+esc(m.uid)+'</span><span class="p-room">'+(m.room?esc(m.room):'未绑定')+'</span>';
+    it.onclick = function(){
+      var on = it.classList.toggle("sel");
+      if(on) exportSel[m.uid] = 1; else delete exportSel[m.uid];
+    };
+    exportSel[m.uid] = 1;
+    el.appendChild(it);
+  });
+}
+$("btnExportOk").onclick = function(){
+  var manual = $("exportManual").value.trim().split(/\s+/).filter(Boolean);
+  var n = Object.keys(exportSel).length + manual.length;
+  if(!n){ toast("请至少选择一台电表"); return; }
+  closeSheet("Export");
+  toast("演示：已导出 "+n+" 台电表全部充值记录 CSV");
+};
+
+/* 刷新 */
+$("btnRefreshTop").onclick = doRefresh;
+$("btnBack").onclick = function(){ toast("演示：返回工作台"); };
+
+init();
+render();
+</script>
+</body>
+</html>

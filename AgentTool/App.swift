@@ -144,6 +144,7 @@ struct AgentToolApp: App {
                 .environment(\.locale, Locale(identifier: "zh_CN"))
                 .environment(\.calendar, Calendar(identifier: .gregorian))
                 .environmentObject(tabRouter)
+                .environmentObject(MeterStore.shared)
                 .environment(\.houseModelContext, houseContainer.mainContext)
                 .alert("存储异常", isPresented: Binding(
                     get: { storageWarning != nil },

@@ -60,6 +60,16 @@
 		A10000010000000000000140 /* MediaPendingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000140 /* MediaPendingView.swift */; };
 		A10000010000000000000141 /* SyncTaskCenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000141 /* SyncTaskCenter.swift */; };
 		A10000010000000000000150 /* GlobalAlertCenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000150 /* GlobalAlertCenter.swift */; };
+		A10000010000000000000202 /* MeterModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000202 /* MeterModels.swift */; };
+		A10000010000000000000203 /* MeterStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000203 /* MeterStore.swift */; };
+		A10000010000000000000204 /* MeterQueryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000204 /* MeterQueryService.swift */; };
+		A10000010000000000000205 /* MeterWebViewProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000205 /* MeterWebViewProvider.swift */; };
+		A10000010000000000000206 /* MeterBoardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000206 /* MeterBoardView.swift */; };
+		A10000010000000000000207 /* MeterExportSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000207 /* MeterExportSheet.swift */; };
+		A10000010000000000000208 /* MeterManageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000208 /* MeterManageView.swift */; };
+		A10000010000000000000209 /* MeterRecordView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000209 /* MeterRecordView.swift */; };
+		A10000010000000000000210 /* MeterSettingsDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000210 /* MeterSettingsDetailView.swift */; };
+		A10000010000000000000211 /* QuickActionEditSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000211 /* QuickActionEditSheet.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -118,6 +128,16 @@
 		B10000010000000000000140 /* MediaPendingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaPendingView.swift; sourceTree = "<group>"; };
 		B10000010000000000000141 /* SyncTaskCenter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncTaskCenter.swift; sourceTree = "<group>"; };
 		B10000010000000000000150 /* GlobalAlertCenter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalAlertCenter.swift; sourceTree = "<group>"; };
+		B10000010000000000000202 /* MeterModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeterModels.swift; sourceTree = "<group>"; };
+		B10000010000000000000203 /* MeterStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeterStore.swift; sourceTree = "<group>"; };
+		B10000010000000000000204 /* MeterQueryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeterQueryService.swift; sourceTree = "<group>"; };
+		B10000010000000000000205 /* MeterWebViewProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeterWebViewProvider.swift; sourceTree = "<group>"; };
+		B10000010000000000000206 /* MeterBoardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeterBoardView.swift; sourceTree = "<group>"; };
+		B10000010000000000000207 /* MeterExportSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeterExportSheet.swift; sourceTree = "<group>"; };
+		B10000010000000000000208 /* MeterManageView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeterManageView.swift; sourceTree = "<group>"; };
+		B10000010000000000000209 /* MeterRecordView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeterRecordView.swift; sourceTree = "<group>"; };
+		B10000010000000000000210 /* MeterSettingsDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeterSettingsDetailView.swift; sourceTree = "<group>"; };
+		B10000010000000000000211 /* QuickActionEditSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickActionEditSheet.swift; sourceTree = "<group>"; };
 		B10000010000000000000115 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -274,6 +294,7 @@
 				D10000010000000000000009 /* Models */,
 				D10000010000000000000010 /* Services */,
 				D10000010000000000000011 /* Views */,
+				D10000010000000000000012 /* Meters */,
 			);
 			path = HouseKeeper;
 			sourceTree = "<group>";
@@ -312,6 +333,23 @@
 				B10000010000000000000107 /* HouseSettingsView.swift */,
 			);
 			path = Views;
+			sourceTree = "<group>";
+		};
+		D10000010000000000000012 /* Meters */ = {
+			isa = PBXGroup;
+			children = (
+				B10000010000000000000202 /* MeterModels.swift */,
+				B10000010000000000000203 /* MeterStore.swift */,
+				B10000010000000000000204 /* MeterQueryService.swift */,
+				B10000010000000000000205 /* MeterWebViewProvider.swift */,
+				B10000010000000000000206 /* MeterBoardView.swift */,
+				B10000010000000000000207 /* MeterExportSheet.swift */,
+				B10000010000000000000208 /* MeterManageView.swift */,
+				B10000010000000000000209 /* MeterRecordView.swift */,
+				B10000010000000000000210 /* MeterSettingsDetailView.swift */,
+				B10000010000000000000211 /* QuickActionEditSheet.swift */,
+			);
+			path = Meters;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -440,6 +478,16 @@
 				A10000010000000000000141 /* SyncTaskCenter.swift in Sources */,
 				A10000010000000000000150 /* GlobalAlertCenter.swift in Sources */,
 				A10000010000000000000140 /* MediaPendingView.swift in Sources */,
+				A10000010000000000000202 /* MeterModels.swift in Sources */,
+				A10000010000000000000203 /* MeterStore.swift in Sources */,
+				A10000010000000000000204 /* MeterQueryService.swift in Sources */,
+				A10000010000000000000205 /* MeterWebViewProvider.swift in Sources */,
+				A10000010000000000000206 /* MeterBoardView.swift in Sources */,
+				A10000010000000000000207 /* MeterExportSheet.swift in Sources */,
+				A10000010000000000000208 /* MeterManageView.swift in Sources */,
+				A10000010000000000000209 /* MeterRecordView.swift in Sources */,
+				A10000010000000000000210 /* MeterSettingsDetailView.swift in Sources */,
+				A10000010000000000000211 /* QuickActionEditSheet.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -501,7 +549,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = AgentTool/AgentTool.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 70;
+				CURRENT_PROJECT_VERSION = 71;
 				DEVELOPMENT_ASSET_PATHS = "\"AgentTool/Preview Content\"";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -522,7 +570,7 @@ INFOPLIST_KEY_NSLocalNetworkUsageDescription = "仅在你点击同步时连接�
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.83;
+				MARKETING_VERSION = 1.84;
 				PRODUCT_BUNDLE_IDENTIFIER = com.gj.tg;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -537,7 +585,7 @@ INFOPLIST_KEY_NSLocalNetworkUsageDescription = "仅在你点击同步时连接�
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = AgentTool/AgentTool.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 70;
+				CURRENT_PROJECT_VERSION = 71;
 				DEVELOPMENT_ASSET_PATHS = "\"AgentTool/Preview Content\"";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -558,7 +606,7 @@ INFOPLIST_KEY_NSLocalNetworkUsageDescription = "仅在你点击同步时连接�
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.83;
+				MARKETING_VERSION = 1.84;
 				PRODUCT_BUNDLE_IDENTIFIER = com.gj.tg;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -567,8 +615,8 @@ INFOPLIST_KEY_NSLocalNetworkUsageDescription = "仅在你点击同步时连接�
 			};
 			name = Release;
 		};
-		WD = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGN_ENTITLEMENTS = AgentToolWidget/AgentToolWidget.entitlements; CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 70; INFOPLIST_FILE = AgentToolWidget/Info.plist; IPHONEOS_DEPLOYMENT_TARGET = 17.0; MARKETING_VERSION = 1.83; PRODUCT_BUNDLE_IDENTIFIER = com.gj.tg.widget; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = iphoneos; SKIP_INSTALL = YES; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2"; }; name = Debug; };
-		WR = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGN_ENTITLEMENTS = AgentToolWidget/AgentToolWidget.entitlements; CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 70; INFOPLIST_FILE = AgentToolWidget/Info.plist; IPHONEOS_DEPLOYMENT_TARGET = 17.0; MARKETING_VERSION = 1.83; PRODUCT_BUNDLE_IDENTIFIER = com.gj.tg.widget; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = iphoneos; SKIP_INSTALL = YES; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2"; }; name = Release; };
+		WD = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGN_ENTITLEMENTS = AgentToolWidget/AgentToolWidget.entitlements; CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 71; INFOPLIST_FILE = AgentToolWidget/Info.plist; IPHONEOS_DEPLOYMENT_TARGET = 17.0; MARKETING_VERSION = 1.84; PRODUCT_BUNDLE_IDENTIFIER = com.gj.tg.widget; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = iphoneos; SKIP_INSTALL = YES; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2"; }; name = Debug; };
+		WR = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGN_ENTITLEMENTS = AgentToolWidget/AgentToolWidget.entitlements; CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 71; INFOPLIST_FILE = AgentToolWidget/Info.plist; IPHONEOS_DEPLOYMENT_TARGET = 17.0; MARKETING_VERSION = 1.84; PRODUCT_BUNDLE_IDENTIFIER = com.gj.tg.widget; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = iphoneos; SKIP_INSTALL = YES; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2"; }; name = Release; };
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */

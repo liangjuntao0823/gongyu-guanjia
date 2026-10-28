@@ -1,0 +1,127 @@
+{
+  "src": "电表监控板块原型.html",
+  "url": "file:///home/user/Doubao/chats/38448577444166402/%E7%94%B5%E8%A1%A8%E7%9B%91%E6%8E%A7%E5%8E%9F%E5%9E%8B/%E7%94%B5%E8%A1%A8%E7%9B%91%E6%8E%A7%E6%9D%BF%E5%9D%97%E5%8E%9F%E5%9E%8B.html",
+  "outdir": "/home/user/Doubao/chats/38448577444166402/电表监控原型/_shots",
+  "include": [
+    "lint",
+    "screenshots",
+    "structure"
+  ],
+  "shots": {
+    "desktop": {
+      "revealed": 0,
+      "screenshot": "/home/user/Doubao/chats/38448577444166402/电表监控原型/_shots/电表监控板块原型_desktop.jpg",
+      "screenshotBytes": 115530,
+      "truncated": false,
+      "structure": {
+        "title": "电表监控 · 公寓管家",
+        "firstH1": "",
+        "viewport": {
+          "w": 1440,
+          "h": 900
+        },
+        "fullpage": {
+          "w": 1440,
+          "h": 2990
+        },
+        "counts": {
+          "section": 1,
+          "h1": 0,
+          "h2": 0,
+          "img": 0,
+          "canvas": 0,
+          "svg": 51,
+          "links": 0,
+          "buttons": 74
+        }
+      },
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "horizontalOverflow": [],
+      "resourceErrors": []
+    },
+    "mobile": {
+      "revealed": 0,
+      "screenshot": "/home/user/Doubao/chats/38448577444166402/电表监控原型/_shots/电表监控板块原型_mobile.jpg",
+      "screenshotBytes": 181902,
+      "truncated": false,
+      "structure": {
+        "title": "电表监控 · 公寓管家",
+        "firstH1": "",
+        "viewport": {
+          "w": 390,
+          "h": 844
+        },
+        "fullpage": {
+          "w": 390,
+          "h": 2990
+        },
+        "counts": {
+          "section": 1,
+          "h1": 0,
+          "h2": 0,
+          "img": 0,
+          "canvas": 0,
+          "svg": 51,
+          "links": 0,
+          "buttons": 74
+        }
+      },
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "horizontalOverflow": [],
+      "resourceErrors": []
+    }
+  },
+  "engine": "playwright",
+  "chromiumExec": "/opt/vm/preinstall/ms-playwright/chromium-1169/chrome-linux/chrome",
+  "elapsedSec": 6.21,
+  "schemaVersion": 2,
+  "status": "pass",
+  "engineInfo": {
+    "name": "playwright",
+    "degraded": false,
+    "degradedReasons": []
+  },
+  "input": {
+    "original": "电表监控板块原型.html",
+    "resolvedPath": "/home/user/Doubao/chats/38448577444166402/电表监控原型/电表监控板块原型.html",
+    "baseUrl": "file:///home/user/Doubao/chats/38448577444166402/%E7%94%B5%E8%A1%A8%E7%9B%91%E6%8E%A7%E5%8E%9F%E5%9E%8B/%E7%94%B5%E8%A1%A8%E7%9B%91%E6%8E%A7%E6%9D%BF%E5%9D%97%E5%8E%9F%E5%9E%8B.html",
+    "protocol": "file",
+    "cwd": "/home/user/Doubao/chats/38448577444166402/电表监控原型",
+    "mediaMode": {
+      "reducedMotion": true
+    }
+  },
+  "artifacts": {
+    "screenshots": [
+      {
+        "viewport": "desktop",
+        "path": "/home/user/Doubao/chats/38448577444166402/电表监控原型/_shots/电表监控板块原型_desktop.jpg",
+        "size": 115530,
+        "visualCoverage": {
+          "complete": true,
+          "reason": null
+        }
+      },
+      {
+        "viewport": "mobile",
+        "path": "/home/user/Doubao/chats/38448577444166402/电表监控原型/_shots/电表监控板块原型_mobile.jpg",
+        "size": 181902,
+        "visualCoverage": {
+          "complete": true,
+          "reason": null
+        }
+      }
+    ]
+  },
+  "summary": {
+    "blocker": 0,
+    "error": 0,
+    "warning": 0,
+    "info": 0
+  },
+  "findings": [],
+  "prioritizedActions": [],
+  "reportPath": "/home/user/Doubao/chats/38448577444166402/电表监控原型/_shots/report.json"
+}

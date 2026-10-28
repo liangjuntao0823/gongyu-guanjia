@@ -74,6 +74,10 @@ struct SettingsView: View {
     @State private var houseCacheTip: String?
     @State private var roomsLinkExpiry = 2   // v1.55：选房链接有效期（天），默认 2，onAppear 从 UserDefaults 读取
     @State private var watermarkSubtitle = ""   // v1.41：分享水印入口副标题（onAppear 刷新，返回设置页即显示最新开关状态）
+    // v1.84：电表监控设置（链接/数据源/阈值/定时刷新/提醒）
+    @EnvironmentObject private var meterStore: MeterStore
+    @State private var meterLinkInput = ""
+    @State private var meterLinkTip: String?
 
     /// v1.41：刷新分享水印入口副标题（返回设置页 / 页面出现时读取最新 store，立即反映开关状态）
     private func refreshWatermarkSubtitle() {
@@ -428,6 +432,32 @@ struct SettingsView: View {
         }
     }
 
+    // MARK: - v1.84 电表监控设置
+
+    private var meterSection: some View {
+        Section {
+            NavigationLink {
+                MeterSettingsDetailView()
+            } label: {
+                Label("电表监控", systemImage: "bolt.batteryblock.fill")
+                Spacer()
+                if meterStore.settings.openId.isEmpty {
+                    Text("未配置链接")
+                        .font(.system(size: 12))
+                        .foregroundColor(.red)
+                } else {
+                    Text(meterStore.settings.provider == .webView ? "网页抓取" : "直连接口")
+                        .font(.system(size: 12))
+                        .foregroundColor(.themeText3)
+                }
+            }
+        } header: {
+            Text("电表监控")
+        } footer: {
+            Text("设置官方电表查询链接、数据源方案、低电量阈值与定时刷新。仅读取展示电量数据，充值仍走官方页面。")
+        }
+    }
+
     private var billSection: some View {
         Section {
             Button { showBillTemplate = true } label: {
@@ -555,6 +585,7 @@ struct SettingsView: View {
                 syncSection
                 autoBackupSection
                 utilitySection
+                meterSection
                 billSection
                 houseShareSection
                 ringtoneSection
@@ -1020,6 +1051,7 @@ struct InterconnectionInfoView: View {
 // MARK: - 版本更新介绍
 struct VersionHistoryView: View {
     let versions: [(version: String, date: String, changes: [String])] = [
+        ("v1.84", "2026-10-28", ["新增「电表监控」板块（工作台 → 电表管理）：App 内集中查看全部电表余额/累计用量/状态/抄表时间，进入板块自动刷新、串行限速查询，仅读取展示、充值仍走官方页面", "双数据源可切换（设置 → 电表监控）：直连接口（默认，已验证无签名只需微信UA）+ 网页抓取兜底", "电表管理：一键导入当前微信身份绑定的全部电表 + 手动增删 + 备注房号（列表第一行显示）", "电表卡片三行布局：户号+房号+状态 / 剩余电量+累计+记录充值 / 抄表时间+单表刷新；低电量与拉闸房号红色标出", "排序（剩余低→高默认/高→低/累计用量/房号）+ 筛选（低于 X 度可输入 + 拉闸）", "充值记录按表查看 + 导出 CSV（多选已绑定 + 手动输入户号，一行一个，支持一键分享）", "低电量提醒（阈值默认30可配，每天每户最多一次防骚扰）+ 可选定时自动刷新（默认30分钟、默认关）", "电表查询链接自定义更换入口（设置 → 电表监控）：换微信换链接即更新 openId 并重置会话", "工作台快捷操作改版：第一行 新增成交/收入/支出/收租，第二行 新增待办/电表管理/后台管理/更多，更多收纳 新增包租/水电结算/新增房源；右上角「排序」支持拖拽重排、工作台与更多互相收放、实时保存"]),
         ("v1.83", "2026-10-28", ["媒体预检优化：无变化刷新时从「逐房号串行列桶」改为「一次整桶拉取比对」，房源再多刷新也只发 1 次云端请求，明显提速", "同步下载限流：账本下载改为每次最多并发 8 套，房源多时不再因瞬时并发过高触发云端限流", "同步失败自动重试一次：弱网/信号切换导致的瞬断会自动补一次，不再手动反复点刷新", "后台功耗优化：通知重建与小组件同步改为「数据保存时」触发，不再每 30 秒空转", "公告链接安全：只放行 http/https 链接，异常 scheme 一律忽略", "崩溃留痕与提示：数据库异常等致命错误自动写入崩溃日志，下次启动提示「上次异常退出」，设置页可导出定位", "媒体补传进度文件级：进度条显示当前房号「本套 x/y 个文件」，一眼分清是图多还是卡住", "云函数请求超时参数化：列桶/用量统计等大操作放宽到 30 秒，不再因大桶超时失败", "新增自动化测试：云函数 19 项核心逻辑测试（口令/签名/超时/路径防护/埋点去重）+ Swift 核心逻辑自测脚本（Mac 上 swift 一键运行）"]),
         ("v1.82", "2026-10-28", ["远程配置页全面中文化：功能开关/数值参数/提示文案/帮助说明全部显示中文名称，英文 key 以小字副标题展示便于对照", "远程配置页排版优化：分区图标化（基础设置/功能开关/数值参数/提示文案/帮助说明/版本更新记录）、公告开关联动显示文字与链接、更新日志支持左滑删除、底部增加保存按钮"]),
         ("v1.81", "2026-10-28", ["远程配置原生化：App 内管理后台新增第 4 个「远程配置」页，公告/功能开关/参数/提示文案/帮助文本/更新日志全部可在 App 内直接编辑保存，不再需要跳网页后台、不再下载文件", "原生远程配置页与云端网页后台同源：加载=云端 configGet，保存=云端 configSave（自动版本+1），保存后同步写本地缓存，断网仍用最新配置"]),
