@@ -382,8 +382,8 @@ struct MeterCardRow: View {
                 Spacer()
                 badge
             }
-            // 第二行：剩余电量 + 累计抄表 + 记录/充值（记录左、充值右）
-            HStack(spacing: 8) {
+            // 第二行：左剩余电量，右 记录（左）/充值（右）
+            HStack(alignment: .center, spacing: 8) {
                 HStack(alignment: .firstTextBaseline, spacing: 2) {
                     Text(String(format: "%.2f", meter.shengyu))
                         .font(.system(size: 26, weight: .heavy, design: .rounded))
@@ -393,27 +393,22 @@ struct MeterCardRow: View {
                         .font(.system(size: 11))
                         .foregroundColor(.themeText3)
                 }
-                Text("累计 \(String(format: "%.2f", meter.leiji)) 度 · 抄表 \(shortTime(meter.shijian))")
-                    .font(.system(size: 11))
-                    .foregroundColor(.themeText3)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                Spacer()
                 HStack(spacing: 6) {
                     miniButton("记录", icon: "list.bullet.rectangle") { onAction(.records) }
                     miniButton("充值", icon: "creditcard.fill", filled: true) { onAction(.pay) }
                 }
             }
             .padding(.top, 7)
-            // 第三行：抄表时间 + 单独刷新
+            // 第三行：左 累计电量 + 抄表时间，右 单独刷新（两行间无分隔线）
             HStack(spacing: 8) {
-                HStack(spacing: 4) {
-                    Image(systemName: "clock")
-                        .font(.system(size: 10))
-                    Text("抄表 \(fullTime(meter.shijian))")
+                HStack(alignment: .firstTextBaseline, spacing: 4) {
+                    Text("累计 \(String(format: "%.2f", meter.leiji)) 度 · 抄表 \(fullTime(meter.shijian))")
                         .font(.system(size: 11))
+                        .foregroundColor(.themeText3)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
                 }
-                .foregroundColor(Color.themeText3.opacity(0.7))
                 .frame(maxWidth: .infinity, alignment: .leading)
                 Button {
                     onAction(.refresh)
@@ -468,10 +463,6 @@ struct MeterCardRow: View {
         .buttonStyle(.plain)
     }
 
-    private func shortTime(_ raw: String) -> String {
-        guard raw.count >= 16 else { return raw }
-        return String(raw[raw.index(raw.startIndex, offsetBy: 11)..<raw.index(raw.startIndex, offsetBy: 16)])
-    }
     private func fullTime(_ raw: String) -> String {
         guard raw.count >= 16 else { return raw.isEmpty ? "--" : raw }
         let start = raw.index(raw.startIndex, offsetBy: 5)
