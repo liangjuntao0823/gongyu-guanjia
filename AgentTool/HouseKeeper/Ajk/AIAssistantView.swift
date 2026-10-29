@@ -30,6 +30,12 @@ struct AIAssistantView: View {
     @State private var showSettings = false
     @State private var errorText: String?
 
+    /// 与设置页共用同一存储：设置改动（模型名/端点/Key 状态）立即反映到本页，无需重启
+    @AppStorage("ai.modelName") private var storedModel = "doubao-seed-2-1-turbo-260628"
+    @AppStorage("ai.baseURL") private var storedBaseURL = "https://ark.cn-beijing.volces.com/api/v3/chat/completions"
+    @AppStorage("ai.promptTemplate") private var storedTemplate = ""
+    @AppStorage("ai.apiKeyConfigured") private var keyConfigured = false
+
     /// 快捷场景（预设指令模板，一键带入输入框）
     private let quickScenes: [(icon: String, label: String, prompt: String)] = [
         ("cloud.fill", "云端监控", "帮我监控云端数据变化：检查我云端的数据目录/备份文件有没有新增或变动，如有变动用大白话告诉我具体变化（哪个文件、什么时间、变大了多少）。"),
@@ -80,7 +86,7 @@ struct AIAssistantView: View {
     }
 
     private var hasKey: Bool {
-        KeychainHelper.exists(key: "ai.volcengine.apiKey")
+        keyConfigured
     }
 
     private var navBar: some View {
@@ -122,8 +128,7 @@ struct AIAssistantView: View {
     }
 
     private var modelLabel: String {
-        let m = UserDefaults.standard.string(forKey: "ai.modelName") ?? AIAssistantSettingsView.defaultModel
-        return "模型：\(m)"
+        "模型：\(storedModel)"
     }
 
     private var keyNotice: some View {
@@ -256,9 +261,9 @@ struct AIAssistantView: View {
         messages.append(AIMessage(role: .user, text: text, time: Date()))
         sending = true
         let apiKey = KeychainHelper.load(key: "ai.volcengine.apiKey") ?? ""
-        let baseURL = UserDefaults.standard.string(forKey: "ai.baseURL") ?? AIRequestService.defaultBaseURL
-        let model = UserDefaults.standard.string(forKey: "ai.modelName") ?? AIAssistantSettingsView.defaultModel
-        let template = UserDefaults.standard.string(forKey: "ai.promptTemplate") ?? ""
+        let baseURL = storedBaseURL
+        let model = storedModel
+        let template = storedTemplate
         let systemPrompt = AIAssistantSettingsView.defaultSystemPrompt + (template.isEmpty ? "" : "\n\n【我的偏好要求】\n\(template)")
         Task {
             do {
@@ -278,27 +283,38 @@ struct AIAssistantView: View {
 struct AIAssistantSettingsView: View {
     @Environment(\.dismiss) private var dismiss
 
-    static let defaultModel = "Seed-2.1-turbo"
-    static let modelOptions = ["Seed-2.1-turbo", "Seed-2.1-pro", "Seed-2.1-lite", "DeepSeek-V4-flash"]
+    /// 火山方舟完整模型 ID（正确 ID；旧版短名 Seed-2.1-turbo 会在进入时自动迁移）
+    static let defaultModel = "doubao-seed-2-1-turbo-260628"
+    static let modelOptions = ["doubao-seed-2-1-turbo-260628", "doubao-seed-2-1-lite-260915", "doubao-seed-evolving"]
+    /// 旧版本写错的短模型名（不含 doubao- 前缀，API 会 404），进入设置时自动迁移
+    static let legacyModels = ["Seed-2.1-turbo", "Seed-2.1-pro", "Seed-2.1-lite", "DeepSeek-V4-flash"]
     static let defaultSystemPrompt = "你是「公寓管家」的 AI 助手。用户是佛山顺德的二房东/房产从业者，管理米兰公馆的多套出租房源。回答要简洁、口语化、中文优先；涉及数据时先给结论再给依据；涉及金额要精确到分。你只能基于用户 App 里的数据和我提供的信息回答，不要编造数据。"
+
+    /// 存储即实时：@AppStorage 与 UserDefaults 双向同步，改动立即生效，无需点保存/重启
+    @AppStorage("ai.modelName") private var storedModel = "doubao-seed-2-1-turbo-260628"
+    @AppStorage("ai.baseURL") private var storedBaseURL = "https://ark.cn-beijing.volces.com/api/v3/chat/completions"
+    @AppStorage("ai.promptTemplate") private var storedTemplate = ""
+    @AppStorage("ai.apiKeyConfigured") private var keyConfigured = false
 
     @State private var apiKey = ""
     @State private var model = ""
     @State private var baseURL = ""
     @State private var template = ""
+    @State private var modelCustom = ""
 
     var body: some View {
         Form {
             Section {
                 SecureField("API Key（火山方舟）", text: $apiKey)
                     .font(.system(size: 13))
-                Text("只保存在本机钥匙串（Keychain），不上传、不备份")
+                    .autocapitalization(.none)
+                Text("只保存在本机钥匙串（Keychain），不上传、不备份；输入即保存，改动立即生效")
                     .font(.system(size: 11))
                     .foregroundColor(.themeText3)
             } header: {
                 Text("API Key")
             } footer: {
-                Text("在火山方舟控制台创建 API Key 后粘贴到这里")
+                Text("在火山方舟控制台创建 API Key 后粘贴到这里；清空输入即删除本机 Key")
             }
 
             Section("模型") {
@@ -306,10 +322,14 @@ struct AIAssistantSettingsView: View {
                     ForEach(Self.modelOptions, id: \.self) { m in
                         Text(m).tag(m)
                     }
+                    Text("自定义（填下方 ID）").tag("custom")
                 }
                 TextField("自定义模型 ID（选填，覆盖上方选择）", text: $modelCustom)
                     .font(.system(size: 13))
                     .autocapitalization(.none)
+                Text("输入即保存；保存过自定义 ID 后再次进入会自动回填显示")
+                    .font(.system(size: 11))
+                    .foregroundColor(.themeText3)
             }
 
             Section("接口端点") {
@@ -327,40 +347,70 @@ struct AIAssistantSettingsView: View {
                     .font(.system(size: 11))
                     .foregroundColor(.themeText3)
             }
-
-            Section {
-                Button("保存") {
-                    let trimmedKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
-                    if !trimmedKey.isEmpty {
-                        _ = KeychainHelper.save(key: "ai.volcengine.apiKey", value: trimmedKey)
-                    }
-                    UserDefaults.standard.set(model.isEmpty ? Self.defaultModel : model, forKey: "ai.modelName")
-                    if !modelCustom.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        UserDefaults.standard.set(modelCustom.trimmingCharacters(in: .whitespacesAndNewlines), forKey: "ai.modelName")
-                    }
-                    let trimmedURL = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
-                    if !trimmedURL.isEmpty {
-                        UserDefaults.standard.set(trimmedURL, forKey: "ai.baseURL")
-                    }
-                    UserDefaults.standard.set(template, forKey: "ai.promptTemplate")
-                    dismiss()
-                }
-            }
         }
         .navigationTitle("AI 助手设置")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .cancellationAction) {
-                Button("取消") { dismiss() }
+            ToolbarItem(placement: .confirmationAction) {
+                Button("完成") { dismiss() }
             }
         }
-        .onAppear {
-            apiKey = KeychainHelper.load(key: "ai.volcengine.apiKey") ?? ""
-            model = UserDefaults.standard.string(forKey: "ai.modelName") ?? Self.defaultModel
-            baseURL = UserDefaults.standard.string(forKey: "ai.baseURL") ?? AIRequestService.defaultBaseURL
-            template = UserDefaults.standard.string(forKey: "ai.promptTemplate") ?? ""
+        .onAppear(perform: loadFromStorage)
+        // 以下全部实时保存（水印开关同款修法：输入即生效，不依赖「保存」按钮）
+        .onChange(of: apiKey) { newKey in
+            let t = newKey.trimmingCharacters(in: .whitespacesAndNewlines)
+            if t.isEmpty {
+                KeychainHelper.delete(key: "ai.volcengine.apiKey")
+                keyConfigured = false
+            } else {
+                _ = KeychainHelper.save(key: "ai.volcengine.apiKey", value: t)
+                keyConfigured = true
+            }
+        }
+        .onChange(of: model) { newModel in
+            guard newModel != "custom" else { return }
+            if Self.modelOptions.contains(newModel) {
+                storedModel = newModel
+                if !modelCustom.isEmpty { modelCustom = "" }
+            }
+        }
+        .onChange(of: modelCustom) { newValue in
+            let t = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !t.isEmpty {
+                storedModel = t
+                if model != "custom" { model = "custom" }
+            } else if model == "custom" {
+                storedModel = Self.defaultModel
+                model = Self.defaultModel
+            }
+        }
+        .onChange(of: baseURL) { newValue in
+            let t = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            storedBaseURL = t.isEmpty ? AIRequestService.defaultBaseURL : t
+        }
+        .onChange(of: template) { newValue in
+            storedTemplate = newValue
         }
     }
 
-    @State private var modelCustom = ""
+    private func loadFromStorage() {
+        apiKey = KeychainHelper.load(key: "ai.volcengine.apiKey") ?? ""
+        let saved = UserDefaults.standard.string(forKey: "ai.modelName") ?? Self.defaultModel
+        if Self.legacyModels.contains(saved) {
+            // 旧版错误短名 → 自动迁移到正确模型 ID 并写回
+            storedModel = Self.defaultModel
+            model = Self.defaultModel
+            modelCustom = ""
+        } else if Self.modelOptions.contains(saved) {
+            model = saved
+            modelCustom = ""
+        } else {
+            // 已保存的自定义模型 ID → 回填自定义输入框
+            model = "custom"
+            modelCustom = saved
+        }
+        baseURL = UserDefaults.standard.string(forKey: "ai.baseURL") ?? AIRequestService.defaultBaseURL
+        template = UserDefaults.standard.string(forKey: "ai.promptTemplate") ?? ""
+        keyConfigured = !apiKey.isEmpty
+    }
 }

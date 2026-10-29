@@ -97,15 +97,20 @@ struct MeterExportSheet: View {
                 Text("导出充值记录")
                     .font(.system(size: 16, weight: .bold))
                 Spacer()
-                // 全选：只增不减（已全选时置灰，点击不会取消）
+                // 全选 ↔ 取消全选（已全选时按钮变「取消全选」，点击清空选择）
                 Button {
-                    selectAll()
+                    if allSelected {
+                        for item in filtered where selected.contains(item.uid) {
+                            selected.remove(item.uid)
+                        }
+                    } else {
+                        selectAll()
+                    }
                 } label: {
-                    Text("全选")
+                    Text(allSelected ? "取消全选" : "全选")
                         .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(allSelected ? .themeText3.opacity(0.5) : .themeAccentDark)
+                        .foregroundColor(.themeAccentDark)
                 }
-                .disabled(allSelected)
             }
             .padding(.top, 12)
             .padding(.bottom, 8)

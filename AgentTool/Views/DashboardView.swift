@@ -754,10 +754,10 @@ struct DashboardView: View {
         .sheet(isPresented: $showAI) {
             NavigationStack { AIAssistantView() }
         }
-        .sheet(isPresented: $showMoreActions) {
+        .sheet(isPresented: $showMoreActions, onDismiss: { showMoreActions = false }) {
             MoreActionsSheet(specs: moreActionIDs.compactMap { quickActionSpec($0) })
         }
-        .sheet(isPresented: $showQuickActionEdit) {
+        .sheet(isPresented: $showQuickActionEdit, onDismiss: { showQuickActionEdit = false }) {
             QuickActionEditSheet(dashOrder: $qaDashOrder, moreOrder: $qaMoreOrder)
         }
         .sheet(isPresented: $showAdmin) {
@@ -1406,7 +1406,11 @@ struct MoreActionsSheet: View {
                     ForEach(Array(specs.enumerated()), id: \.offset) { _, spec in
                         QuickActionItem(icon: spec.icon, label: spec.label, color: spec.color, action: {
                             dismiss()
-                            spec.action()
+                            // 先等面板完全关闭再打开目标页，避免同一 presenter 的 sheet 关闭/打开竞争
+                            // 导致 showMoreActions 状态残留、切换板块后面板又自动弹出
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
+                                spec.action()
+                            }
                         }, imageName: spec.imageName)
                     }
                 }
