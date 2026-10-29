@@ -330,7 +330,7 @@ struct AjkBoardView: View {
                     .padding(.top, 30)
             } else {
                 ForEach(list) { house in
-                    AjkHouseCard(house: house, settings: store.settings)
+                    AjkHouseCard(house: house, settings: store.settings, delta: store.clickDelta(house: house))
                 }
                 .padding(.horizontal)
             }
@@ -407,6 +407,7 @@ enum AjkSortMode: String, CaseIterable {
 struct AjkHouseCard: View {
     let house: AjkHouse
     let settings: AjkSettings
+    let delta: Int
 
     var body: some View {
         // v1.90：封面图（本地已下载才显示；无封面走占位）
@@ -470,8 +471,29 @@ struct AjkHouseCard: View {
                     }
                 }
 
-                // v1.90：不再显示 xx/xx（今日/累计点击行）——用户要求删除；只保留平台与维护人
+                // 点击量：左今日 / 右累计（v1.91 恢复显示）+ 较上次变化 + 平台与维护人
                 HStack(spacing: 10) {
+                    HStack(spacing: 3) {
+                        Text("\(house.todayClick)")
+                            .font(.system(size: 15, weight: .bold))
+                            .foregroundColor(.themeAccentDark)
+                        Text("/")
+                            .font(.system(size: 12))
+                            .foregroundColor(.themeText3)
+                        Text("\(house.totalClick)")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundColor(.themeText2)
+                    }
+                    if delta > 0 {
+                        Text("较上次 +\(delta)")
+                            .font(.system(size: 10))
+                            .foregroundColor(.themeAccentDark)
+                    } else if delta < 0 {
+                        Text("较上次 \(delta)")
+                            .font(.system(size: 10))
+                            .foregroundColor(.red)
+                    }
+                    Spacer()
                     ForEach(house.platforms, id: \.self) { p in
                         Text(p)
                             .font(.system(size: 10))
