@@ -11,6 +11,8 @@
 import Foundation
 import SwiftData
 
+/// @MainActor：内部访问 MeterStore/AjkStore/SyncStore/BackupV5Manager 等主线程隔离单例
+@MainActor
 struct AIToolExecutor {
 
     let modelContext: ModelContext        // 主容器：Property / DealRecord / MiscIncome / MiscExpense / TodoItem / Utility*

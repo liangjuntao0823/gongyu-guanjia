@@ -637,8 +637,8 @@ struct AIAssistantView: View {
                 if finalText == nil {
                     finalText = "操作已完成（见上方动作标签）。如需继续调整，直接告诉我。"
                 }
-                messages.append(AIMessage(role: .assistant, text: finalText!, time: Date(),
-                                          toolSummary: executedLabels))
+                self.messages.append(AIMessage(role: .assistant, text: finalText!, time: Date(),
+                                               toolSummary: executedLabels))
                 saveHistory()
             } catch {
                 errorText = error.localizedDescription
