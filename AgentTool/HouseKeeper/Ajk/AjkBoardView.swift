@@ -29,12 +29,12 @@ struct AjkBoardView: View {
             VStack(spacing: 0) {
                 navBar
                 if refreshing { progressBar }
-                // v1.91：概览/预警/工具行固定，仅房源列表滚动
-                overviewCard
-                warningCard
-                toolRow
+                // v1.92：取消头部固定——概览/预警/工具行回到 ScrollView 内整体滚动（用户验收后要求撤销 v1.91 的固定）
                 ScrollView {
                     VStack(spacing: 0) {
+                        overviewCard
+                        warningCard
+                        toolRow
                         houseList
                     }
                     .padding(.bottom, 30)

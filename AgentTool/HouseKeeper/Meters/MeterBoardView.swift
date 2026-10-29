@@ -38,11 +38,11 @@ struct MeterBoardView: View {
             VStack(spacing: 0) {
                 navBar
                 if refreshing { refreshProgressBar }
-                // v1.91：统计卡/工具行固定，仅电表列表滚动
-                statsCards
-                toolRow
+                // v1.92：取消头部固定——统计卡/工具行回到 ScrollView 内整体滚动（用户验收后要求撤销 v1.91 的固定）
                 ScrollView {
                     VStack(spacing: 0) {
+                        statsCards
+                        toolRow
                         meterList
                     }
                     .padding(.bottom, 30)

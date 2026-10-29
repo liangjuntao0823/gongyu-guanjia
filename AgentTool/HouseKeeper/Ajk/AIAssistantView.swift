@@ -44,7 +44,9 @@ struct AIMessage: Identifiable, Equatable, Codable {
 
 struct AIAssistantView: View {
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.modelContext) private var modelContext
+    // v1.92：必须用房源专用容器 houseModelContext——主容器 schema 不含 House，用 modelContext 会抛
+    // NSInternalInconsistencyException（NSFetchRequest could not locate entity 'House'）导致发送即闪退
+    @Environment(\.houseModelContext) private var houseModelContext
     @State private var messages: [AIMessage] = []
     @State private var input = ""
     @State private var sending = false
@@ -507,7 +509,7 @@ struct AIAssistantView: View {
 
     /// 从本地 SwiftData 拉取房源，生成文本快照注入系统提示
     private func houseDataSnapshot() -> String {
-        let houses = (try? modelContext.fetch(FetchDescriptor<House>())) ?? []
+        let houses = (try? houseModelContext?.fetch(FetchDescriptor<House>())) ?? []
         let active = houses.filter { !($0.isDeleted ?? false) }
         guard !active.isEmpty else { return "" }
         let rented = active.filter { $0.status == .rented }.count

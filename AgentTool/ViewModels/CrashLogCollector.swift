@@ -5,6 +5,8 @@ import UIKit
 // 捕获未捕获异常（NSSetUncaughtExceptionHandler）与主要信号（SIGABRT/SIGSEGV/SIGBUS/SIGILL/SIGFPE），
 // 写入 Documents/备份/Logs/Crash_yyyyMMdd_HHmmss_序号.txt；v1.90 起改为【无限记录】（不再删除旧日志），
 // 信号崩溃时用 backtrace_symbols_fd 写入完整调用栈（信号安全），方便定位根因。
+// v1.92：信号 handler 全静态预初始化、执行期零动态分配——上一版在 handler 内 allocate/[CChar] 数组
+// 属于 malloc 堆分配（非信号安全），崩溃现场堆损坏时会二次崩溃（Crash_Signal_1_1.txt 栈顶 writeLogSignal）。
 
 enum CrashLogCollector {
     static let logsDirectory: URL = {
@@ -14,13 +16,29 @@ enum CrashLogCollector {
     }()
 
     private static var isInstalled = false
-    /// v1.91：信号 handler 专用目录路径 C 指针（install 时 strdup 缓存；handler 内只读，纯内存访问信号安全）
+    /// 信号 handler 专用目录路径 C 指针（install 时 strdup 缓存；handler 内只读，纯内存访问信号安全）
     private static var dirPathPtr: UnsafeMutablePointer<CChar>? = nil
+
+    // MARK: - 信号 handler 专用存储（install() 预初始化；handler 内零动态分配）
+
+    /// 日志文件路径缓冲（目录 + /Crash_Signal_ + epoch + _ + seq + .txt，1024 足够）
+    private static var sigPathBuf = [CChar](repeating: 0, count: 1024)
+    /// 数字字符串缓冲（epoch / seq 手写十进制转换）
+    private static var sigNumBuf = [CChar](repeating: 0, count: 24)
+    /// 日期缓冲（strftime 输出）
+    private static var sigDateBuf = [CChar](repeating: 0, count: 64)
+    /// 调用栈帧指针数组（128 帧）
+    private static var sigFrames = UnsafeMutablePointer<UnsafeMutableRawPointer?>.allocate(capacity: 128)
 
     static func install() {
         guard !isInstalled else { return }
         // 信号 handler 只允许信号安全操作：预先把日志目录路径转成 C 字符串缓存（此处是安全上下文）
         dirPathPtr = strdup(logsDirectory.path)
+        // 预初始化信号 handler 全部静态缓冲（此后 handler 内不再触发任何 Swift 运行时分配）
+        _ = sigPathBuf.count
+        _ = sigNumBuf.count
+        _ = sigDateBuf.count
+        _ = sigFrames
         isInstalled = true
         NSSetUncaughtExceptionHandler { exception in
             let name = exception.name.rawValue
@@ -70,27 +88,24 @@ enum CrashLogCollector {
         try? content.write(to: fileURL, atomically: true, encoding: .utf8)
     }
 
-    /// 信号 handler 专用（信号安全：纯 C 接口 open/write/backtrace_symbols_fd + 静态字符串，
-    /// 不碰变参/堆分配/FileManager；snprintf 是 C 变参、Swift 不可用，v1.91 起文件名用手写十进制追加构造，
-    /// 杜绝非信号安全调用导致二次崩溃）
+    /// 信号 handler 专用（信号安全：纯 C 接口 open/write/backtrace_symbols_fd + 静态缓冲，
+    /// 零堆分配/零 Swift 运行时分配；文件名用手写十进制追加构造）
     private static func writeLogSignal(_ sig: Int32) {
         guard let dp = dirPathPtr else { return }
         // 纯 C 构造 /Logs/Crash_Signal_<epoch>_<seq>.txt（O_EXCL 递增序号，不覆盖旧文件）
-        let pathBuf = UnsafeMutablePointer<CChar>.allocate(capacity: 1024)
-        defer { pathBuf.deallocate() }
-        _ = strcpy(pathBuf, dp)                     // 目录（install() 已 strdup 缓存）
-        _ = strcat(pathBuf, "/Crash_Signal_")
+        _ = strcpy(&sigPathBuf, dp)                 // 目录（install() 已 strdup 缓存）
+        _ = strcat(&sigPathBuf, "/Crash_Signal_")
         let epoch: Int64 = Int64(time(nil))
-        appendDecimal(pathBuf, epoch)
-        _ = strcat(pathBuf, "_")
-        let underscoreLen = strlen(pathBuf)         // "_" 结尾位置，seq 循环从这里追加
+        appendDecimal(pathPtr: &sigPathBuf, numPtr: &sigNumBuf, value: epoch)
+        _ = strcat(&sigPathBuf, "_")
+        let underscoreLen = strlen(&sigPathBuf)     // "_" 结尾位置，seq 循环从这里追加
         var fd: Int32 = -1
         var seq: Int32 = 1
         while seq < 10000 {
-            pathBuf[underscoreLen] = 0              // 截断上一轮 seq 残留
-            appendDecimal(pathBuf, Int64(seq))
-            _ = strcat(pathBuf, ".txt")
-            fd = open(pathBuf, O_WRONLY | O_CREAT | O_EXCL, 0o644)
+            sigPathBuf[Int(underscoreLen)] = 0      // 截断上一轮 seq 残留
+            appendDecimal(pathPtr: &sigPathBuf, numPtr: &sigNumBuf, value: Int64(seq))
+            _ = strcat(&sigPathBuf, ".txt")
+            fd = open(&sigPathBuf, O_WRONLY | O_CREAT | O_EXCL, 0o644)
             if fd >= 0 { break }
             seq += 1
         }
@@ -100,11 +115,10 @@ enum CrashLogCollector {
         var t = time(nil)
         var tmRaw = tm()
         localtime_r(&t, &tmRaw)
-        var dateBuf = [CChar](repeating: 0, count: 64)
-        strftime(&dateBuf, dateBuf.count, "%Y-%m-%d %H:%M:%S", &tmRaw)
+        strftime(&sigDateBuf, sigDateBuf.count, "%Y-%m-%d %H:%M:%S", &tmRaw)
 
         writeStaticStr(fd, "时间：")
-        _ = write(fd, dateBuf, strlen(dateBuf))
+        _ = write(fd, &sigDateBuf, strlen(&sigDateBuf))
         writeStaticStr(fd, "\n信号：")
         switch sig {
         case SIGABRT: writeStaticStr(fd, "SIGABRT=6")
@@ -116,13 +130,10 @@ enum CrashLogCollector {
         }
         writeStaticStr(fd, " (SIGABRT=6, SIGSEGV=11, SIGBUS=10, SIGILL=4, SIGFPE=8)\n调用栈：\n")
 
-        // 本线程调用栈（backtrace_symbols_fd 信号安全，直接写描述符）
-        let maxFrames: Int32 = 128
-        let frames = UnsafeMutablePointer<UnsafeMutableRawPointer?>.allocate(capacity: Int(maxFrames))
-        defer { frames.deallocate() }
-        let count = backtrace(frames, maxFrames)
+        // 本线程调用栈（backtrace_symbols_fd 信号安全，直接写描述符；sigFrames 已预初始化）
+        let count = backtrace(sigFrames, 128)
         if count > 0 {
-            backtrace_symbols_fd(frames, count, fd)
+            backtrace_symbols_fd(sigFrames, count, fd)
         }
         _ = write(fd, "\n", 1)
     }
@@ -135,24 +146,26 @@ enum CrashLogCollector {
         }
     }
 
-    /// 信号 handler 专用：把十进制整数追加到 pathBuf 末尾（替代 Swift 不可用的 C 变参 snprintf；纯内存操作）
+    /// 信号 handler 专用：把十进制整数写入 numPtr（数字字符串），再 strcat 到 pathPtr 末尾
+    /// （替代 Swift 不可用的 C 变参 snprintf；纯静态缓冲内存操作，零分配）
     @inline(__always)
-    private static func appendDecimal(_ buf: UnsafeMutablePointer<CChar>, _ value: Int64) {
-        var tmp = [CChar](repeating: 0, count: 24)
+    private static func appendDecimal(pathPtr: UnsafeMutablePointer<CChar>,
+                                      numPtr: UnsafeMutablePointer<CChar>,
+                                      value: Int64) {
         var v = value
         var idx = 23
-        tmp[idx] = 0
+        numPtr[idx] = 0
         if v == 0 {
             idx -= 1
-            tmp[idx] = 48 // '0'
+            numPtr[idx] = 48 // '0'
         } else {
             while v > 0 && idx > 0 {
                 idx -= 1
-                tmp[idx] = CChar(48 + v % 10)
+                numPtr[idx] = CChar(48 + v % 10)
                 v /= 10
             }
         }
-        _ = strcat(buf, &tmp[idx])
+        _ = strcat(pathPtr, numPtr + idx)
     }
 
     /// 全部崩溃日志文件
