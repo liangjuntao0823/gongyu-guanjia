@@ -975,9 +975,10 @@ struct AIToolExecutor {
     private func exportData(_ a: [String: Any]) -> String {
         let dataType = s(a, "data_type")
         guard dataType != "" else { return "缺少 data_type（meters/ajk/houses/overdue/rent_summary/misc）" }
-        guard let mc = modelContext, let hc = houseModelContext else {
+        guard let hc = houseModelContext else {
             return "数据容器不可用，请重新打开 AI 助手"
         }
+        let mc = modelContext
         var header: [String] = []
         var rows: [[String]] = []
         let stamp = Self.stampFormatter.string(from: Date())
@@ -1007,7 +1008,7 @@ struct AIToolExecutor {
             let houses = (try? hc.fetch(FetchDescriptor<House>())) ?? []
             let active = houses.filter { !($0.isDeleted ?? false) }.sorted { $0.roomNo < $1.roomNo }
             for h in active {
-                rows.append([h.tower, h.roomNo, h.layout, "\(h.price)", h.landlord,
+                rows.append(["\(h.tower)", h.roomNo, h.layout, "\(h.price)", h.landlord,
                              h.status == .rented ? "已租" : "待租", h.remark])
             }
         case "overdue":
