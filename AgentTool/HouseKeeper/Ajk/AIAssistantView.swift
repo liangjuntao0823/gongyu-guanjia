@@ -527,7 +527,9 @@ struct AIAssistantView: View {
     private func loadHistory() {
         guard let data = UserDefaults.standard.data(forKey: historyKey),
               let arr = try? JSONDecoder().decode([AIMessage].self, from: data) else { return }
-        messages = arr
+        // v1.91：历史去重保险（防止旧版本存了重复 id 导致 ForEach 崩溃）
+        var seen = Set<UUID>()
+        messages = arr.filter { seen.insert($0.id).inserted }
     }
 
     private func saveHistory() {
@@ -637,14 +639,56 @@ struct AIAssistantSettingsView: View {
 
     /// 火山方舟完整模型 ID（正确 ID；旧版短名 Seed-2.1-turbo 会在进入时自动迁移）
     static let defaultModel = "doubao-seed-2-1-turbo-260628"
-    /// v1.89：本地内置已开通模型（含说明）；云端 RemoteConfig.aiModels 抓取的账号全部模型会合并进来
+    /// v1.91：账号已开通模型全量接入（2026-10-29 从火山方舟控制台实测抓取；
+    /// 全部模型均带「新用户赠送 50 万 tokens 推理额度」，可免费调用）
     static let builtinModels: [RemoteConfig.AIModelInfo] = [
+        // ── 豆包（字节）系列 ──
         RemoteConfig.AIModelInfo(modelID: "doubao-seed-2-1-turbo-260628", name: "Doubao-Seed-2.1-turbo",
                                 desc: "效果与成本均衡的日常首选：对话、编程、智能体、多模态全面均衡，响应快，适合日常问答与多轮对话"),
         RemoteConfig.AIModelInfo(modelID: "doubao-seed-2-1-lite-260915", name: "Doubao-Seed-2.1-lite",
                                 desc: "轻量快速版：响应更快、成本更低，支持 1M 超长上下文，适合简单问答与长文本处理"),
         RemoteConfig.AIModelInfo(modelID: "doubao-seed-evolving", name: "Doubao-Seed-Evolving",
-                                desc: "深度思考增强版：先思考再回答，Agent 执行与多模态理解更强，适合复杂分析类问题")
+                                desc: "深度思考增强版：先思考再回答，Agent 执行与多模态理解更强，适合复杂分析类问题"),
+        RemoteConfig.AIModelInfo(modelID: "doubao-seed-2-1-pro-260915", name: "Doubao-Seed-2.1-pro",
+                                desc: "旗舰级大模型：推理与生成质量最高，适合复杂推理、深度分析与高质量长文写作"),
+        RemoteConfig.AIModelInfo(modelID: "doubao-seed-2-0-lite-260428", name: "Doubao-Seed-2.0-lite",
+                                desc: "上一代轻量版：速度快、成本低，适合简单任务与低延迟场景"),
+        RemoteConfig.AIModelInfo(modelID: "doubao-seed-2-0-mini-260428", name: "Doubao-Seed-2.0-mini",
+                                desc: "轻量小模型：极速响应、极致成本，适合高频轻量问答"),
+        RemoteConfig.AIModelInfo(modelID: "doubao-seed-2-0-code-preview-260215", name: "Doubao-Seed-2.0-code",
+                                desc: "代码专项模型：代码生成、解释、调试与补全能力更强，适合编程类问题"),
+        RemoteConfig.AIModelInfo(modelID: "doubao-seed-character-260628", name: "Doubao-Seed-Character",
+                                desc: "角色扮演模型：擅长人设一致的角色对话与沉浸式剧情互动"),
+        RemoteConfig.AIModelInfo(modelID: "doubao-smart-router-250928", name: "Doubao-Smart-Router",
+                                desc: "智能路由：自动把请求分发给最合适的模型，兼顾效果与成本"),
+        // ── DeepSeek 系列 ──
+        RemoteConfig.AIModelInfo(modelID: "deepseek-v4-1-flash-261017", name: "DeepSeek-V4.1-Flash",
+                                desc: "高性价比快模型：推理能力强、价格低，适合日常问答与批量任务"),
+        RemoteConfig.AIModelInfo(modelID: "deepseek-v4-1-flash-economy-261017", name: "DeepSeek-V4.1-Flash经济版",
+                                desc: "超低成本版：价格仅为标准版一半，适合高频轻量调用"),
+        RemoteConfig.AIModelInfo(modelID: "deepseek-v4-flash-ga-260731", name: "DeepSeek-V4-Flash正式版",
+                                desc: "正式版快模型：稳定可用，速度与效果均衡"),
+        RemoteConfig.AIModelInfo(modelID: "deepseek-v4-pro-ga-260813", name: "DeepSeek-V4-Pro正式版",
+                                desc: "正式版强模型：深度推理能力强，适合复杂分析类问题"),
+        // ── 第三方系列 ──
+        RemoteConfig.AIModelInfo(modelID: "kimi-k3-1-pro-261024", name: "Kimi-K3.1-Pro",
+                                desc: "月之暗面旗舰：超长上下文 + 强推理，适合长文档理解与深度分析"),
+        RemoteConfig.AIModelInfo(modelID: "glm-5-2-260617", name: "GLM-5.2",
+                                desc: "智谱旗舰：综合能力强，中英文对话与工具调用表现出色"),
+        RemoteConfig.AIModelInfo(modelID: "glm-5-3-flash-260828", name: "GLM-5.3-Flash",
+                                desc: "智谱快模型：速度优先，适合高频互动场景"),
+        RemoteConfig.AIModelInfo(modelID: "glm-4-5-air-20250728", name: "GLM-4.5-Air",
+                                desc: "智谱轻量版：低延迟低成本，适合简单问答"),
+        RemoteConfig.AIModelInfo(modelID: "qwen3-0-6b-20250429", name: "Qwen3-0.6B",
+                                desc: "通义超轻量：极小规模、极速响应，适合简单任务"),
+        RemoteConfig.AIModelInfo(modelID: "qwen3-8b-20250429", name: "Qwen3-8B",
+                                desc: "通义轻量：开源模型，性价比高，适合日常问答"),
+        RemoteConfig.AIModelInfo(modelID: "qwen3-14b-20250429", name: "Qwen3-14B",
+                                desc: "通义中等规模：效果与速度平衡，适合一般任务"),
+        RemoteConfig.AIModelInfo(modelID: "qwen3-32b-20250429", name: "Qwen3-32B",
+                                desc: "通义较强：推理能力更强，适合复杂问题"),
+        RemoteConfig.AIModelInfo(modelID: "qwen2-5-72b-20240919", name: "Qwen2.5-72B",
+                                desc: "通义旧版强模型：72B 大规模，综合能力扎实")
     ]
     /// 内置 + 云端扩展（去重合并）
     static var allModels: [RemoteConfig.AIModelInfo] {

@@ -35,27 +35,36 @@
   }
   .nav-read svg { width:12px; height:12px; }
   .nav-read span { font-size:12px; font-weight:600; color:#fff; }
-  /* ===== 预警条 ===== */
+  /* ===== 预警卡（v1.91：保留——对齐 App 真实 UI：标题+只看预警按钮+房态明细）===== */
   .warn {
-    margin:10px 12px 0; padding:8px 12px; border-radius:10px;
-    background:#FFF7E6; border:1px solid #F3DFAE; font-size:11px; color:#B0761A;
+    margin:10px 12px 0; padding:10px 12px; border-radius:12px;
+    background:#FFF7E6; border:1px solid #F3DFAE;
   }
-  .warn b { font-weight:700; }
-  /* ===== 概览卡（v1.90：6 项，两行三列）===== */
-  .overview { margin:10px 12px 0; background:#fff; border:1px solid #E3EAE6; border-radius:0; padding:0 0 14px; }
-  .ov-refresh { font-size:10.5px; color:#97A49F; padding:10px 12px 6px; }
+  .warn-head { display:flex; align-items:center; gap:5px; }
+  .warn-head svg { width:13px; height:13px; color:#E09A2F; flex:none; }
+  .warn-head b { font-size:13px; font-weight:700; color:#B0761A; }
+  .warn-only { margin-left:auto; font-size:11px; color:#B0761A; background:rgba(240,154,47,.12); padding:3px 9px; border-radius:999px; flex:none; }
+  .warn-line { margin-top:7px; font-size:12px; font-weight:600; color:#E04545; }
+  .warn-detail { margin-top:3px; font-size:11px; color:#97A49F; line-height:1.5; }
+  /* ===== 工具行（固定，不随列表滚动）===== */
+  .tool-row { margin:10px 12px 0; display:flex; align-items:center; }
+  .tool-sort { font-size:12px; color:#1C2D29; background:rgba(227,234,230,.4); padding:6px 10px; border-radius:999px; display:flex; align-items:center; gap:4px; }
+  .tool-sort svg { width:11px; height:11px; color:#5F716C; }
+  /* ===== 概览卡（v1.91：6 项，两行三列；已删除「刷新时间」行）===== */
+  .overview { margin:10px 12px 0; background:#fff; border:1px solid #E3EAE6; border-radius:0; padding:14px 0; }
   .ov-row { display:flex; }
   .ov-item { flex:1; text-align:center; }
   .ov-item .v { font-size:19px; font-weight:800; color:#1C2D29; line-height:1.2; }
   .ov-item .l { font-size:10.5px; color:#97A49F; margin-top:3px; }
   .ov-item + .ov-item { border-left:1px solid #E3EAE6; }
-  /* ===== 房源卡片（AjkHouseCard v1.91 复原版）===== */
+  /* ===== 房源卡片（AjkHouseCard v1.91：推广状态=封面左上角胶囊）===== */
   .house-card {
     margin:10px 12px 0; background:#fff; border:1px solid #E3EAE6; border-radius:12px;
     padding:12px; display:flex; gap:10px;
   }
-  .cover { width:62px; height:62px; border-radius:10px; background:rgba(227,234,230,.55); border:1px solid #E3EAE6; display:flex; align-items:center; justify-content:center; flex:none; }
+  .cover { position:relative; width:62px; height:62px; border-radius:10px; background:rgba(227,234,230,.55); border:1px solid #E3EAE6; display:flex; align-items:center; justify-content:center; flex:none; }
   .cover svg { width:22px; height:22px; color:#97A49F; }
+  .promo-badge { position:absolute; top:2px; left:2px; font-size:8px; font-weight:600; color:#fff; background:#0B7A66; padding:1.5px 5px; border-radius:999px; }
   .card-body { flex:1; min-width:0; display:flex; flex-direction:column; gap:6px; }
   .row-title { display:flex; align-items:flex-start; gap:6px; }
   .row-title .txt { font-size:14px; font-weight:600; color:#1C2D29; line-height:1.35; flex:1; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
@@ -106,12 +115,19 @@
     </div>
   </div>
 
-  <!-- 预警条 -->
-  <div class="warn"><b>预警</b> ｜ 10套房源房态≥7天，需实地核验</div>
+  <!-- 预警卡（v1.91：保留——9套房源房态≥7天 + 只看预警按钮 + 房号明细） -->
+  <div class="warn">
+    <div class="warn-head">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
+      <b>预警</b>
+      <span class="warn-only">只看预警</span>
+    </div>
+    <div class="warn-line">9套房源房态≥7天，需实地核验</div>
+    <div class="warn-detail">4717210449715212房态68天、4751257588409346房态44天、4798018644517896房态11天</div>
+  </div>
 
-  <!-- 概览卡 6 项（数值 = 解析器实际输出；神奇分/房产币改从工作台首页读取） -->
+  <!-- 概览卡 6 项（数值 = 解析器实际输出；神奇分/房产币从工作台首页读取；已删除刷新时间行） -->
   <div class="overview">
-    <div class="ov-refresh">刷新时间：2026-10-29 16:20</div>
     <div class="ov-row">
       <div class="ov-item"><div class="v">56</div><div class="l">今日点击</div></div>
       <div class="ov-item"><div class="v">33</div><div class="l">推广房源</div></div>
@@ -124,10 +140,19 @@
     </div>
   </div>
 
-  <!-- 房源卡片：解析器对截图文本的真实输出 -->
+  <!-- 工具行（固定，不随列表滚动） -->
+  <div class="tool-row">
+    <div class="tool-sort">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3v18"/><path d="M4 7l4-4 4 4"/><path d="M16 21V3"/><path d="M12 17l4 4 4-4"/></svg>
+      房态
+    </div>
+  </div>
+
+  <!-- 房源卡片：解析器对截图文本的真实输出（推广状态=封面左上角胶囊） -->
   <div class="house-card">
     <div class="cover">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/><path d="M9 21v-6h6v6"/></svg>
+      <span class="promo-badge">精选</span>
     </div>
     <div class="card-body">
       <div class="row-title">
@@ -152,15 +177,15 @@
       <div class="row-status">
         <span class="st-ok">核验成功</span>
         <span class="st-ok">暂无视频</span>
-        <span class="st-promo">精选</span>
       </div>
     </div>
   </div>
 
-  <!-- 第二张：真实登录抓取的页面卡片（推广状态=点击量左侧原文精确提取） -->
+  <!-- 第二张：真实登录抓取的页面卡片（推广状态=点击量左侧原文精确提取，显示在封面左上角） -->
   <div class="house-card">
     <div class="cover">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/><path d="M9 21v-6h6v6"/></svg>
+      <span class="promo-badge">精选</span>
     </div>
     <div class="card-body">
       <div class="row-title">
@@ -184,7 +209,6 @@
       <div class="row-status">
         <span class="st-ok">核验成功</span>
         <span class="st-ok">暂无视频</span>
-        <span class="st-promo">精选</span>
       </div>
     </div>
   </div>
@@ -205,11 +229,14 @@
     <tr><td>平台</td><td>安居客 / 58同城</td><td>点击量行右侧胶囊</td></tr>
     <tr><td>维护状态</td><td>维护人</td><td>平台旁（琥珀色）</td></tr>
     <tr><td>核验 / 视频</td><td>核验成功（显示时去掉「实地核验·」前缀） / 暂无视频</td><td>最底行</td></tr>
-    <tr><td>推广状态（合并显示）</td><td>精选</td><td>最底行（精确提取后合并：58与安居客同步，有精选→显示精选，只有普通推广→显示普通推广）</td></tr>
+    <tr><td>推广状态（合并显示）</td><td>精选</td><td>封面左上角胶囊（58与安居客同步：有精选→「精选」，只有普通推广→「普通推广」）</td></tr>
+    <tr><td>预警卡</td><td>9套房源房态≥7天，需实地核验</td><td>概览卡上方（固定区），附「只看预警」切换按钮与房号明细</td></tr>
+    <tr><td>刷新时间行</td><td>—（已删除）</td><td>抓取时间显示在导航栏副标题「上次抓取 MM-dd HH:mm｜共N套」</td></tr>
+    <tr><td>头部固定</td><td>—</td><td>预警卡 / 概览卡 / 工具行固定不动，仅房源列表上下滚动</td></tr>
     <tr><td>质量标签</td><td>高</td><td>标题右侧（深绿胶囊）</td></tr>
   </table>
-  <p style="margin-top:8px">推广状态链路：精确提取（点击量左侧 <code>安居客 普通推广 精选 58同城 普通推广 精选 11/11</code>）→ 合并显示（58与安居客同步，有精选→「精选」，只有普通推广→「普通推广」）。上方第二张卡即实抓页面（编号4813369935258638）的渲染。</p>
-  <p style="margin-top:8px">概览卡「神奇分 / 房产币」已接入真实数据：读取时先抓工作台首页（<code>总分 889分</code>、<code>房产币 3,134.11</code>，含千分位），再抓房源列表页（今日点击/推广/端口/套餐），两页文本合并解析。概览卡顶部新增「刷新时间」行。</p>
+  <p style="margin-top:8px">推广状态链路：精确提取（点击量左侧 <code>安居客 普通推广 精选 58同城 普通推广 精选 11/11</code>）→ 合并显示（58与安居客同步，有精选→「精选」，只有普通推广→「普通推广」）→ 显示在封面左上角胶囊（深绿底白字 8pt）。上方第二张卡即实抓页面（编号4813369935258638）的渲染。</p>
+  <p style="margin-top:8px">概览卡「神奇分 / 房产币」已接入真实数据：读取时先抓工作台首页（<code>总分 889分</code>、<code>房产币 3,134.11</code>，含千分位），再抓房源列表页（今日点击/推广/端口/套餐），两页文本合并解析。概览卡顶部「刷新时间」行已按 v1.91 删除。</p>
 </div>
 
 </body>

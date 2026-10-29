@@ -14,9 +14,13 @@ enum CrashLogCollector {
     }()
 
     private static var isInstalled = false
+    /// v1.91：信号 handler 专用目录路径 C 指针（install 时 strdup 缓存；handler 内只读，纯内存访问信号安全）
+    private static var dirPathPtr: UnsafeMutablePointer<CChar>? = nil
 
     static func install() {
         guard !isInstalled else { return }
+        // 信号 handler 只允许信号安全操作：预先把日志目录路径转成 C 字符串缓存（此处是安全上下文）
+        dirPathPtr = strdup(logsDirectory.path)
         isInstalled = true
         NSSetUncaughtExceptionHandler { exception in
             let name = exception.name.rawValue
@@ -66,19 +70,29 @@ enum CrashLogCollector {
         try? content.write(to: fileURL, atomically: true, encoding: .utf8)
     }
 
-    /// 信号 handler 专用（信号安全：纯 C 接口 open/write/backtrace_symbols_fd + 静态字符串，不碰变参/堆分配）
+    /// 信号 handler 专用（信号安全：纯 C 接口 open/write/backtrace_symbols_fd + 静态字符串，
+    /// 不碰变参/堆分配/FileManager；v1.91 起文件名用 snprintf 构造，杜绝非信号安全调用导致二次崩溃）
     private static func writeLogSignal(_ sig: Int32) {
-        let fileURL = nextLogURL(prefix: "Crash_Signal")
+        guard let dp = dirPathPtr else { return }
+        // 纯 C 构造 /Logs/Crash_Signal_<epoch>_<seq>.txt（O_EXCL 递增序号，不覆盖旧文件）
+        var epoch: Int64 = Int64(time(nil))
+        var pathBuf = [CChar](repeating: 0, count: 1024)
+        var fd: Int32 = -1
+        var seq: Int32 = 1
+        while seq < 10000 {
+            snprintf(&pathBuf, pathBuf.count, "%s/Crash_Signal_%lld_%d.txt", dp, epoch, seq)
+            fd = open(pathBuf, O_WRONLY | O_CREAT | O_EXCL, 0o644)
+            if fd >= 0 { break }
+            seq += 1
+        }
+        guard fd >= 0 else { return }
+        defer { close(fd) }
         // 日期：strftime 输出（信号 handler 内避免 Swift 对象/变参函数）
         var t = time(nil)
         var tmRaw = tm()
         localtime_r(&t, &tmRaw)
         var dateBuf = [CChar](repeating: 0, count: 64)
         strftime(&dateBuf, dateBuf.count, "%Y-%m-%d %H:%M:%S", &tmRaw)
-
-        let fd = open(fileURL.path, O_WRONLY | O_CREAT | O_APPEND, 0o644)
-        guard fd >= 0 else { return }
-        defer { close(fd) }
 
         writeStaticStr(fd, "时间：")
         _ = write(fd, dateBuf, strlen(dateBuf))

@@ -38,10 +38,11 @@ struct MeterBoardView: View {
             VStack(spacing: 0) {
                 navBar
                 if refreshing { refreshProgressBar }
+                // v1.91：统计卡/工具行固定，仅电表列表滚动
+                statsCards
+                toolRow
                 ScrollView {
                     VStack(spacing: 0) {
-                        statsCards
-                        toolRow
                         meterList
                     }
                     .padding(.bottom, 30)

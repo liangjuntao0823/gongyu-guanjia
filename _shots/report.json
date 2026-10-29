@@ -11,7 +11,7 @@
     "desktop": {
       "revealed": 0,
       "screenshot": "/home/user/Doubao/chats/38448577444166402/_shots/安居客卡片效果预览_desktop.jpg",
-      "screenshotBytes": 50099,
+      "screenshotBytes": 75476,
       "truncated": false,
       "structure": {
         "title": "安居客房源卡片效果预览（v1.90 解析器实际输出）",
@@ -22,7 +22,7 @@
         },
         "fullpage": {
           "w": 1440,
-          "h": 1343
+          "h": 1971
         },
         "counts": {
           "section": 0,
@@ -30,7 +30,7 @@
           "h2": 0,
           "img": 0,
           "canvas": 0,
-          "svg": 4,
+          "svg": 7,
           "links": 0,
           "buttons": 0
         }
@@ -47,7 +47,7 @@
     "mobile": {
       "revealed": 0,
       "screenshot": "/home/user/Doubao/chats/38448577444166402/_shots/安居客卡片效果预览_mobile.jpg",
-      "screenshotBytes": 80903,
+      "screenshotBytes": 121566,
       "truncated": false,
       "structure": {
         "title": "安居客房源卡片效果预览（v1.90 解析器实际输出）",
@@ -58,7 +58,7 @@
         },
         "fullpage": {
           "w": 390,
-          "h": 1417
+          "h": 2165
         },
         "counts": {
           "section": 0,
@@ -66,7 +66,7 @@
           "h2": 0,
           "img": 0,
           "canvas": 0,
-          "svg": 4,
+          "svg": 7,
           "links": 0,
           "buttons": 0
         }
@@ -83,7 +83,7 @@
   },
   "engine": "playwright",
   "chromiumExec": "/opt/vm/preinstall/ms-playwright/chromium-1169/chrome-linux/chrome",
-  "elapsedSec": 4.45,
+  "elapsedSec": 4.79,
   "schemaVersion": 2,
   "status": "warning",
   "engineInfo": {
@@ -106,7 +106,7 @@
       {
         "viewport": "desktop",
         "path": "/home/user/Doubao/chats/38448577444166402/_shots/安居客卡片效果预览_desktop.jpg",
-        "size": 50099,
+        "size": 75476,
         "visualCoverage": {
           "complete": true,
           "reason": null
@@ -115,7 +115,7 @@
       {
         "viewport": "mobile",
         "path": "/home/user/Doubao/chats/38448577444166402/_shots/安居客卡片效果预览_mobile.jpg",
-        "size": 80903,
+        "size": 121566,
         "visualCoverage": {
           "complete": true,
           "reason": null

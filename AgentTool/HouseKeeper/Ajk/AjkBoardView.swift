@@ -29,11 +29,12 @@ struct AjkBoardView: View {
             VStack(spacing: 0) {
                 navBar
                 if refreshing { progressBar }
+                // v1.91：概览/预警/工具行固定，仅房源列表滚动
+                overviewCard
+                warningCard
+                toolRow
                 ScrollView {
                     VStack(spacing: 0) {
-                        overviewCard
-                        warningCard
-                        toolRow
                         houseList
                     }
                     .padding(.bottom, 30)
@@ -154,40 +155,22 @@ struct AjkBoardView: View {
 
     private var overviewCard: some View {
         let o = store.overview
-        return VStack(spacing: 0) {
-            // v1.91：刷新时间
-            HStack {
-                Text("刷新时间：\(fetchTimeText)")
-                    .font(.system(size: 10.5))
-                    .foregroundColor(.themeText3)
-                Spacer()
+        return VStack(spacing: 10) {
+            HStack(spacing: 0) {
+                statItem(value: "\(o.todayClickTotal)", label: "今日点击")
+                statItem(value: "\(o.promotedCount)", label: "推广房源")
+                statItem(value: "\(o.portCount)", label: "剩余端口")
             }
-            .padding(.horizontal, 12)
-            .padding(.top, 10)
-            .padding(.bottom, 6)
-            VStack(spacing: 10) {
-                HStack(spacing: 0) {
-                    statItem(value: "\(o.todayClickTotal)", label: "今日点击")
-                    statItem(value: "\(o.promotedCount)", label: "推广房源")
-                    statItem(value: "\(o.portCount)", label: "剩余端口")
-                }
-                HStack(spacing: 0) {
-                    statItem(value: "\(o.packageDays)", label: "套餐剩余(天)")
-                    statItem(value: "\(o.score)", label: "神奇分")
-                    statItem(value: "\(o.coin)", label: "房产币")
-                }
+            HStack(spacing: 0) {
+                statItem(value: "\(o.packageDays)", label: "套餐剩余(天)")
+                statItem(value: "\(o.score)", label: "神奇分")
+                statItem(value: "\(o.coin)", label: "房产币")
             }
         }
         .padding(.vertical, 14)
         .background(Color.themePanel)
         .overlay(RoundedRectangle(cornerRadius: 0).stroke(Color.themeBorder, lineWidth: 0.5))
         .padding(.top, 8)
-    }
-
-    private var fetchTimeText: String {
-        guard let t = store.lastFetch else { return "—" }
-        let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd HH:mm"
-        return f.string(from: t)
     }
 
     private func statItem(value: String, label: String) -> some View {
@@ -445,21 +428,34 @@ struct AjkHouseCard: View {
             return types.first ?? ""
         }()
         return HStack(alignment: .top, spacing: 10) {
-            if let cp = coverPath, let img = UIImage(contentsOfFile: cp) {
-                Image(uiImage: img)
-                    .resizable()
-                    .scaledToFill()
-                    .frame(width: 62, height: 62)
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
-                    .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.themeBorder, lineWidth: 1))
-            } else {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 10)
-                        .fill(Color.themeBorder.opacity(0.25))
+            // v1.91：封面 + 推广状态胶囊（左上角）
+            ZStack(alignment: .topLeading) {
+                if let cp = coverPath, let img = UIImage(contentsOfFile: cp) {
+                    Image(uiImage: img)
+                        .resizable()
+                        .scaledToFill()
                         .frame(width: 62, height: 62)
-                    Image(systemName: "house")
-                        .font(.system(size: 20))
-                        .foregroundColor(.themeText3)
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.themeBorder, lineWidth: 1))
+                } else {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 10)
+                            .fill(Color.themeBorder.opacity(0.25))
+                            .frame(width: 62, height: 62)
+                        Image(systemName: "house")
+                            .font(.system(size: 20))
+                            .foregroundColor(.themeText3)
+                    }
+                }
+                if !promoDisplay.isEmpty {
+                    Text(promoDisplay)
+                        .font(.system(size: 8, weight: .semibold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1.5)
+                        .background(Color.themeAccentDark)
+                        .clipShape(Capsule())
+                        .padding(2)
                 }
             }
             VStack(alignment: .leading, spacing: 6) {
@@ -553,12 +549,7 @@ struct AjkHouseCard: View {
                             .font(.system(size: 10))
                             .foregroundColor(.themeText2)
                     }
-                    // 推广状态（v1.91：精确数据合并显示——58与安居客同步，精选 > 普通推广）
-                    if !promoDisplay.isEmpty {
-                        Text(promoDisplay)
-                            .font(.system(size: 10))
-                            .foregroundColor(.themeText3)
-                    }
+                    // v1.91：推广状态已移到封面左上角胶囊，此处不再重复显示
                 }
             }
         }
