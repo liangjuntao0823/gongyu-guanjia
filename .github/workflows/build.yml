@@ -62,17 +62,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # v1.89 fix: awk 提前 exit 触发 printf Broken pipe（pipefail 下失败）；改用 python 一次读完再解析
+          # v1.89 fix: awk 提前 exit 触发 printf Broken pipe（pipefail 下失败）；改用 here-string + grep -m1（grep 提前退出不触发 SIGPIPE）
           SETTINGS="$(xcodebuild -project "$PROJECT_PATH" -scheme "$SCHEME" -configuration "$CONFIGURATION" -showBuildSettings 2>/dev/null || true)"
-          read VERSION BUILD PRODUCT_NAME <<< "$(printf '%s' "$SETTINGS" | python3 -c '
-import sys, re
-s = sys.stdin.read()
-def g(k):
-    m = re.search(r"^\s*" + k + r" = (\S+)", s, re.M)
-    return m.group(1) if m else ""
-v = g("MARKETING_VERSION"); b = g("CURRENT_PROJECT_VERSION")
-p = g("WRAPPER_NAME") or g("FULL_PRODUCT_NAME")
-print(v, b, p)')"
+          VERSION="$(grep -m1 '^ *MARKETING_VERSION = ' <<< "$SETTINGS" | sed 's/^.*= //')"
+          BUILD="$(grep -m1 '^ *CURRENT_PROJECT_VERSION = ' <<< "$SETTINGS" | sed 's/^.*= //')"
+          PRODUCT_NAME="$(grep -m1 '^ *WRAPPER_NAME = ' <<< "$SETTINGS" | sed 's/^.*= //')"
+          if [[ -z "$PRODUCT_NAME" ]]; then
+            PRODUCT_NAME="$(grep -m1 '^ *FULL_PRODUCT_NAME = ' <<< "$SETTINGS" | sed 's/^.*= //')"
+          fi
           test -n "$VERSION" && test -n "$BUILD" && test -n "$PRODUCT_NAME"
           IPA_NAME="公寓管家${VERSION}.ipa"
           {
