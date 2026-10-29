@@ -727,63 +727,10 @@ struct AIAssistantSettingsView: View {
 
     var body: some View {
         Form {
-            Section {
-                SecureField("API Key（火山方舟）", text: $apiKey)
-                    .font(.system(size: 13))
-                    .autocapitalization(.none)
-                Text("只保存在本机钥匙串（Keychain），不上传、不备份；输入即保存，改动立即生效")
-                    .font(.system(size: 11))
-                    .foregroundColor(.themeText3)
-            } header: {
-                Text("API Key")
-            } footer: {
-                Text("在火山方舟控制台创建 API Key 后粘贴到这里；清空输入即删除本机 Key")
-            }
-
-            Section("模型") {
-                Picker("对话模型", selection: $model) {
-                    ForEach(Self.allModels, id: \.modelID) { m in
-                        Text(modelPickerLabel(m)).tag(m.modelID)
-                    }
-                    Text("自定义（填下方 ID）").tag("custom")
-                }
-                TextField("自定义模型 ID（选填，覆盖上方选择）", text: $modelCustom)
-                    .font(.system(size: 13))
-                    .autocapitalization(.none)
-                Text("输入即保存；保存过自定义 ID 后再次进入会自动回填显示")
-                    .font(.system(size: 11))
-                    .foregroundColor(.themeText3)
-                // v1.89：当前模型的说明介绍（v1.93 起带开通状态标注）
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("模型说明")
-                        .font(.system(size: 12, weight: .semibold))
-                    Text(currentModelDesc)
-                        .font(.system(size: 11.5))
-                        .foregroundColor(.themeText2)
-                }
-                .padding(10)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color.themeBorder.opacity(0.35))
-                .cornerRadius(8)
-            } footer: {
-                Text("当前账号已开通：Doubao-Seed-2.1-turbo / Doubao-Seed-2.1-lite / Doubao-Seed-Evolving；其余模型需在火山方舟控制台「开通管理」页开通后调用，未开通会提示模型未开通")
-            }
-
-            Section("接口端点") {
-                TextField("API 端点 URL", text: $baseURL)
-                    .font(.system(size: 12))
-                    .autocapitalization(.none)
-                    .keyboardType(.URL)
-            }
-
-            Section("偏好模板（调教）") {
-                TextEditor(text: $template)
-                    .frame(minHeight: 90)
-                    .font(.system(size: 12))
-                Text("填写你希望 AI 一直遵守的规则（如：报价只说每月租金；金额精确到元；先结论后明细）。每次对话都会带上。")
-                    .font(.system(size: 11))
-                    .foregroundColor(.themeText3)
-            }
+            apiKeySection
+            modelSection
+            endpointSection
+            templateSection
         }
         .navigationTitle("AI 助手设置")
         .navigationBarTitleDisplayMode(.inline)
@@ -848,6 +795,79 @@ struct AIAssistantSettingsView: View {
             return m.modelID + "（已开通）"
         }
         return m.modelID + "（未开通）"
+    }
+
+    /// v1.93：模型 Section 底部说明（开通状态提示）
+    private var modelStatusFooter: String {
+        "当前账号已开通：Doubao-Seed-2.1-turbo / Doubao-Seed-2.1-lite / Doubao-Seed-Evolving；其余模型需在火山方舟控制台「开通管理」页开通后调用，未开通会提示模型未开通"
+    }
+
+    // MARK: - 设置页分块（v1.93 拆分，避免 body 过大触发类型检查超时）
+
+    private var apiKeySection: some View {
+        Section {
+            SecureField("API Key（火山方舟）", text: $apiKey)
+                .font(.system(size: 13))
+                .autocapitalization(.none)
+            Text("只保存在本机钥匙串（Keychain），不上传、不备份；输入即保存，改动立即生效")
+                .font(.system(size: 11))
+                .foregroundColor(.themeText3)
+        } header: {
+            Text("API Key")
+        } footer: {
+            Text("在火山方舟控制台创建 API Key 后粘贴到这里；清空输入即删除本机 Key")
+        }
+    }
+
+    private var modelSection: some View {
+        Section {
+            Picker("对话模型", selection: $model) {
+                ForEach(Self.allModels, id: \.modelID) { m in
+                    Text(modelPickerLabel(m)).tag(m.modelID)
+                }
+                Text("自定义（填下方 ID）").tag("custom")
+            }
+            TextField("自定义模型 ID（选填，覆盖上方选择）", text: $modelCustom)
+                .font(.system(size: 13))
+                .autocapitalization(.none)
+            Text("输入即保存；保存过自定义 ID 后再次进入会自动回填显示")
+                .font(.system(size: 11))
+                .foregroundColor(.themeText3)
+            // v1.89：当前模型的说明介绍（v1.93 起带开通状态标注）
+            VStack(alignment: .leading, spacing: 4) {
+                Text("模型说明")
+                    .font(.system(size: 12, weight: .semibold))
+                Text(currentModelDesc)
+                    .font(.system(size: 11.5))
+                    .foregroundColor(.themeText2)
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.themeBorder.opacity(0.35))
+            .cornerRadius(8)
+        } footer: {
+            Text(modelStatusFooter)
+        }
+    }
+
+    private var endpointSection: some View {
+        Section("接口端点") {
+            TextField("API 端点 URL", text: $baseURL)
+                .font(.system(size: 12))
+                .autocapitalization(.none)
+                .keyboardType(.URL)
+        }
+    }
+
+    private var templateSection: some View {
+        Section("偏好模板（调教）") {
+            TextEditor(text: $template)
+                .frame(minHeight: 90)
+                .font(.system(size: 12))
+            Text("填写你希望 AI 一直遵守的规则（如：报价只说每月租金；金额精确到元；先结论后明细）。每次对话都会带上。")
+                .font(.system(size: 11))
+                .foregroundColor(.themeText3)
+        }
     }
 
     private func loadFromStorage() {
