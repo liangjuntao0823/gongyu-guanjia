@@ -743,7 +743,7 @@ struct AIAssistantSettingsView: View {
             Section("模型") {
                 Picker("对话模型", selection: $model) {
                     ForEach(Self.allModels, id: \.modelID) { m in
-                        Text(Self.isActivated(m.modelID) ? "\(m.modelID)（已开通）" : "\(m.modelID)（未开通）").tag(m.modelID)
+                        Text(modelPickerLabel(m)).tag(m.modelID)
                     }
                     Text("自定义（填下方 ID）").tag("custom")
                 }
@@ -837,9 +837,17 @@ struct AIAssistantSettingsView: View {
         }
         if let m = Self.allModels.first(where: { $0.modelID == model }) {
             let state = Self.isActivated(m.modelID) ? "已开通" : "未开通（需到火山方舟控制台开通）"
-            return "【\(state)】\(m.name)｜\(m.desc)"
+            return "【" + state + "】" + m.name + "｜" + m.desc
         }
         return "请选择上方模型查看说明"
+    }
+
+    /// v1.93：模型选择器选项文字（带开通状态标注）
+    private func modelPickerLabel(_ m: RemoteConfig.AIModelInfo) -> String {
+        if Self.isActivated(m.modelID) {
+            return m.modelID + "（已开通）"
+        }
+        return m.modelID + "（未开通）"
     }
 
     private func loadFromStorage() {
