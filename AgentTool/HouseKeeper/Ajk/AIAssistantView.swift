@@ -47,6 +47,8 @@ struct AIAssistantView: View {
     // v1.92：必须用房源专用容器 houseModelContext——主容器 schema 不含 House，用 modelContext 会抛
     // NSInternalInconsistencyException（NSFetchRequest could not locate entity 'House'）导致发送即闪退
     @Environment(\.houseModelContext) private var houseModelContext
+    // v1.94：主容器 modelContext（收支/待办等经营数据，App.swift .modelContainer(mainContainer) 注入）
+    @Environment(\.modelContext) private var modelContext
     @State private var messages: [AIMessage] = []
     @State private var input = ""
     @State private var sending = false
@@ -496,14 +498,18 @@ struct AIAssistantView: View {
         }
     }
 
-    // MARK: - 系统提示 + 数据快照（v1.88：接入 App 本地房源数据）
+    // MARK: - 系统提示 + 数据快照（v1.88 房源；v1.94 全量：收支/待办/电表/安居客/房源）
 
     private func buildSystemPrompt() -> String {
-        let base = AIAssistantSettingsView.defaultSystemPrompt
+        var base = AIAssistantSettingsView.defaultSystemPrompt
             + (storedTemplate.isEmpty ? "" : "\n\n【我的偏好要求】\n\(storedTemplate)")
-        let snapshot = houseDataSnapshot()
-        guard !snapshot.isEmpty else { return base }
-        return base + "\n\n【当前 App 房源数据快照（只读参考，涉及房源数量/租金/状态的问题据此回答，不要编造）】\n\(snapshot)"
+        // 房源（独立容器）
+        let house = houseDataSnapshot()
+        if !house.isEmpty { base += "\n\n【房源数据快照（只读参考，涉及房源数量/租金/状态的问题据此回答，不要编造）】\n" + house }
+        // 主容器经营数据
+        let appData = appDataSnapshot()
+        if !appData.isEmpty { base += "\n\n【App 经营数据快照（收支/待办/电表/安居客，只读参考，据实回答）】\n" + appData }
+        return base
     }
 
     /// 从本地 SwiftData 拉取房源，生成文本快照注入系统提示
@@ -521,6 +527,84 @@ struct AIAssistantView: View {
             lines.append(line)
         }
         return lines.joined(separator: "\n")
+    }
+
+    /// v1.94：App 经营数据快照（收支/待办/电表/安居客）——与房源快照分开，注入系统提示
+    private func appDataSnapshot() -> String {
+        var lines: [String] = []
+        let cal = Calendar.current
+        let now = Date()
+        let ym = cal.dateComponents([.year, .month], from: now)
+
+        // ---- 收支（主容器 modelContext）----
+        let activeProps = (try? modelContext.fetch(FetchDescriptor<Property>(predicate: #Predicate { !$0.isDeleted }))) ?? []
+        let rentingProps = activeProps.filter { !$0.isTerminated }
+        let rents = (try? modelContext.fetch(FetchDescriptor<RentMonthRecord>())) ?? []
+        let monthRents = rents.filter { $0.year == ym.year && $0.month == ym.month }
+        let totalRent = monthRents.reduce(0.0) { $0 + $1.amount }
+        let paidRent = monthRents.filter { $0.isPaid }.reduce(0.0) { $0 + $1.amount }
+        if !rentingProps.isEmpty || !monthRents.isEmpty {
+            lines.append("收租中房源 \(rentingProps.count) 套；本月(\(ym.year)-\(ym.month))应收租金 \(Self.fmtYuan(totalRent)) 元，已收 \(Self.fmtYuan(paidRent)) 元，未收 \(Self.fmtYuan(totalRent - paidRent)) 元")
+        }
+        let utility = (try? modelContext.fetch(FetchDescriptor<UtilitySettlementRecord>(predicate: #Predicate { !$0.isSettled }))) ?? []
+        if !utility.isEmpty {
+            let totalU = utility.reduce(0.0) { $0 + $1.electricAmount + $1.waterAmount }
+            lines.append("未结清水电结算 \(utility.count) 笔，合计约 \(Self.fmtYuan(totalU)) 元")
+        }
+        let incs = (try? modelContext.fetch(FetchDescriptor<MiscIncome>(predicate: #Predicate { !$0.isDeleted }))) ?? []
+        let exps = (try? modelContext.fetch(FetchDescriptor<MiscExpense>(predicate: #Predicate { !$0.isDeleted }))) ?? []
+        let monthIncs = incs.filter { cal.isDate($0.date, equalTo: now, toGranularity: .month) }
+        let monthExps = exps.filter { cal.isDate($0.date, equalTo: now, toGranularity: .month) }
+        if !monthIncs.isEmpty || !monthExps.isEmpty {
+            let sumInc = monthIncs.reduce(0.0) { $0 + $1.amount }
+            let sumExp = monthExps.reduce(0.0) { $0 + $1.amount }
+            lines.append("本月杂项收入 \(Self.fmtYuan(sumInc)) 元（\(monthIncs.count)笔）、杂项支出 \(Self.fmtYuan(sumExp)) 元（\(monthExps.count)笔）")
+        }
+
+        // ---- 待办 ----
+        let todos = (try? modelContext.fetch(FetchDescriptor<TodoItem>(predicate: #Predicate { !$0.isCompleted && !$0.isDeleted }))) ?? []
+        if !todos.isEmpty {
+            let top = todos.sorted { $0.sortOrder < $1.sortOrder }.prefix(20)
+            var t = "未完成待办 \(todos.count) 条"
+            let tList = top.map { $0.content.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+            if !tList.isEmpty { t += "：" + tList.joined(separator: "；") }
+            lines.append(t)
+        }
+
+        // ---- 电表（MeterStore.shared）----
+        let meters = MeterStore.shared.meters
+        if !meters.isEmpty {
+            let low = meters.filter { $0.isLow(threshold: MeterStore.shared.settings.lowThreshold) }
+            var m = "电表 \(meters.count) 个；"
+            let descs = meters.prefix(15).map { mm -> String in
+                let room = mm.room.isEmpty ? mm.uid : mm.room
+                return "\(room)剩\(Int(mm.shengyu))度\(mm.zhuangtai)"
+            }
+            m += descs.joined(separator: "；")
+            if !low.isEmpty { m += "；低电量预警 \(low.count) 个" }
+            lines.append(m)
+        }
+
+        // ---- 安居客（AjkStore.shared）----
+        let ajk = AjkStore.shared
+        if let fetch = ajk.lastFetch {
+            var a = "安居客(上次抓取 \(Self.timeStr(fetch)))：共找到 \(ajk.overview.totalHouses) 套房源；今日点击 \(ajk.overview.todayClickTotal) 次；推广 \(ajk.overview.promotedCount) 套；剩余端口 \(ajk.overview.portCount)；套餐剩 \(ajk.overview.packageDays) 天；神奇分 \(ajk.overview.score)；房产币 \(ajk.overview.coin)；全城排名 \(ajk.overview.cityRank)"
+            lines.append(a)
+        }
+
+        return lines.joined(separator: "\n")
+    }
+
+    /// 金额显示：保留两位小数（分）
+    private static func fmtYuan(_ v: Double) -> String {
+        String(format: "%.2f", v)
+    }
+
+    /// 时间显示：yyyy-MM-dd HH:mm
+    private static func timeStr(_ d: Date) -> String {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd HH:mm"
+        return f.string(from: d)
     }
 
     // MARK: - 历史记录持久化（保留最近 60 条；图片不持久化，控制体积）
