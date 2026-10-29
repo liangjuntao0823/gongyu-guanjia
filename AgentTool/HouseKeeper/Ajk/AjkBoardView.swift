@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import UIKit
 import WebKit
 
 // MARK: - 主界面
@@ -72,25 +73,27 @@ struct AjkBoardView: View {
 
     private var navBar: some View {
         ZStack {
-            // v1.89：顶栏改为安居客品牌蓝渐变（原深绿与页面品牌感不符）
-            LinearGradient(colors: [Color(hex: "3E7BFA"), Color(hex: "2B5BD7")], startPoint: .top, endPoint: .bottom)
+            // v1.90：顶栏配色与 AI 助手/电表监控统一（深绿渐变 + 白色按钮），并整体缩窄
+            LinearGradient(colors: [.themeAccentDark, .themeAccent], startPoint: .top, endPoint: .bottom)
                 .ignoresSafeArea(edges: .top)
             HStack(spacing: 8) {
                 Button {
                     dismiss()
                 } label: {
                     Image(systemName: "chevron.left")
-                        .font(.system(size: 18, weight: .semibold))
-                        .frame(width: 38, height: 38)
-                        .background(Color.white.opacity(0.14))
-                        .clipShape(RoundedRectangle(cornerRadius: 11))
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundColor(.white)
+                        .frame(width: 34, height: 34)
+                        .background(Color.white.opacity(0.16))
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
                 }
-                VStack(alignment: .leading, spacing: 1) {
+                VStack(alignment: .leading, spacing: 0) {
                     Text("安居客后台")
-                        .font(.system(size: 17, weight: .bold))
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundColor(.white)
                     Text(subTitle)
-                        .font(.system(size: 10.5))
-                        .opacity(0.75)
+                        .font(.system(size: 10))
+                        .foregroundColor(.white.opacity(0.8))
                         .lineLimit(1)
                 }
                 Spacer()
@@ -98,30 +101,33 @@ struct AjkBoardView: View {
                     showSettings = true
                 } label: {
                     Image(systemName: "gearshape.fill")
-                        .font(.system(size: 16))
-                        .frame(width: 38, height: 38)
-                        .background(Color.white.opacity(0.14))
-                        .clipShape(RoundedRectangle(cornerRadius: 11))
+                        .font(.system(size: 14))
+                        .foregroundColor(.white)
+                        .frame(width: 34, height: 34)
+                        .background(Color.white.opacity(0.16))
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
                 }
                 Button {
                     Task { await fetch() }
                 } label: {
                     HStack(spacing: 4) {
                         Image(systemName: "arrow.clockwise")
-                            .font(.system(size: 13, weight: .semibold))
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(.white)
                         Text("读取")
-                            .font(.system(size: 13, weight: .semibold))
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(.white)
                     }
-                    .padding(.horizontal, 12)
-                    .frame(height: 38)
-                    .background(Color.white.opacity(0.16))
+                    .padding(.horizontal, 10)
+                    .frame(height: 34)
+                    .background(Color.white.opacity(0.18))
                     .clipShape(Capsule())
                 }
                 .disabled(refreshing)
             }
             .padding(.horizontal, 12)
         }
-        .frame(height: 96)
+        .frame(height: 62)
     }
 
     private var subTitle: String {
@@ -148,11 +154,17 @@ struct AjkBoardView: View {
 
     private var overviewCard: some View {
         let o = store.overview
-        return HStack(spacing: 0) {
-            statItem(value: "\(o.todayClickTotal)", label: "今日点击")
-            statItem(value: "\(o.promotedCount)", label: "推广房源")
-            statItem(value: "\(o.portCount)", label: "剩余端口")
-            statItem(value: "\(o.packageDays)", label: "套餐剩余(天)")
+        return VStack(spacing: 10) {
+            HStack(spacing: 0) {
+                statItem(value: "\(o.todayClickTotal)", label: "今日点击")
+                statItem(value: "\(o.promotedCount)", label: "推广房源")
+                statItem(value: "\(o.portCount)", label: "剩余端口")
+            }
+            HStack(spacing: 0) {
+                statItem(value: "\(o.packageDays)", label: "套餐剩余(天)")
+                statItem(value: "\(o.score)", label: "神奇分")
+                statItem(value: "\(o.coin)", label: "房产币")
+            }
         }
         .padding(.vertical, 14)
         .background(Color.themePanel)
@@ -318,7 +330,7 @@ struct AjkBoardView: View {
                     .padding(.top, 30)
             } else {
                 ForEach(list) { house in
-                    AjkHouseCard(house: house, settings: store.settings, delta: store.clickDelta(house: house))
+                    AjkHouseCard(house: house, settings: store.settings)
                 }
                 .padding(.horizontal)
             }
@@ -395,104 +407,104 @@ enum AjkSortMode: String, CaseIterable {
 struct AjkHouseCard: View {
     let house: AjkHouse
     let settings: AjkSettings
-    let delta: Int
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .top, spacing: 6) {
-                Text(house.title.isEmpty ? "（无标题）" : house.title)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(.themeText)
-                    .lineLimit(2)
-                Spacer()
-                if !house.quality.isEmpty {
-                    tag(house.quality, color: house.quality == "高" ? .themeAccentDark : .themeAmber)
+        // v1.90：封面图（本地已下载才显示；无封面走占位）
+        let coverPath = AjkStore.shared.coverLocalPath(for: house.number)
+        return HStack(alignment: .top, spacing: 10) {
+            if let cp = coverPath, let img = UIImage(contentsOfFile: cp) {
+                Image(uiImage: img)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: 62, height: 62)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.themeBorder, lineWidth: 1))
+            } else {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(Color.themeBorder.opacity(0.25))
+                        .frame(width: 62, height: 62)
+                    Image(systemName: "house")
+                        .font(.system(size: 20))
+                        .foregroundColor(.themeText3)
                 }
             }
-            Text("\(house.community) · \(house.area) \(house.layout) \(house.floor) \(house.price)")
-                .font(.system(size: 12))
-                .foregroundColor(.themeText2)
-                .lineLimit(1)
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .top, spacing: 6) {
+                    Text(house.title.isEmpty ? "（无标题）" : house.title)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.themeText)
+                        .lineLimit(2)
+                    Spacer()
+                    if !house.quality.isEmpty {
+                        tag(house.quality, color: house.quality == "高" ? .themeAccentDark : .themeAmber)
+                    }
+                }
+                Text("\(house.community) · \(house.area) \(house.layout) \(house.floor) \(house.price)")
+                    .font(.system(size: 12))
+                    .foregroundColor(.themeText2)
+                    .lineLimit(1)
 
-            HStack(spacing: 10) {
-                Text("编号 \(house.number)")
-                    .font(.system(size: 11))
-                    .foregroundColor(.themeText3)
-                Spacer()
-                if house.houseStateDays >= settings.inspectThreshold {
-                    Text("房态\(house.houseStateDays)天·需核验")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundColor(.red)
-                } else {
-                    Text("房态\(house.houseStateDays)天")
+                HStack(spacing: 10) {
+                    Text("编号 \(house.number)")
                         .font(.system(size: 11))
                         .foregroundColor(.themeText3)
+                    Spacer()
+                    if house.houseStateDays >= settings.inspectThreshold {
+                        Text("房态\(house.houseStateDays)天·需核验")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundColor(.red)
+                    } else {
+                        Text("房态\(house.houseStateDays)天")
+                            .font(.system(size: 11))
+                            .foregroundColor(.themeText3)
+                    }
+                    if house.editedDays >= settings.removalThreshold {
+                        Text("已编辑\(house.editedDays)天·将下架")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundColor(.red)
+                    } else {
+                        Text("已编辑\(house.editedDays)天")
+                            .font(.system(size: 11))
+                            .foregroundColor(.themeText3)
+                    }
                 }
-                if house.editedDays >= settings.removalThreshold {
-                    Text("已编辑\(house.editedDays)天·将下架")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundColor(.red)
-                } else {
-                    Text("已编辑\(house.editedDays)天")
-                        .font(.system(size: 11))
-                        .foregroundColor(.themeText3)
-                }
-            }
 
-            HStack(spacing: 10) {
-                // 点击量：左今日 / 右累计
-                HStack(spacing: 3) {
-                    Text("\(house.todayClick)")
-                        .font(.system(size: 15, weight: .bold))
-                        .foregroundColor(.themeAccentDark)
-                    Text("/")
-                        .font(.system(size: 12))
-                        .foregroundColor(.themeText3)
-                    Text("\(house.totalClick)")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundColor(.themeText2)
+                // v1.90：不再显示 xx/xx（今日/累计点击行）——用户要求删除；只保留平台与维护人
+                HStack(spacing: 10) {
+                    ForEach(house.platforms, id: \.self) { p in
+                        Text(p)
+                            .font(.system(size: 10))
+                            .foregroundColor(.themeBlue)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.themeBlue.opacity(0.1))
+                            .clipShape(Capsule())
+                    }
+                    if !house.maintainer.isEmpty {
+                        Text(house.maintainer)
+                            .font(.system(size: 10))
+                            .foregroundColor(.themeAmber)
+                    }
                 }
-                if delta > 0 {
-                    Text("较上次 +\(delta)")
-                        .font(.system(size: 10))
-                        .foregroundColor(.themeAccentDark)
-                } else if delta < 0 {
-                    Text("较上次 \(delta)")
-                        .font(.system(size: 10))
-                        .foregroundColor(.red)
-                }
-                Spacer()
-                ForEach(house.platforms, id: \.self) { p in
-                    Text(p)
-                        .font(.system(size: 10))
-                        .foregroundColor(.themeBlue)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(Color.themeBlue.opacity(0.1))
-                        .clipShape(Capsule())
-                }
-                if !house.maintainer.isEmpty {
-                    Text(house.maintainer)
-                        .font(.system(size: 10))
-                        .foregroundColor(.themeAmber)
-                }
-            }
 
-            HStack(spacing: 10) {
-                if !house.verified.isEmpty {
-                    Text(house.verified)
-                        .font(.system(size: 10))
-                        .foregroundColor(.themeText2)
-                }
-                if !house.video.isEmpty {
-                    Text(house.video)
-                        .font(.system(size: 10))
-                        .foregroundColor(.themeText2)
-                }
-                if !house.promotions.isEmpty {
-                    Text(house.promotions.joined(separator: "·"))
-                        .font(.system(size: 10))
-                        .foregroundColor(.themeText3)
+                HStack(spacing: 10) {
+                    if !house.verified.isEmpty {
+                        Text(house.verified)
+                            .font(.system(size: 10))
+                            .foregroundColor(.themeText2)
+                    }
+                    if !house.video.isEmpty {
+                        Text(house.video)
+                            .font(.system(size: 10))
+                            .foregroundColor(.themeText2)
+                    }
+                    // 推广状态（点击量下方，v1.90 明确提取）
+                    if !house.promotions.isEmpty {
+                        Text(house.promotions.joined(separator: "·"))
+                            .font(.system(size: 10))
+                            .foregroundColor(.themeText3)
+                    }
                 }
             }
         }
@@ -523,33 +535,36 @@ struct AjkLoginView: View {
     var body: some View {
         VStack(spacing: 0) {
             ZStack {
-                // v1.89：登录页顶栏与主页面统一为安居客品牌蓝渐变
-                LinearGradient(colors: [Color(hex: "3E7BFA"), Color(hex: "2B5BD7")], startPoint: .top, endPoint: .bottom)
+                // v1.90：登录页顶栏与 AI/电表统一（深绿渐变 + 白色按钮），同步缩窄
+                LinearGradient(colors: [.themeAccentDark, .themeAccent], startPoint: .top, endPoint: .bottom)
                     .ignoresSafeArea(edges: .top)
                 HStack(spacing: 8) {
                     Button {
                         dismiss()
                     } label: {
                         Image(systemName: "xmark")
-                            .font(.system(size: 15, weight: .semibold))
-                            .frame(width: 34, height: 34)
-                            .background(Color.white.opacity(0.14))
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(.white)
+                            .frame(width: 32, height: 32)
+                            .background(Color.white.opacity(0.16))
                             .clipShape(RoundedRectangle(cornerRadius: 9))
                     }
-                    VStack(alignment: .leading, spacing: 1) {
+                    VStack(alignment: .leading, spacing: 0) {
                         Text("登录安居客后台")
-                            .font(.system(size: 16, weight: .bold))
+                            .font(.system(size: 15, weight: .bold))
+                            .foregroundColor(.white)
                         Text("账号/扫码登录后，返回点「读取」即可抓取数据")
-                            .font(.system(size: 10.5))
-                            .opacity(0.75)
+                            .font(.system(size: 10))
+                            .foregroundColor(.white.opacity(0.8))
                     }
                     Spacer()
                     Button("完成") { dismiss() }
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(.white)
                 }
                 .padding(.horizontal, 12)
             }
-            .frame(height: 88)
+            .frame(height: 62)
             AjkLoginWebView(url: URL(string: AjkStore.shared.settings.baseURL) ?? URL(string: "https://vip.anjuke.com/zufang/main/zufang/subpages/allHouse")!)
         }
         .navigationBarHidden(true)

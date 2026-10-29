@@ -83,28 +83,37 @@ final class AjkWebViewProvider: NSObject, WKNavigationDelegate {
           }
           // 收集概览文本
           var bodyText = norm(document.body.innerText || document.body.textContent);
-          // 收集房源卡片：找到含"编号:"的文本节点，向上定位到含"预约管理"的容器
-          var cards = [];
-          var seen = new Set();
-          var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-          while (walker.nextNode()) {
-            var n = walker.currentNode;
-            if (n.nodeValue && n.nodeValue.indexOf('编号:') >= 0) {
-              var el = n.parentElement;
-              var guard = 0;
-              while (el && guard < 8) {
-                var t = el.innerText || '';
-                if (t.indexOf('预约管理') >= 0 && t.indexOf('编号:') >= 0) { break; }
-                el = el.parentElement; guard++;
-              }
-              if (!el) continue;
-              var m = t.match(/编号:(\\d+)/);
-              if (m && !seen.has(m[1])) {
-                seen.add(m[1]);
-                cards.push(norm(t));
+          // 收集房源卡片：找到含"编号:"的文本节点，向上定位到含"预约管理"的容器；
+          // v1.90：同时抓取卡片内第一张封面图 URL（缩略图，作为房源封面）
+          function collectCards(seenSet) {
+            var out = [];
+            var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+            while (walker.nextNode()) {
+              var n = walker.currentNode;
+              if (n.nodeValue && n.nodeValue.indexOf('编号:') >= 0) {
+                var el = n.parentElement;
+                var guard = 0;
+                var t = '';
+                while (el && guard < 8) {
+                  t = el.innerText || '';
+                  if (t.indexOf('预约管理') >= 0 && t.indexOf('编号:') >= 0) { break; }
+                  el = el.parentElement; guard++;
+                }
+                if (!el) continue;
+                var m = t.match(/编号:(\\d+)/);
+                if (m && !seenSet.has(m[1])) {
+                  seenSet.add(m[1]);
+                  var cover = '';
+                  var img = el.querySelector('img');
+                  if (img) { cover = img.getAttribute('src') || img.getAttribute('data-src') || ''; }
+                  out.push({t: norm(t), cover: cover});
+                }
               }
             }
+            return out;
           }
+          var seen = new Set();
+          var cards = collectCards(seen);
           var out = {type:'page', overview: bodyText, cards: cards, page: 1};
           window.webkit.messageHandlers.ajkScrape.postMessage(JSON.stringify(out));
           // 自动翻页：点"下一页"直到没有或达到上限
@@ -123,27 +132,7 @@ final class AjkWebViewProvider: NSObject, WKNavigationDelegate {
             next.click();
             await sleep(2500);
             // 收集新一页
-            var cards2 = [];
-            var seen2 = new Set();
-            var walker2 = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-            while (walker2.nextNode()) {
-              var n2 = walker2.currentNode;
-              if (n2.nodeValue && n2.nodeValue.indexOf('编号:') >= 0) {
-                var el2 = n2.parentElement;
-                var guard2 = 0;
-                while (el2 && guard2 < 8) {
-                  var t2 = el2.innerText || '';
-                  if (t2.indexOf('预约管理') >= 0 && t2.indexOf('编号:') >= 0) { break; }
-                  el2 = el2.parentElement; guard2++;
-                }
-                if (!el2) continue;
-                var m2 = t2.match(/编号:(\\d+)/);
-                if (m2 && !seen2.has(m2[1]) && !seen.has(m2[1])) {
-                  seen2.add(m2[1]); seen.add(m2[1]);
-                  cards2.push(norm(t2));
-                }
-              }
-            }
+            var cards2 = collectCards(seen);
             page = p + 1;
             window.webkit.messageHandlers.ajkScrape.postMessage(JSON.stringify({type:'page', overview: bodyText, cards: cards2, page: page}));
             if (cards2.length === 0) break;
@@ -182,9 +171,25 @@ extension AjkWebViewProvider: WKScriptMessageHandler {
 
         if type == "page" {
             let overview = (dict["overview"] as? String) ?? ""
-            let cards = (dict["cards"] as? [String]) ?? []
             let page = (dict["page"] as? Int) ?? 1
-            let parsed = AjkParser.parse(overview: overview, cards: cards, page: page)
+            // v1.90：卡片元素为 {t, cover} 对象；兼容旧版纯文本数组
+            var cardTexts: [String] = []
+            var covers: [String: String] = [:]   // number -> coverURL
+            if let objs = dict["cards"] as? [[String: Any]] {
+                for obj in objs {
+                    let t = (obj["t"] as? String) ?? ""
+                    let cover = (obj["cover"] as? String) ?? ""
+                    if t.isEmpty { continue }
+                    if let m = t.range(of: #"编号:(\d+)"#, options: .regularExpression) {
+                        let num = String(t[m]).replacingOccurrences(of: "编号:", with: "")
+                        if !cover.isEmpty { covers[num] = cover }
+                    }
+                    cardTexts.append(t)
+                }
+            } else if let strs = dict["cards"] as? [String] {
+                cardTexts = strs
+            }
+            let parsed = AjkParser.parse(overview: overview, cards: cardTexts, covers: covers, page: page)
             if !parsed.houses.isEmpty {
                 pendingHouses += parsed.houses
                 pendingOverview = parsed.overview

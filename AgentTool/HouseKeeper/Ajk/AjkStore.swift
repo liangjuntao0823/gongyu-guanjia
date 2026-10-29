@@ -84,6 +84,9 @@ final class AjkStore: ObservableObject {
         self.lastFetch = Date()
         saveHouses()
 
+        // v1.90：后台下载封面图（Documents/Ajk/Covers/<number>.jpg，失败静默，不阻塞主流程）
+        downloadCovers()
+
         // 快照留存（点击趋势对比）：保留最近 30 次
         if settings.saveSnapshots {
             let snap = AjkSnapshot(timestamp: Date(), count: houses.count, totalTodayClick: overview.todayClickTotal, houses: houses)
@@ -91,6 +94,46 @@ final class AjkStore: ObservableObject {
             if snapshots.count > 30 { snapshots.removeFirst(snapshots.count - 30) }
             saveSnapshots()
         }
+    }
+
+    // MARK: - 封面图（v1.90）
+
+    /// 封面图本地目录
+    static var coversDirectory: URL {
+        let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Ajk", isDirectory: true)
+            .appendingPathComponent("Covers", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    /// 封面本地文件 URL（按编号）
+    static func coverFileURL(for number: String) -> URL {
+        coversDirectory.appendingPathComponent("\(number).jpg")
+    }
+
+    /// 后台串行下载全部缺失封面；下载完成后触发 UI 刷新（封面显示只看本地文件是否存在）
+    private func downloadCovers() {
+        let toDownload = houses.filter { !($0.coverURL ?? "").isEmpty && !FileManager.default.fileExists(atPath: Self.coverFileURL(for: $0.number).path) }
+        guard !toDownload.isEmpty else { return }
+        Task.detached {
+            for house in toDownload {
+                guard let url = URL(string: house.coverURL ?? "") else { continue }
+                do {
+                    let (data, _) = try await URLSession.shared.data(from: url)
+                    try data.write(to: Self.coverFileURL(for: house.number), options: .atomic)
+                    await MainActor.run { self.objectWillChange.send() }
+                } catch {
+                    // 单张失败不重试（可能是防盗链/临时网络），保持无封面占位
+                }
+            }
+        }
+    }
+
+    /// 编号的封面本地路径（存在才返回，供列表显示）
+    func coverLocalPath(for number: String) -> String? {
+        let url = Self.coverFileURL(for: number)
+        return FileManager.default.fileExists(atPath: url.path) ? url.path : nil
     }
 
     /// 与最近一次快照对比今日点击增量（用于分析文案）

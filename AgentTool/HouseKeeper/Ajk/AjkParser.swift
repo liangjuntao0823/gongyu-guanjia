@@ -10,9 +10,14 @@ enum AjkParser {
 
     /// 解析一页卡片文本 + 概览文本
     static func parse(overview: String, cards: [String], page: Int) -> (houses: [AjkHouse], overview: AjkOverview) {
+        parse(overview: overview, cards: cards, covers: [:], page: page)
+    }
+
+    /// 解析一页卡片文本 + 封面 URL 表 + 概览文本
+    static func parse(overview: String, cards: [String], covers: [String: String], page: Int) -> (houses: [AjkHouse], overview: AjkOverview) {
         var houses: [AjkHouse] = []
         for card in cards {
-            if let h = parseCard(card, page: page) {
+            if let h = parseCard(card, covers: covers, page: page) {
                 houses.append(h)
             }
         }
@@ -25,6 +30,10 @@ enum AjkParser {
     // MARK: - 单卡解析
 
     static func parseCard(_ text: String, page: Int) -> AjkHouse? {
+        parseCard(text, covers: [:], page: page)
+    }
+
+    static func parseCard(_ text: String, covers: [String: String], page: Int) -> AjkHouse? {
         guard let numMatch = text.range(of: #"编号:(\d+)"#, options: .regularExpression) else { return nil }
         let number = String(text[numMatch]).replacingOccurrences(of: "编号:", with: "")
 
@@ -126,7 +135,8 @@ enum AjkParser {
                         layout: layout, floor: floor, price: price, unifiedPrice: unified,
                         todayClick: today, totalClick: total, editedDays: edited, houseStateDays: stateDays,
                         platforms: platforms, promotions: promotions, verified: verified,
-                        maintainer: maintainer, video: video, quality: quality, page: page)
+                        maintainer: maintainer, video: video, quality: quality, page: page,
+                        coverURL: covers[number], coverPath: nil)
     }
 
     /// 去掉前缀标签，返回标题文本
@@ -150,7 +160,9 @@ enum AjkParser {
         if let m = firstInt(text, pattern: #"(\d+)\s*套\s*推广房源"#) { o.promotedCount = m }
         if let m = firstInt(text, pattern: #"(\d+)\s*个\s*剩余端口"#) { o.portCount = m }
         if let m = firstInt(text, pattern: #"套餐剩余(\d+)天"#) { o.packageDays = m }
-        if let m = firstInt(text, pattern: #"神奇分[:：]?\s*(\d+)分"#) { o.score = m }
+        // v1.90：神奇分放宽（页面可能是「神奇分96分」「神奇分:96」「神奇分 96」），新增房产币
+        if let m = firstInt(text, pattern: #"神奇分[:：]?\s*(\d+)"#) { o.score = m }
+        if let m = firstInt(text, pattern: #"房产币[:：]?\s*(\d+)"#) { o.coin = m }
         if let m = firstInt(text, pattern: #"全城排名[:：]?\s*(\d+)"#) { o.cityRank = m }
         if let m = firstInt(text, pattern: #"共找到\s*(\d+)\s*套房源"#) { o.totalHouses = m }
         return o
