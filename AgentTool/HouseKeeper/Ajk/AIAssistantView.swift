@@ -156,7 +156,8 @@ struct AIAssistantView: View {
                                     .frame(width: 52, height: 52)
                                     .clipShape(RoundedRectangle(cornerRadius: 9))
                                 Button {
-                                    pendingImages.remove(at: idx)
+                                    // v1.89：防快速连点导致数组越界闪退
+                                    if idx < pendingImages.count { pendingImages.remove(at: idx) }
                                 } label: {
                                     Image(systemName: "xmark.circle.fill")
                                         .font(.system(size: 15))
@@ -227,8 +228,8 @@ struct AIAssistantView: View {
 
     private var navBar: some View {
         ZStack {
-            // v1.88：浅色顶栏（按钮深色高对比），高度收窄为标准栏
-            Color.themePanel
+            // v1.89：顶栏改深绿渐变（与 App 主题一致），白色高对比按钮，与白色聊天区明显区分
+            LinearGradient(colors: [.themeAccentDark, .themeAccent], startPoint: .top, endPoint: .bottom)
                 .ignoresSafeArea(edges: .top)
             HStack(spacing: 8) {
                 Button {
@@ -236,18 +237,18 @@ struct AIAssistantView: View {
                 } label: {
                     Image(systemName: "chevron.left")
                         .font(.system(size: 16, weight: .semibold))
-                        .foregroundColor(.themeText)
+                        .foregroundColor(.white)
                         .frame(width: 32, height: 32)
-                        .background(Color.themeBorder.opacity(0.5))
+                        .background(Color.white.opacity(0.16))
                         .clipShape(Circle())
                 }
                 VStack(alignment: .leading, spacing: 0) {
                     Text("AI 助手")
                         .font(.system(size: 16, weight: .bold))
-                        .foregroundColor(.themeText)
+                        .foregroundColor(.white)
                     Text(modelLabel)
                         .font(.system(size: 9.5))
-                        .foregroundColor(.themeText3)
+                        .foregroundColor(.white.opacity(0.8))
                         .lineLimit(1)
                 }
                 Spacer()
@@ -258,9 +259,9 @@ struct AIAssistantView: View {
                     } label: {
                         Image(systemName: "trash")
                             .font(.system(size: 14))
-                            .foregroundColor(.themeText)
+                            .foregroundColor(.white)
                             .frame(width: 32, height: 32)
-                            .background(Color.themeBorder.opacity(0.5))
+                            .background(Color.white.opacity(0.16))
                             .clipShape(Circle())
                     }
                 }
@@ -269,9 +270,9 @@ struct AIAssistantView: View {
                 } label: {
                     Image(systemName: "gearshape.fill")
                         .font(.system(size: 15))
-                        .foregroundColor(.themeText)
+                        .foregroundColor(.white)
                         .frame(width: 32, height: 32)
-                        .background(Color.themeBorder.opacity(0.5))
+                        .background(Color.white.opacity(0.16))
                         .clipShape(Circle())
                 }
             }
@@ -441,7 +442,8 @@ struct AIAssistantView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
-        .background(Color.themePanel.opacity(0.95))
+        // v1.89：背景延伸到屏幕底部安全区，输入栏整体下移贴底
+        .background(Color.themePanel.opacity(0.95).ignoresSafeArea(edges: .bottom))
     }
 
     // MARK: - 发送
@@ -635,7 +637,23 @@ struct AIAssistantSettingsView: View {
 
     /// 火山方舟完整模型 ID（正确 ID；旧版短名 Seed-2.1-turbo 会在进入时自动迁移）
     static let defaultModel = "doubao-seed-2-1-turbo-260628"
-    static let modelOptions = ["doubao-seed-2-1-turbo-260628", "doubao-seed-2-1-lite-260915", "doubao-seed-evolving"]
+    /// v1.89：本地内置已开通模型（含说明）；云端 RemoteConfig.aiModels 抓取的账号全部模型会合并进来
+    static let builtinModels: [RemoteConfig.AIModelInfo] = [
+        RemoteConfig.AIModelInfo(modelID: "doubao-seed-2-1-turbo-260628", name: "Doubao-Seed-2.1-turbo",
+                                desc: "效果与成本均衡的日常首选：对话、编程、智能体、多模态全面均衡，响应快，适合日常问答与多轮对话"),
+        RemoteConfig.AIModelInfo(modelID: "doubao-seed-2-1-lite-260915", name: "Doubao-Seed-2.1-lite",
+                                desc: "轻量快速版：响应更快、成本更低，支持 1M 超长上下文，适合简单问答与长文本处理"),
+        RemoteConfig.AIModelInfo(modelID: "doubao-seed-evolving", name: "Doubao-Seed-Evolving",
+                                desc: "深度思考增强版：先思考再回答，Agent 执行与多模态理解更强，适合复杂分析类问题")
+    ]
+    /// 内置 + 云端扩展（去重合并）
+    static var allModels: [RemoteConfig.AIModelInfo] {
+        var list = builtinModels
+        for m in RemoteConfig.aiModels where !list.contains(where: { $0.modelID == m.modelID }) {
+            list.append(m)
+        }
+        return list
+    }
     /// 旧版本写错的短模型名（不含 doubao- 前缀，API 会 404），进入设置时自动迁移
     static let legacyModels = ["Seed-2.1-turbo", "Seed-2.1-pro", "Seed-2.1-lite", "DeepSeek-V4-flash"]
     static let defaultSystemPrompt = "你是「公寓管家」的 AI 助手。用户是佛山顺德的二房东/房产从业者，管理米兰公馆的多套出租房源。回答要简洁、口语化、中文优先；涉及数据时先给结论再给依据；涉及金额要精确到分。你只能基于用户 App 里的数据和我提供的信息回答，不要编造数据。"
@@ -669,8 +687,8 @@ struct AIAssistantSettingsView: View {
 
             Section("模型") {
                 Picker("对话模型", selection: $model) {
-                    ForEach(Self.modelOptions, id: \.self) { m in
-                        Text(m).tag(m)
+                    ForEach(Self.allModels, id: \.modelID) { m in
+                        Text(m.modelID).tag(m.modelID)
                     }
                     Text("自定义（填下方 ID）").tag("custom")
                 }
@@ -680,6 +698,18 @@ struct AIAssistantSettingsView: View {
                 Text("输入即保存；保存过自定义 ID 后再次进入会自动回填显示")
                     .font(.system(size: 11))
                     .foregroundColor(.themeText3)
+                // v1.89：当前模型的说明介绍
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("模型说明")
+                        .font(.system(size: 12, weight: .semibold))
+                    Text(currentModelDesc)
+                        .font(.system(size: 11.5))
+                        .foregroundColor(.themeText2)
+                }
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.themeBorder.opacity(0.35))
+                .cornerRadius(8)
             }
 
             Section("接口端点") {
@@ -719,7 +749,7 @@ struct AIAssistantSettingsView: View {
         }
         .onChange(of: model) { newModel in
             guard newModel != "custom" else { return }
-            if Self.modelOptions.contains(newModel) {
+            if Self.allModels.contains(where: { $0.modelID == newModel }) {
                 storedModel = newModel
                 if !modelCustom.isEmpty { modelCustom = "" }
             }
@@ -743,6 +773,17 @@ struct AIAssistantSettingsView: View {
         }
     }
 
+    /// v1.89：当前选中模型的说明（内置/云端合并列表中查找）
+    private var currentModelDesc: String {
+        if model == "custom" && !modelCustom.isEmpty {
+            return "自定义模型：请填写火山方舟已开通模型的完整 ID（如 doubao- 开头）；ID 写错会返回 InvalidEndpointOrModel.NotFound"
+        }
+        if let m = Self.allModels.first(where: { $0.modelID == model }) {
+            return "\(m.name)｜\(m.desc)"
+        }
+        return "请选择上方模型查看说明"
+    }
+
     private func loadFromStorage() {
         apiKey = KeychainHelper.load(key: "ai.volcengine.apiKey") ?? ""
         let saved = UserDefaults.standard.string(forKey: "ai.modelName") ?? Self.defaultModel
@@ -751,7 +792,7 @@ struct AIAssistantSettingsView: View {
             storedModel = Self.defaultModel
             model = Self.defaultModel
             modelCustom = ""
-        } else if Self.modelOptions.contains(saved) {
+        } else if Self.allModels.contains(where: { $0.modelID == saved }) {
             model = saved
             modelCustom = ""
         } else {

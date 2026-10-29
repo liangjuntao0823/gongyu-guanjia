@@ -150,6 +150,7 @@ final class AjkWebViewProvider: NSObject, WKNavigationDelegate {
           }
           window.webkit.messageHandlers.ajkScrape.postMessage(JSON.stringify({type:'done', total: seen.size, error:''}));
         })();
+        void 0;
         """
         webView.evaluateJavaScript(js) { _, error in
             if let error = error {

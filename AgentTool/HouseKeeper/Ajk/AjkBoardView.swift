@@ -72,7 +72,8 @@ struct AjkBoardView: View {
 
     private var navBar: some View {
         ZStack {
-            LinearGradient(colors: [.themeAccentDark, .themeAccent], startPoint: .top, endPoint: .bottom)
+            // v1.89：顶栏改为安居客品牌蓝渐变（原深绿与页面品牌感不符）
+            LinearGradient(colors: [Color(hex: "3E7BFA"), Color(hex: "2B5BD7")], startPoint: .top, endPoint: .bottom)
                 .ignoresSafeArea(edges: .top)
             HStack(spacing: 8) {
                 Button {
@@ -522,7 +523,8 @@ struct AjkLoginView: View {
     var body: some View {
         VStack(spacing: 0) {
             ZStack {
-                LinearGradient(colors: [.themeAccentDark, .themeAccent], startPoint: .top, endPoint: .bottom)
+                // v1.89：登录页顶栏与主页面统一为安居客品牌蓝渐变
+                LinearGradient(colors: [Color(hex: "3E7BFA"), Color(hex: "2B5BD7")], startPoint: .top, endPoint: .bottom)
                     .ignoresSafeArea(edges: .top)
                 HStack(spacing: 8) {
                     Button {

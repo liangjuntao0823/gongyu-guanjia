@@ -16,6 +16,9 @@ struct RemoteConfigAdminView: View {
     @State private var newCLDate = ""
     @State private var newCLChanges = ""
 
+    /// v1.89：AI 模型清单（JSON 文本编辑）
+    @State private var aiModelsJSON = ""
+
     var body: some View {
         Form {
             // ── 顶部：状态 + 操作 ──
@@ -204,6 +207,20 @@ struct RemoteConfigAdminView: View {
                 Label("帮助说明（设置页长文案）", systemImage: "questionmark.circle")
             }
 
+            // ── AI 模型清单（v1.89）──
+            Section {
+                TextEditor(text: $aiModelsJSON)
+                    .font(.system(size: 12, design: .monospaced))
+                    .frame(minHeight: 120)
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.secondary.opacity(0.3), lineWidth: 1))
+                Text("格式：[{\"modelID\":\"doubao-…\",\"name\":\"模型名\",\"desc\":\"说明\"}]；保存时自动校验，非法 JSON 不生效")
+                    .font(.caption2).foregroundStyle(.secondary)
+            } header: {
+                Label("AI 模型清单（设置页模型下拉扩展）", systemImage: "brain")
+            } footer: {
+                Text("App 内置默认 3 个模型；这里追加账号下已开通的其他模型，App 设置页会自动合并显示并附说明。")
+            }
+
             // ── 版本更新记录 ──
             Section {
                 let list = Binding<[RemoteConfig.ChangelogEntry]>(
@@ -287,8 +304,14 @@ struct RemoteConfigAdminView: View {
                 }
                 if let fetched = obj.config {
                     config = fetched
+                    if let list = fetched.aiModels, let data = try? JSONEncoder().encode(list) {
+                        aiModelsJSON = String(data: data, encoding: .utf8) ?? ""
+                    } else {
+                        aiModelsJSON = ""
+                    }
                 } else {
                     config = Self.defaultTemplate()
+                    aiModelsJSON = ""
                 }
                 loaded = true
                 statusText = "已加载云端配置 v\(config.version)"
@@ -301,6 +324,18 @@ struct RemoteConfigAdminView: View {
     private func saveConfig() {
         saving = true
         statusText = ""
+        // v1.89：解析 AI 模型清单（非法 JSON 则忽略并提示，不阻断其他配置保存）
+        let trimmed = aiModelsJSON.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            config.aiModels = nil
+        } else if let data = trimmed.data(using: .utf8),
+                  let list = try? JSONDecoder().decode([RemoteConfig.AIModelInfo].self, from: data) {
+            config.aiModels = list
+        } else {
+            saving = false
+            statusText = "AI 模型清单 JSON 格式无效，请检查后重试"
+            return
+        }
         config.version = (config.version > 0 ? config.version : 0) + 1
         var body = config
         body.updatedBy = CloudUser.username

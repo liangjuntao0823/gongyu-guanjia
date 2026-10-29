@@ -11,6 +11,13 @@ enum RemoteConfig {
         var text: String
         var link: String?
     }
+    /// v1.89：AI 模型清单（云端扩展，登录火山方舟抓取账号已开通模型后由后台写入；与本地内置合并展示）
+    struct AIModelInfo: Codable, Identifiable, Hashable {
+        var id: String { modelID }
+        var modelID: String
+        var name: String
+        var desc: String
+    }
     struct ChangelogEntry: Codable, Identifiable {
         var id: String { version + (date ?? "") }
         var version: String
@@ -28,6 +35,7 @@ enum RemoteConfig {
         var params: [String: Double] = [:]
         var helpTexts: [String: String] = [:]
         var changelog: [ChangelogEntry]?
+        var aiModels: [AIModelInfo]? = nil
     }
 
     private static var _current = Payload()
@@ -95,6 +103,8 @@ enum RemoteConfig {
         return v.isEmpty ? nil : v
     }
     static var changelog: [ChangelogEntry]? { _current.changelog }
+    /// 云端扩展的 AI 模型清单（可能为空；与 App 内置合并展示）
+    static var aiModels: [AIModelInfo] { _current.aiModels ?? [] }
 
     /// 配置概览（设置页显示：版本 + 更新时间）
     static var summary: String {
