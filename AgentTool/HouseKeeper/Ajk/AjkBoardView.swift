@@ -415,6 +415,17 @@ struct AjkHouseCard: View {
         // v1.91：显示裁剪——小区去掉「顺德-龙江，」前缀只留小区名；面积不显示；核验只显示「核验成功」
         let communityShort = house.community.components(separatedBy: "，").last ?? house.community
         let verifiedShort = house.verified.components(separatedBy: "·").last ?? house.verified
+        // v1.91：推广合并显示——58与安居客推广同步，只显示最高推广类型（精选 > 普通推广）
+        let promoDisplay: String = {
+            var types: [String] = []
+            for g in house.promotions {
+                let parts = g.components(separatedBy: "·")
+                if parts.count >= 2 { types.append(contentsOf: parts.dropFirst()) }
+            }
+            if types.contains("精选") { return "精选" }
+            if types.contains("普通推广") { return "普通推广" }
+            return types.first ?? ""
+        }()
         return HStack(alignment: .top, spacing: 10) {
             if let cp = coverPath, let img = UIImage(contentsOfFile: cp) {
                 Image(uiImage: img)
@@ -524,12 +535,11 @@ struct AjkHouseCard: View {
                             .font(.system(size: 10))
                             .foregroundColor(.themeText2)
                     }
-                    // 推广状态（v1.91：点击量左侧「平台+推广类型」精确数据，按平台组展示）
-                    if !house.promotions.isEmpty {
-                        Text(house.promotions.joined(separator: "  "))
+                    // 推广状态（v1.91：精确数据合并显示——58与安居客同步，精选 > 普通推广）
+                    if !promoDisplay.isEmpty {
+                        Text(promoDisplay)
                             .font(.system(size: 10))
                             .foregroundColor(.themeText3)
-                            .lineLimit(1)
                     }
                 }
             }
