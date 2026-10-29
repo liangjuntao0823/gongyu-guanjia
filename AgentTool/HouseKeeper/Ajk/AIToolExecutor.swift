@@ -975,6 +975,9 @@ struct AIToolExecutor {
     private func exportData(_ a: [String: Any]) -> String {
         let dataType = s(a, "data_type")
         guard dataType != "" else { return "缺少 data_type（meters/ajk/houses/overdue/rent_summary/misc）" }
+        guard let mc = modelContext, let hc = houseModelContext else {
+            return "数据容器不可用，请重新打开 AI 助手"
+        }
         var header: [String] = []
         var rows: [[String]] = []
         let stamp = Self.stampFormatter.string(from: Date())
@@ -1001,7 +1004,7 @@ struct AIToolExecutor {
         case "houses":
             prefix = "房源列表"
             header = ["座", "房号", "户型", "租金(元)", "房东", "状态", "备注"]
-            let houses = (try? houseModelContext.fetch(FetchDescriptor<House>())) ?? []
+            let houses = (try? hc.fetch(FetchDescriptor<House>())) ?? []
             let active = houses.filter { !($0.isDeleted ?? false) }.sorted { $0.roomNo < $1.roomNo }
             for h in active {
                 rows.append([h.tower, h.roomNo, h.layout, "\(h.price)", h.landlord,
@@ -1010,7 +1013,7 @@ struct AIToolExecutor {
         case "overdue":
             prefix = "欠租清单"
             header = ["房号", "欠租月份", "租金(元)", "房东"]
-            let props = (try? modelContext.fetch(FetchDescriptor<Property>())) ?? []
+            let props = (try? mc.fetch(FetchDescriptor<Property>())) ?? []
             let now = Date()
             let cal = Calendar.current
             let cy = cal.component(.year, from: now)
@@ -1037,20 +1040,20 @@ struct AIToolExecutor {
             let year = i(a, "year") ?? Calendar.current.component(.year, from: Date())
             let month = i(a, "month") ?? Calendar.current.component(.month, from: Date())
             header = ["房号", "\(year)-\(month)租金(元)", "是否已收", "房东", "收款时间"]
-            let props = (try? modelContext.fetch(FetchDescriptor<Property>())) ?? []
+            let props = (try? mc.fetch(FetchDescriptor<Property>())) ?? []
             for prop in props where !prop.isDeleted {
                 let rec = prop.monthlyRentRecords.first(where: { $0.year == year && $0.month == month })
                 let amount = rec?.amount ?? prop.rent
                 rows.append([prop.roomNumber, "\(Int(amount))", rec?.isPaid == true ? "已收" : "未收",
-                             prop.landlord, rec?.paidDate ?? ""])
+                             prop.landlord, rec?.paidDate.map { Self.dayStr($0) } ?? ""])
             }
         case "misc":
             prefix = "本月杂项"
             let now = Date()
             let cal = Calendar.current
             header = ["类型", "日期", "金额(元)", "备注"]
-            let incs = (try? modelContext.fetch(FetchDescriptor<MiscIncome>(predicate: #Predicate { !$0.isDeleted }))) ?? []
-            let exps = (try? modelContext.fetch(FetchDescriptor<MiscExpense>(predicate: #Predicate { !$0.isDeleted }))) ?? []
+            let incs = (try? mc.fetch(FetchDescriptor<MiscIncome>(predicate: #Predicate { !$0.isDeleted }))) ?? []
+            let exps = (try? mc.fetch(FetchDescriptor<MiscExpense>(predicate: #Predicate { !$0.isDeleted }))) ?? []
             for inc in incs where cal.isDate(inc.date, equalTo: now, toGranularity: .month) {
                 rows.append(["收入", Self.dayStr(inc.date), "\(Int(inc.amount))", inc.item + (inc.notes.isEmpty ? "" : "（\(inc.notes)）")])
             }
