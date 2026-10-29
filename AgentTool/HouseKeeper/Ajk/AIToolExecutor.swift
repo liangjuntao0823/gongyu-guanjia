@@ -20,14 +20,16 @@ struct AIToolExecutor {
 
     // MARK: - 工具 Schema（注册给火山方舟 function calling 用）
 
-    /// 六大工具的 JSON Schema（tools 参数）
+    /// 工具 Schema 列表（注册给火山方舟 function calling 用）
     static let toolSchemas: [[String: Any]] = [
         updatePropertySchema,
         recordFinanceSchema,
         manageTodoSchema,
         refreshDataSchema,
         manageMeterSchema,
-        queryReportSchema
+        queryReportSchema,
+        exportDataSchema,
+        webSearchSchema
     ]
 
     static let updatePropertySchema: [String: Any] = [
@@ -150,17 +152,54 @@ struct AIToolExecutor {
         "type": "function",
         "function": [
             "name": "query_report",
-            "description": "查询/报表域通用工具：欠租清单、租约到期提醒、收租汇总、水电结算文本。只读，不修改任何数据。",
+            "description": "查询/报表域通用工具：欠租清单、租约到期提醒、收租汇总、水电结算文本、生成收租账单文本。只读，不修改任何数据。",
             "parameters": [
                 "type": "object",
                 "properties": [
-                    "action_type": ["type": "string", "description": "overdue_list=未收租金清单；lease_expiry=租约即将到期清单；rent_summary=指定年月收租汇总；utility_settle=指定房号水电结算文本", "enum": ["overdue_list", "lease_expiry", "rent_summary", "utility_settle"]],
-                    "year": ["type": "integer", "description": "年份（rent_summary 用）"],
-                    "month": ["type": "integer", "description": "月份 1-12（rent_summary 用）"],
+                    "action_type": ["type": "string", "description": "overdue_list=未收租金清单；lease_expiry=租约即将到期清单；rent_summary=指定年月收租汇总；utility_settle=指定房号水电结算文本；generate_rent_bill=生成指定房号指定月份收租账单文本", "enum": ["overdue_list", "lease_expiry", "rent_summary", "utility_settle", "generate_rent_bill"]],
+                    "year": ["type": "integer", "description": "年份（rent_summary/generate_rent_bill 用，默认当前年）"],
+                    "month": ["type": "integer", "description": "月份 1-12（rent_summary/generate_rent_bill 用，默认当前月）"],
                     "days": ["type": "integer", "description": "lease_expiry 提前天数，默认 30"],
-                    "room_no": ["type": "string", "description": "utility_settle 房号"]
+                    "room_no": ["type": "string", "description": "utility_settle / generate_rent_bill 房号"],
+                    "no_extra": ["type": "boolean", "description": "generate_rent_bill 是否无附加费（true=账单注明无附加费；缺省=false）"]
                 ],
                 "required": ["action_type"]
+            ]
+        ]
+    ]
+
+    /// v1.97：导出/文件域工具——查询结果生成 CSV 保存到 App 沙盒根目录（Documents）
+    static let exportDataSchema: [String: Any] = [
+        "type": "function",
+        "function": [
+            "name": "export_data",
+            "description": "导出/文件域通用工具：把查询结果（电表余量、安居客房源、房源列表、欠租清单、收租汇总、本月杂项）生成 CSV 文件保存到 App 沙盒根目录（Documents），返回文件完整路径。只读+生成文件，不修改任何业务数据。",
+            "parameters": [
+                "type": "object",
+                "properties": [
+                    "action_type": ["type": "string", "description": "export_excel=导出CSV文件（Excel/WPS 可直接打开）", "enum": ["export_excel"]],
+                    "data_type": ["type": "string", "description": "meters=电表余量；ajk=安居客房源；houses=房源列表；overdue=欠租清单；rent_summary=收租汇总；misc=本月杂项收支", "enum": ["meters", "ajk", "houses", "overdue", "rent_summary", "misc"]],
+                    "year": ["type": "integer", "description": "年份（rent_summary 用，默认当前年）"],
+                    "month": ["type": "integer", "description": "月份 1-12（rent_summary 用，默认当前月）"]
+                ],
+                "required": ["action_type", "data_type"]
+            ]
+        ]
+    ]
+
+    /// v1.97：联网搜索工具——必应搜索公开资料，返回标题/链接/摘要
+    static let webSearchSchema: [String: Any] = [
+        "type": "function",
+        "function": [
+            "name": "web_search",
+            "description": "联网搜索：用必应搜索指定关键词，返回前几条网页结果（标题+链接+摘要），供查询公开资料使用。只读。",
+            "parameters": [
+                "type": "object",
+                "properties": [
+                    "action_type": ["type": "string", "description": "search=执行搜索", "enum": ["search"]],
+                    "query": ["type": "string", "description": "搜索关键词，如 佛山租房政策 2026"]
+                ],
+                "required": ["action_type", "query"]
             ]
         ]
     ]
@@ -180,7 +219,7 @@ struct AIToolExecutor {
             return actionType == "create_quick_backup" || actionType == "create_full_backup"
         case "manage_meter":
             return true
-        case "query_report":
+        case "query_report", "export_data", "web_search":
             return false
         default:
             return false
@@ -276,8 +315,13 @@ struct AIToolExecutor {
             case "lease_expiry": return "查询租约即将到期清单"
             case "rent_summary": return "查询 \(a["year"] as? Int ?? 0)年\(a["month"] as? Int ?? 0)月收租汇总"
             case "utility_settle": return "生成 \(a["room_no"] as? String ?? "?") 水电结算文本"
+            case "generate_rent_bill": return "生成 \(a["room_no"] as? String ?? "?") 的 \(a["year"] as? Int ?? 0)年\(a["month"] as? Int ?? 0)月收租账单文本"
             default: return "执行查询"
             }
+        case "export_data":
+            return "导出「\(a["data_type"] as? String ?? "?")」数据为 CSV 文件（保存到 App 沙盒根目录）"
+        case "web_search":
+            return "联网搜索：\(a["query"] as? String ?? "?")"
         default:
             return "执行 \(toolName)"
         }
@@ -300,6 +344,8 @@ struct AIToolExecutor {
         case "refresh_data": return await refreshData(arguments)
         case "manage_meter": return manageMeter(arguments)
         case "query_report": return queryReport(arguments)
+        case "export_data": return exportData(arguments)
+        case "web_search": return await webSearch(arguments)
         default: return "未知工具：\(tool.name)"
         }
     }
@@ -361,10 +407,12 @@ struct AIToolExecutor {
         return fmt.string(from: date)
     }
 
-    // MARK: - 日志（写操作统一留痕，AI 标识）
+    // MARK: - 日志（写操作统一留痕，AI 标识；房源域走云端日志——共享数据，与手动房源操作一致）
 
     private func logAI(category: String, action: String, result: String, detail: String) {
-        BackupLogStore.log(category: category, action: action + "（AI）", result: result, detail: detail)
+        // v1.97：房源相关操作记录到云端日志（房源是共享数据，与房源板块手动操作 cloud: true 一致）
+        BackupLogStore.log(category: category, action: action + "（AI）", result: result,
+                           detail: detail, cloud: category == "房源")
     }
 
     // MARK: - 房源域（update_property）
@@ -892,6 +940,23 @@ struct AIToolExecutor {
             }
             return lines.joined(separator: "\n")
 
+        case "generate_rent_bill":
+            // v1.97：账单生成固有动作——AI 不再自行编造长账单文本，直接取合同数据生成结构化账单
+            guard let prop = findProperty(s(a, "room_no")) else { return "未找到收租合同房号 \(s(a, "room_no"))" }
+            let year = i(a, "year") ?? Calendar.current.component(.year, from: Date())
+            let month = i(a, "month") ?? Calendar.current.component(.month, from: Date())
+            let rec = prop.monthlyRentRecords.first(where: { $0.year == year && $0.month == month })
+            let amount = rec?.amount ?? prop.rent
+            let noExtra = b(a, "no_extra")
+            var lines = ["【\(prop.roomNumber) 收租账单 \(year)年\(month)月】"]
+            lines.append("房号：\(prop.roomNumber)（户型 \(prop.unitType.isEmpty ? "未填" : prop.unitType)）")
+            lines.append("租金：¥\(Int(amount))")
+            lines.append("附加费：\(noExtra ? "无" : "（未指定，如有水电等附加请单独说明）")")
+            lines.append("租约：\(prop.leaseStart) 至 \(prop.leaseEnd)（\(prop.leaseDuration)）")
+            lines.append("水电底数：水表 \(prop.waterMeterBase) / 电表 \(prop.electricMeterBase)")
+            lines.append("收款方式：在 App「收租」页按此金额收款即可")
+            return lines.joined(separator: "\n")
+
         default:
             return "未知查询动作：\(action)"
         }
@@ -903,5 +968,201 @@ struct AIToolExecutor {
         let s = cal.startOfDay(for: start)
         let e = cal.startOfDay(for: end)
         return cal.dateComponents([.day], from: s, to: e).day ?? 0
+    }
+
+    // MARK: - 导出/文件域（export_data，v1.97）
+
+    private func exportData(_ a: [String: Any]) -> String {
+        let dataType = s(a, "data_type")
+        guard dataType != "" else { return "缺少 data_type（meters/ajk/houses/overdue/rent_summary/misc）" }
+        var header: [String] = []
+        var rows: [[String]] = []
+        let stamp = Self.stampFormatter.string(from: Date())
+        var prefix = ""
+
+        switch dataType {
+        case "meters":
+            prefix = "电表余量"
+            header = ["用户号", "房号", "剩余电量(度)", "累计用量(度)", "状态", "抄表时间"]
+            let meters = MeterStore.shared.meters.sorted { $0.shengyu < $1.shengyu }
+            for m in meters {
+                rows.append([m.uid, m.room, Self.num(m.shengyu), Self.num(m.leiji), m.zhuangtai, m.shijian])
+            }
+        case "ajk":
+            prefix = "安居客房源"
+            header = ["编号", "标题", "小区", "户型", "楼层", "租金", "今日点击", "累计点击", "推广状态", "平台", "房态天数", "核验状态"]
+            let houses = AjkStore.shared.houses.sorted { $0.todayClick > $1.todayClick }
+            for h in houses {
+                rows.append([h.number, h.title, h.community, h.layout, h.floor, h.price,
+                             "\(h.todayClick)", "\(h.totalClick)",
+                             h.promotions.joined(separator: "/"), h.platforms.joined(separator: "/"),
+                             "\(h.houseStateDays)", h.verified])
+            }
+        case "houses":
+            prefix = "房源列表"
+            header = ["座", "房号", "户型", "租金(元)", "房东", "状态", "备注"]
+            let houses = (try? houseModelContext.fetch(FetchDescriptor<House>())) ?? []
+            let active = houses.filter { !($0.isDeleted ?? false) }.sorted { $0.roomNo < $1.roomNo }
+            for h in active {
+                rows.append([h.tower, h.roomNo, h.layout, "\(h.price)", h.landlord,
+                             h.status == .rented ? "已租" : "待租", h.remark])
+            }
+        case "overdue":
+            prefix = "欠租清单"
+            header = ["房号", "欠租月份", "租金(元)", "房东"]
+            let props = (try? modelContext.fetch(FetchDescriptor<Property>())) ?? []
+            let now = Date()
+            let cal = Calendar.current
+            let cy = cal.component(.year, from: now)
+            let cm = cal.component(.month, from: now)
+            for prop in props where !prop.isDeleted {
+                var missing: [String] = []
+                for back in 0..<6 {
+                    var comps = DateComponents()
+                    comps.year = cy; comps.month = cm
+                    if let m = cal.date(byAdding: .month, value: -back, to: now) {
+                        let y = cal.component(.year, from: m)
+                        let mo = cal.component(.month, from: m)
+                        if !prop.monthlyRentRecords.contains(where: { $0.year == y && $0.month == mo && $0.isPaid }) {
+                            missing.append("\(y)-\(mo)")
+                        }
+                    }
+                }
+                if !missing.isEmpty {
+                    rows.append([prop.roomNumber, missing.joined(separator: "、"), "\(Int(prop.rent))", prop.landlord])
+                }
+            }
+        case "rent_summary":
+            prefix = "收租汇总"
+            let year = i(a, "year") ?? Calendar.current.component(.year, from: Date())
+            let month = i(a, "month") ?? Calendar.current.component(.month, from: Date())
+            header = ["房号", "\(year)-\(month)租金(元)", "是否已收", "房东", "收款时间"]
+            let props = (try? modelContext.fetch(FetchDescriptor<Property>())) ?? []
+            for prop in props where !prop.isDeleted {
+                let rec = prop.monthlyRentRecords.first(where: { $0.year == year && $0.month == month })
+                let amount = rec?.amount ?? prop.rent
+                rows.append([prop.roomNumber, "\(Int(amount))", rec?.isPaid == true ? "已收" : "未收",
+                             prop.landlord, rec?.paidDate ?? ""])
+            }
+        case "misc":
+            prefix = "本月杂项"
+            let now = Date()
+            let cal = Calendar.current
+            header = ["类型", "日期", "金额(元)", "备注"]
+            let incs = (try? modelContext.fetch(FetchDescriptor<MiscIncome>(predicate: #Predicate { !$0.isDeleted }))) ?? []
+            let exps = (try? modelContext.fetch(FetchDescriptor<MiscExpense>(predicate: #Predicate { !$0.isDeleted }))) ?? []
+            for inc in incs where cal.isDate(inc.date, equalTo: now, toGranularity: .month) {
+                rows.append(["收入", Self.dayStr(inc.date), "\(Int(inc.amount))", inc.item + (inc.notes.isEmpty ? "" : "（\(inc.notes)）")])
+            }
+            for exp in exps where cal.isDate(exp.date, equalTo: now, toGranularity: .month) {
+                rows.append(["支出", Self.dayStr(exp.date), "\(Int(exp.amount))", exp.item + (exp.notes.isEmpty ? "" : "（\(exp.notes)）")])
+            }
+        default:
+            return "未知导出类型：\(dataType)"
+        }
+
+        let fileName = "\(prefix)_\(stamp).csv"
+        let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+        let url = dir.appendingPathComponent(fileName)
+        var csv = header.map { Self.esc($0) }.joined(separator: ",")
+        for r in rows {
+            csv += "\n" + r.map { Self.esc($0) }.joined(separator: ",")
+        }
+        do {
+            try csv.write(to: url, atomically: true, encoding: .utf8)
+            return "已导出 \(rows.count) 行：\(fileName)（已保存到 App 沙盒根目录 Documents/，可通过「文件」App 或本机文件管理器查看；也可在 App 对应板块内分享）"
+        } catch {
+            return "导出失败：\(error.localizedDescription)"
+        }
+    }
+
+    // MARK: - 联网搜索域（web_search，v1.97）
+
+    private func webSearch(_ a: [String: Any]) async -> String {
+        let query = s(a, "query")
+        guard !query.isEmpty else { return "缺少搜索关键词 query" }
+        let q = (query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query)
+        guard let url = URL(string: "https://www.bing.com/search?q=\(q)&mkt=zh-CN&setlang=zh-hans") else {
+            return "搜索地址构造失败"
+        }
+        var req = URLRequest(url: url)
+        req.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
+                     forHTTPHeaderField: "User-Agent")
+        req.setValue("zh-CN,zh;q=0.9", forHTTPHeaderField: "Accept-Language")
+        req.timeoutInterval = 20
+        do {
+            let (data, resp) = try await URLSession.shared.data(for: req)
+            guard let http = resp as? HTTPURLResponse, http.statusCode == 200,
+                  let html = String(data: data, encoding: .utf8) else {
+                return "联网搜索失败：必应返回异常（HTTP \((resp as? HTTPURLResponse)?.statusCode ?? -1)），请稍后重试"
+            }
+            let items = Self.parseBingResults(html)
+            if items.isEmpty {
+                return "搜索完成但未解析到结果（页面结构可能变化或结果被反爬拦截），建议换关键词，或到 App 的浏览器中直接访问必应查看"
+            }
+            var lines = ["搜索结果（关键词：\(query)）："]
+            for (idx, it) in items.prefix(8).enumerated() {
+                lines.append("\(idx + 1). \(it.title)")
+                lines.append("   链接：\(it.link)")
+                if !it.snippet.isEmpty { lines.append("   摘要：\(it.snippet)") }
+            }
+            return lines.joined(separator: "\n")
+        } catch {
+            return "联网搜索失败：\(error.localizedDescription)（网络不可用或超时，请稍后重试）"
+        }
+    }
+
+    private struct BingItem { let title: String; let link: String; let snippet: String }
+
+    /// 必应 HTML 结果解析（b_algo 块，容错：字段缺失给空串）
+    private static func parseBingResults(_ html: String) -> [BingItem] {
+        var items: [BingItem] = []
+        let blocks = html.components(separatedBy: #"<li class="b_algo""#)
+        for block in blocks.dropFirst() {
+            guard let linkRange = block.range(of: #"href="https?://[^"]+""#) else { continue }
+            let href = String(block[linkRange]).replacingOccurrences(of: #"href=""#, with: "")
+            guard let titleRange = block.range(of: #"<h2[^>]*>.*?<a[^>]*>(.*?)</a>"#, options: .regularExpression) else { continue }
+            let title = stripTags(String(block[titleRange]))
+            var snippet = ""
+            if let pRange = block.range(of: #"<p[^>]*>.*?</p>"#, options: .regularExpression) {
+                snippet = stripTags(String(block[pRange]))
+            }
+            items.append(BingItem(title: title, link: href, snippet: snippet))
+        }
+        return items
+    }
+
+    private static func stripTags(_ s: String) -> String {
+        var t = s
+        while let r = t.range(of: #"<[^>]+>"#, options: .regularExpression) {
+            t.replaceSubrange(r, with: "")
+        }
+        return t.replacingOccurrences(of: "&amp;", with: "&")
+            .replacingOccurrences(of: "&#39;", with: "'")
+            .replacingOccurrences(of: "&quot;", with: "\"")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func esc(_ v: String) -> String {
+        if v.contains(",") || v.contains("\"") || v.contains("\n") {
+            return "\"\(v.replacingOccurrences(of: "\"", with: "\"\"") )\""
+        }
+        return v
+    }
+
+    private static func num(_ v: Double) -> String {
+        v.truncatingRemainder(dividingBy: 1) == 0 ? String(Int(v)) : String(format: "%.1f", v)
+    }
+
+    private static var stampFormatter: DateFormatter {
+        let f = DateFormatter()
+        f.dateFormat = "yyyyMMdd_HHmm"
+        return f
+    }
+
+    private static func dayStr(_ d: Date) -> String {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        return f.string(from: d)
     }
 }

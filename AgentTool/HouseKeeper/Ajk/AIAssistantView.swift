@@ -25,14 +25,18 @@ struct AIMessage: Identifiable, Equatable, Codable {
     /// 本条 user 消息附带的文件文本摘要（如 txt/pdf 提取内容）
     var attachText: String?
     /// v1.96：本条 assistant 消息实际执行过的 AI 工具动作标签（气泡内展示，一眼可追溯）
-    var toolSummary: [String] = []
+    /// Optional：老版本历史无此字段，decodeIfPresent 兼容
+    var toolSummary: [String]? = nil
+    /// v1.97：AI 回复末尾给出的预选项快捷指令（点击直接发送）
+    var suggestedActions: [String]? = nil
 
     enum Role: String, Codable {
         case user, assistant
     }
 
     init(id: UUID = UUID(), role: Role, text: String, time: Date = Date(),
-         images: [String] = [], attachText: String? = nil, toolSummary: [String] = []) {
+         images: [String] = [], attachText: String? = nil, toolSummary: [String]? = nil,
+         suggestedActions: [String]? = nil) {
         self.id = id
         self.role = role
         self.text = text
@@ -40,6 +44,7 @@ struct AIMessage: Identifiable, Equatable, Codable {
         self.images = images
         self.attachText = attachText
         self.toolSummary = toolSummary
+        self.suggestedActions = suggestedActions
     }
 }
 
@@ -52,25 +57,10 @@ struct AIAssistantView: View {
     @Environment(\.houseModelContext) private var houseModelContext
     // v1.94：主容器 modelContext（收支/待办等经营数据，App.swift .modelContainer(mainContainer) 注入）
     @Environment(\.modelContext) private var modelContext
-    @State private var messages: [AIMessage] = []
+    // v1.97：全局 AI 任务管理器——对话状态/执行任务/确认框不随页面关闭丢失（App 划掉才终止）
+    @StateObject private var manager = AIManager.shared
     @State private var input = ""
-    @State private var sending = false
     @State private var showSettings = false
-    @State private var errorText: String?
-
-    // MARK: v1.96 AI 工具调用（function calling）状态
-    /// 工具执行阶段文案（思考气泡动态展示：思考中/等待确认/执行中）
-    @State private var toolPhase: String?
-    /// 待用户确认的工具调用（写操作弹系统确认框）
-    @State private var pendingToolCalls: [AIRequestService.AIToolCall]?
-    @State private var pendingToolSummaries: [String] = []
-    @State private var pendingConfirm = false
-    /// 确认框结果回调容器（class 引用语义，跨 alert 回调稳定可用）
-    @State private var confirmBox = ToolConfirmBox()
-    /// v1.96：确认框回调容器（@State 包装保证 alert 按钮回调能拿到同一实例）
-    final class ToolConfirmBox {
-        var continuation: CheckedContinuation<Bool, Never>?
-    }
 
     /// 附件：待发送的图片（UIImage 源）+ 文件文本
     @State private var pendingImages: [UIImage] = []
@@ -79,10 +69,6 @@ struct AIAssistantView: View {
     @State private var showPhotoPicker = false
     @State private var showFilePicker = false
     @State private var photoPickerItems: [PhotosPickerItem] = []
-
-    /// 历史记录存储键（保留最近 60 条）
-    private let historyKey = "ai.chatHistory"
-    private let historyLimit = 60
 
     /// 与设置页共用同一存储：设置改动（模型名/端点/Key 状态）立即反映到本页，无需重启
     @AppStorage("ai.modelName") private var storedModel = "doubao-seed-2-1-turbo-260628"
@@ -108,14 +94,14 @@ struct AIAssistantView: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     VStack(spacing: 12) {
-                        if messages.isEmpty {
+                        if manager.showWelcome {
                             welcome
                         } else {
-                            ForEach(messages) { msg in
+                            ForEach(manager.messages) { msg in
                                 bubble(msg)
                                     .id(msg.id)
                             }
-                            if sending {
+                            if manager.sending {
                                 thinkingBubble
                                     .id("thinking")
                             }
@@ -124,15 +110,15 @@ struct AIAssistantView: View {
                     .padding(.horizontal)
                     .padding(.vertical, 12)
                 }
-                .onChange(of: messages.count) { _ in
-                    if let last = messages.last {
+                .onChange(of: manager.messages.count) { _ in
+                    if let last = manager.messages.last {
                         withAnimation { proxy.scrollTo(last.id, anchor: .bottom) }
-                    } else if sending {
+                    } else if manager.sending {
                         withAnimation { proxy.scrollTo("thinking", anchor: .bottom) }
                     }
                 }
-                .onChange(of: sending) { _ in
-                    if sending {
+                .onChange(of: manager.sending) { _ in
+                    if manager.sending {
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
                             withAnimation { proxy.scrollTo("thinking", anchor: .bottom) }
                         }
@@ -150,31 +136,28 @@ struct AIAssistantView: View {
         .fileImporter(isPresented: $showFilePicker, allowedContentTypes: [.text, .plainText, .pdf, .json, .commaSeparatedText], allowsMultipleSelection: false) { result in
             handleFileImport(result)
         }
-        .alert("提示", isPresented: Binding(get: { errorText != nil }, set: { if !$0 { errorText = nil } })) {
-            Button("好", role: .cancel) { errorText = nil }
+        .alert("提示", isPresented: Binding(get: { manager.errorText != nil }, set: { if !$0 { manager.errorText = nil } })) {
+            Button("好", role: .cancel) { manager.errorText = nil }
         } message: {
-            Text(errorText ?? "")
+            Text(manager.errorText ?? "")
         }
         // v1.96：AI 写操作确认框（系统弹窗，同提示框样式；删除类动作执行按钮标红）
-        .alert("确认执行以下操作？", isPresented: $pendingConfirm) {
-            let dangerous = (pendingToolCalls ?? []).contains { AIToolExecutor.isDangerous(toolName: $0.name, arguments: $0.arguments) }
+        // v1.97：确认状态在全局 manager——对话页关闭时挂起，重开页面自动继续弹出
+        .alert("确认执行以下操作？", isPresented: $manager.pendingConfirm) {
+            let dangerous = (manager.pendingToolCalls ?? []).contains { AIToolExecutor.isDangerous(toolName: $0.name, arguments: $0.arguments) }
             Button("取消", role: .cancel) {
-                pendingToolCalls = nil
-                confirmBox.continuation?.resume(returning: false)
-                confirmBox.continuation = nil
+                manager.confirm(accept: false)
             }
             Button(dangerous ? "执行（谨慎）" : "执行", role: dangerous ? .destructive : .none) {
-                pendingToolCalls = nil
-                confirmBox.continuation?.resume(returning: true)
-                confirmBox.continuation = nil
+                manager.confirm(accept: true)
             }
         } message: {
             VStack(alignment: .leading, spacing: 6) {
-                ForEach(pendingToolSummaries, id: \.self) { line in
+                ForEach(manager.pendingToolSummaries, id: \.self) { line in
                     Text("• \(line)")
                         .font(.system(size: 13))
                 }
-                if (pendingToolCalls ?? []).contains(where: { AIToolExecutor.isDangerous(toolName: $0.name, arguments: $0.arguments) }) {
+                if (manager.pendingToolCalls ?? []).contains(where: { AIToolExecutor.isDangerous(toolName: $0.name, arguments: $0.arguments) }) {
                     Text("注意：其中包含删除/覆盖类操作，请确认无误后再执行。")
                         .font(.system(size: 12))
                         .foregroundColor(.red)
@@ -186,7 +169,7 @@ struct AIAssistantView: View {
             handlePhotoItems(items)
         }
         .onAppear {
-            loadHistory()
+            manager.onAppear(modelContext: modelContext, houseModelContext: houseModelContext)
         }
     }
 
@@ -257,11 +240,11 @@ struct AIAssistantView: View {
                     ProgressView()
                         .controlSize(.small)
                         .tint(.themeAccent)
-                    Text(toolPhase ?? "正在思考…")
+                    Text(manager.toolPhase ?? "正在思考…")
                         .font(.system(size: 12))
                         .foregroundColor(.themeText2)
                 }
-                if let calls = pendingToolCalls, !calls.isEmpty {
+                if let calls = manager.pendingToolCalls, !calls.isEmpty {
                     Text("共 \(calls.count) 项操作，等待你确认")
                         .font(.system(size: 10.5))
                         .foregroundColor(.themeText3)
@@ -305,10 +288,9 @@ struct AIAssistantView: View {
                         .lineLimit(1)
                 }
                 Spacer()
-                if !messages.isEmpty {
+                if !manager.messages.isEmpty {
                     Button {
-                        messages = []
-                        saveHistory()
+                        manager.clearChat()
                     } label: {
                         Image(systemName: "trash")
                             .font(.system(size: 14))
@@ -399,11 +381,11 @@ struct AIAssistantView: View {
     }
 
     private func bubble(_ msg: AIMessage) -> some View {
-        HStack {
+        HStack(alignment: .bottom, spacing: 8) {
             if msg.role == .user {
-                Spacer(minLength: 60)
+                Spacer(minLength: 56)
             }
-            VStack(alignment: msg.role == .user ? .trailing : .leading, spacing: 5) {
+            VStack(alignment: msg.role == .user ? .trailing : .leading, spacing: 4) {
                 if !msg.images.isEmpty {
                     // 图片缩略（base64 本地渲染）
                     LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: 3), spacing: 4) {
@@ -426,17 +408,19 @@ struct AIAssistantView: View {
                 }
                 Text(msg.text)
                     .font(.system(size: 14))
-                    .foregroundColor(.themeText)
+                    .foregroundColor(msg.role == .user ? .white : .themeText)
                     // v1.95：对话文字可长按复制
                     .textSelection(.enabled)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 9)
-                    .background(msg.role == .user ? Color.themeAccent.opacity(0.14) : Color.themePanel)
+                    // v1.97：微信式双气泡——用户绿底白字、AI 灰底深字，双方都有明确底色
+                    .background(msg.role == .user ? Color.themeAccent : Color(white: 0.93))
                     .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .frame(maxWidth: 300, alignment: msg.role == .user ? .trailing : .leading)
                 // v1.96：AI 实际执行过的动作标签（一眼可追溯）
-                if !msg.toolSummary.isEmpty {
+                if let ts = msg.toolSummary, !ts.isEmpty {
                     VStack(alignment: .leading, spacing: 4) {
-                        ForEach(msg.toolSummary, id: \.self) { label in
+                        ForEach(ts, id: \.self) { label in
                             HStack(spacing: 4) {
                                 Image(systemName: "checkmark.circle.fill")
                                     .font(.system(size: 10))
@@ -453,12 +437,42 @@ struct AIAssistantView: View {
                     }
                     .padding(.top, 2)
                 }
+                // v1.97：AI 回复预选项（豆包式快捷指令 chips，点击直接发送）
+                if let acts = msg.suggestedActions, !acts.isEmpty {
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(acts, id: \.self) { act in
+                            Button {
+                                manager.sendQuick(act)
+                            } label: {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "arrow.up.circle")
+                                        .font(.system(size: 10))
+                                    Text(act)
+                                        .font(.system(size: 12))
+                                        .lineLimit(2)
+                                        .multilineTextAlignment(.leading)
+                                    Spacer(minLength: 0)
+                                }
+                                .foregroundColor(.themeAccentDark)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 7)
+                                .background(Color.themeAccent.opacity(0.1))
+                                .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.themeAccent.opacity(0.25), lineWidth: 1))
+                                .clipShape(RoundedRectangle(cornerRadius: 10))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .frame(maxWidth: 300, alignment: .leading)
+                    .padding(.top, 2)
+                }
                 Text(timeText(msg.time))
                     .font(.system(size: 9.5))
                     .foregroundColor(.themeText3)
+                    .padding(.top, 1)
             }
             if msg.role == .assistant {
-                Spacer(minLength: 60)
+                Spacer(minLength: 56)
             }
         }
     }
@@ -491,9 +505,9 @@ struct AIAssistantView: View {
                     .frame(width: 34, height: 34)
             }
             .buttonStyle(.plain)
-            // v1.93：回答期间输入框保持可输入——去掉 .disabled(sending)（用户反馈发送后编辑框锁死，
-            // 必须等回复完才能打字）；现在等待时也能继续编辑内容，回答完点发送即可
-            TextField(sending ? "正在思考…（仍可继续输入，回答完即可发送）" : "输入指令，或点上方场景带入", text: $input)
+            // v1.97：思考/执行期间输入框与发送按钮保持可用——此时点发送会排队，当前任务完成后自动发送
+            //（不再是"发送被转圈取代、只能打字不能发"）
+            TextField(manager.sending ? "正在思考…（仍可发送，将排队自动发出）" : "输入指令，或点上方场景带入", text: $input)
                 .font(.system(size: 14))
                 .textFieldStyle(.plain)
                 .padding(.horizontal, 12)
@@ -502,23 +516,37 @@ struct AIAssistantView: View {
                 .cornerRadius(10)
                 .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.themeBorder, lineWidth: 1))
             Button {
-                send()
+                let text = input
+                input = ""
+                manager.send(userText: text, images: pendingImages, attachText: pendingAttachText, attachName: pendingAttachName)
+                pendingImages = []
+                pendingAttachText = nil
+                pendingAttachName = nil
             } label: {
                 ZStack {
                     RoundedRectangle(cornerRadius: 10)
-                        .fill(sending ? Color.gray.opacity(0.4) : Color.themeAccent)
-                        .frame(width: 42, height: 40)
-                    if sending {
-                        ProgressView().controlSize(.small).tint(.white)
-                    } else {
-                        Image(systemName: "arrow.up")
-                            .font(.system(size: 16, weight: .semibold))
+                        .fill((input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && pendingImages.isEmpty)
+                              ? Color.gray.opacity(0.35) : Color.themeAccent)
+                        .frame(width: 44, height: 40)
+                    Image(systemName: "arrow.up")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(.white)
+                    // v1.97：排队角标——执行中继续发送的条数
+                    if manager.queuedCount > 0 {
+                        Text("\(manager.queuedCount)")
+                            .font(.system(size: 10, weight: .bold))
                             .foregroundColor(.white)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 2)
+                            .background(Color.red)
+                            .clipShape(Capsule())
+                            .offset(x: 16, y: -16)
                     }
                 }
             }
             .buttonStyle(.plain)
-            .disabled(sending || (input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && pendingImages.isEmpty))
+            // v1.97：仅空输入禁用；思考/执行期间可继续发送（入队自动发出）
+            .disabled(input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && pendingImages.isEmpty)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
@@ -535,347 +563,9 @@ struct AIAssistantView: View {
         store.settings.autoRefreshMinutes = 120
         store.settings.lowAlertEnabled = true
         store.saveSettings() // 内部会重建定时器并立即补刷一次
-        errorText = "已开启电表盯防：每 2 小时自动刷新一次，低电量会本地通知提醒。注意：iOS 限制 App 被杀后无法后台执行，保持 App 在后台运行即可持续盯防；重新打开会立即补刷最新数据。"
+        manager.errorText = "已开启电表盯防：每 2 小时自动刷新一次，低电量会本地通知提醒。注意：iOS 限制 App 被杀后无法后台执行，保持 App 在后台运行即可持续盯防；重新打开会立即补刷最新数据。"
     }
 
-    private func send() {
-        let text = input.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty || !pendingImages.isEmpty, !sending else { return }
-        guard hasKey else {
-            errorText = "请先点右上角设置，填写 API Key（只保存在本机钥匙串）"
-            return
-        }
-        // 图片 → data URL（压缩）
-        let imageDataURLs = pendingImages.compactMap { compressToDataURL($0) }
-        // 附件文件文本拼进本条
-        var fullText = text
-        if let attach = pendingAttachText, let name = pendingAttachName {
-            fullText += "\n\n【附件：\(name)】\n\(attach)"
-        }
-        let userMsg = AIMessage(role: .user, text: fullText, time: Date(),
-                                images: imageDataURLs, attachText: pendingAttachName)
-        messages.append(userMsg)
-        saveHistory()
-        input = ""
-        pendingImages = []
-        pendingAttachText = nil
-        pendingAttachName = nil
-
-        sending = true
-        toolPhase = "正在思考…"
-        let apiKey = KeychainHelper.load(key: "ai.volcengine.apiKey") ?? ""
-        let baseURL = storedBaseURL
-        let model = storedModel
-        // 多轮上下文：除本条外的历史（最多保留最近 40 条，防 token 爆炸；历史图片不重传）
-        let history = Array(messages.dropLast().suffix(40)).compactMap { msg -> AIRequestService.ChatTurn? in
-            guard !msg.text.isEmpty else { return nil }
-            return AIRequestService.ChatTurn(role: msg.role == .user ? "user" : "assistant", text: msg.text)
-        }
-        Task {
-            // v1.95：发送前先异步拉取云端用量（act=usage，失败给提示不阻断发送）
-            let cloudUsage = await fetchCloudUsageText()
-            let systemPrompt = buildSystemPrompt(cloudUsage: cloudUsage)
-            // v1.96：组装工具循环消息（system + 历史 + 本条；工具结果逐轮回填）
-            var messages: [[String: Any]] = [["role": "system", "content": systemPrompt]]
-            for turn in history {
-                messages.append(["role": turn.role, "content": turn.text])
-            }
-            if !imageDataURLs.isEmpty {
-                var content: [Any] = []
-                for url in imageDataURLs {
-                    content.append(["type": "image_url", "image_url": ["url": url]])
-                }
-                content.append(["type": "text", "text": fullText])
-                messages.append(["role": "user", "content": content])
-            } else {
-                messages.append(["role": "user", "content": fullText])
-            }
-            var executedLabels: [String] = []
-            var finalText: String?
-            do {
-                for _ in 0..<3 {   // 工具循环上限 3 轮，防死循环
-                    let completion = try await AIRequestService.sendMessages(apiKey: apiKey, baseURL: baseURL,
-                                                                             model: model, messages: messages,
-                                                                             tools: AIToolExecutor.toolSchemas)
-                    if completion.toolCalls.isEmpty {
-                        finalText = completion.content ?? ""
-                        break
-                    }
-                    // 回填 assistant tool_calls 消息
-                    let assistantMsg: [String: Any] = [
-                        "role": "assistant",
-                        "content": completion.content ?? "",
-                        "tool_calls": completion.toolCalls.map { call -> [String: Any] in
-                            ["id": call.id, "type": "function",
-                             "function": ["name": call.name, "arguments": call.arguments]]
-                        }
-                    ]
-                    messages.append(assistantMsg)
-                    // 写操作 → 系统确认框；取消则终止本轮
-                    toolPhase = "等待你确认操作…"
-                    let confirmed = await confirmToolCalls(completion.toolCalls)
-                    guard confirmed else {
-                        for call in completion.toolCalls {
-                            messages.append(["role": "tool", "tool_call_id": call.id,
-                                             "content": "用户取消了该操作，未执行任何更改"])
-                        }
-                        finalText = "已取消本次操作（未执行任何更改）。需要调整的话告诉我新的指令。"
-                        break
-                    }
-                    // 执行全部工具调用，结果回填
-                    toolPhase = "正在执行操作…"
-                    let executor = AIToolExecutor(modelContext: modelContext, houseModelContext: houseModelContext)
-                    var labels: [String] = []
-                    for call in completion.toolCalls {
-                        let resultText = await executor.execute(tool: call)
-                        labels.append(actionLabel(for: call))
-                        messages.append(["role": "tool", "tool_call_id": call.id, "content": resultText])
-                    }
-                    executedLabels.append(contentsOf: labels)
-                    toolPhase = "正在思考…"
-                }
-                if finalText == nil {
-                    finalText = "操作已完成（见上方动作标签）。如需继续调整，直接告诉我。"
-                }
-                self.messages.append(AIMessage(role: .assistant, text: finalText!, time: Date(),
-                                               toolSummary: executedLabels))
-                saveHistory()
-            } catch {
-                errorText = error.localizedDescription
-            }
-            sending = false
-            toolPhase = nil
-        }
-    }
-
-    // MARK: v1.96 工具确认与标签
-
-    /// 过滤出需确认的写操作并弹系统确认框；无写操作直接放行
-    private func confirmToolCalls(_ calls: [AIRequestService.AIToolCall]) async -> Bool {
-        let needing = calls.filter { call in
-            AIToolExecutor.needsConfirm(toolName: call.name, actionType: actionType(of: call))
-        }
-        if needing.isEmpty { return true }
-        pendingToolSummaries = needing.map { call in
-            let args = (try? JSONSerialization.jsonObject(with: Data(call.arguments.utf8)) as? [String: Any]) ?? [:]
-            return AIToolExecutor.summary(toolName: call.name, arguments: args)
-        }
-        pendingToolCalls = needing
-        return await withCheckedContinuation { cont in
-            confirmBox.continuation = cont
-            pendingConfirm = true
-        }
-    }
-
-    private func actionType(of call: AIRequestService.AIToolCall) -> String {
-        let args = (try? JSONSerialization.jsonObject(with: Data(call.arguments.utf8)) as? [String: Any]) ?? [:]
-        return args["action_type"] as? String ?? ""
-    }
-
-    /// 紧凑动作标签（气泡展示，如「房源·2334 已租」「收租·2-1006 已收」）
-    private func actionLabel(for call: AIRequestService.AIToolCall) -> String {
-        let args = (try? JSONSerialization.jsonObject(with: Data(call.arguments.utf8)) as? [String: Any]) ?? [:]
-        let rooms = args["room_nos"] as? [String]
-        let room = args["room_no"] as? String ?? rooms?.first ?? ""
-        let action = actionType(of: call)
-        switch (call.name, action) {
-        case ("update_property", "add_house"): return "房源·新增 \(room)"
-        case ("update_property", "edit_field"): return "房源·编辑 \(room)"
-        case ("update_property", "change_status"):
-            let status = args["status"] as? String ?? ""
-            return "房源·\(room) \(status == "rented" || status == "已租" ? "已租" : "待租")"
-        case ("update_property", "delete_house"): return "房源·移入回收站 \(room)"
-        case ("update_property", "restore_trash"): return "房源·还原 \(room)"
-        case ("update_property", "share_house"): return "房源·生成分享 \(room)"
-        case ("record_finance", "record_rent"): return "收租·\(room) 已收"
-        case ("record_finance", "unrecord_rent"): return "收租·\(room) 已取消"
-        case ("record_finance", "edit_rent_setting"): return "收租·\(room) 设置"
-        case ("record_finance", "record_deal"): return "成交·\(room)"
-        case ("record_finance", "record_income"): return "杂项·收入"
-        case ("record_finance", "record_expense"): return "杂项·支出"
-        case ("record_finance", "edit_misc"): return "杂项·编辑"
-        case ("record_finance", "delete_misc"): return "杂项·删除"
-        case ("record_finance", "utility_settle"): return "水电·\(room) 结算"
-        case ("manage_todo", "add"): return "待办·新增"
-        case ("manage_todo", "complete"): return "待办·完成"
-        case ("manage_todo", "reopen"): return "待办·恢复"
-        case ("manage_todo", "edit"): return "待办·编辑"
-        case ("manage_todo", "delete"): return "待办·删除"
-        case ("refresh_data", "refresh_meters"): return "电表·刷新"
-        case ("refresh_data", "refresh_ajk"): return "安居客·刷新"
-        case ("refresh_data", "create_quick_backup"): return "备份·快速"
-        case ("refresh_data", "create_full_backup"): return "备份·全量"
-        case ("refresh_data", "list_backups"): return "备份·列表"
-        case ("refresh_data", "sync_status"): return "同步·状态"
-        case ("manage_meter", "set_low_alert"): return "电表·预警设置"
-        case ("manage_meter", "set_auto_refresh"): return "电表·定时刷新"
-        case ("query_report", "overdue_list"): return "报表·欠租"
-        case ("query_report", "lease_expiry"): return "报表·到期"
-        case ("query_report", "rent_summary"): return "报表·收租汇总"
-        case ("query_report", "utility_settle"): return "报表·水电结算"
-        default: return call.name + "·" + action
-        }
-    }
-
-    // MARK: - 系统提示 + 数据快照（v1.88 房源；v1.94 收支/待办/电表/安居客；v1.95 云端用量）
-
-    private func buildSystemPrompt(cloudUsage: String = "") -> String {
-        var base = AIAssistantSettingsView.defaultSystemPrompt
-            + (storedTemplate.isEmpty ? "" : "\n\n【我的偏好要求】\n\(storedTemplate)")
-        // v1.96：工具调用能力说明（function calling）
-        base += "\n\n【工具操作能力（v1.96）】你可以调用工具直接执行 App 内的操作：新增/编辑房源、切换待租已租、移入回收站、标记收租、记成交与杂项、管理待办、刷新电表/安居客、新建备份、设置电表预警与定时刷新、查询欠租/租约到期/收租汇总等。调用规则：①参数名用工具定义里的字段（如 room_no、action_type），房号按用户规则（2- 前缀=2座）；②凡是写操作（新增/修改/删除/备份）系统都会先弹确认框，确认后我才执行，你不需要征求用户意见，也不要擅自替用户编造数据；③执行结果会以 tool 结果返回给你，你必须在最终回复里用大白话向用户汇报：改了什么（改了谁/房号）、多少钱、什么时间、结果如何；④批量类操作（如一次切换多套已租）优先用批量字段一次性完成；⑤查询类工具（query_report）可直接调用，不会打扰用户。"
-        // 房源（独立容器）
-        let house = houseDataSnapshot()
-        if !house.isEmpty { base += "\n\n【房源数据快照（只读参考，涉及房源数量/租金/状态的问题据此回答，不要编造）】\n" + house }
-        // 主容器经营数据
-        let appData = appDataSnapshot()
-        if !appData.isEmpty { base += "\n\n【App 经营数据快照（收支/待办/电表/安居客，只读参考，据实回答）】\n" + appData }
-        // v1.95：云端用量（发送前实时拉取）
-        if !cloudUsage.isEmpty { base += "\n\n【云端用量（实时拉取，据实回答）】\n" + cloudUsage }
-        return base
-    }
-
-    /// v1.95：实时拉取腾讯云桶储存用量（云函数 act=usage；未配置/失败返回提示文案，不阻断发送）
-    private func fetchCloudUsageText() async -> String {
-        guard !CloudConfig.functionURL.isEmpty, !CloudConfig.passwordHash.isEmpty,
-              let url = URL(string: "\(CloudConfig.functionURL)?act=usage&k=\(CloudConfig.passwordHash)") else {
-            return "云端用量：未配置云函数地址或密钥（设置→云端配置），无法拉取"
-        }
-        var request = URLRequest(url: url)
-        request.timeoutInterval = 8
-        do {
-            let (data, _) = try await URLSession.shared.data(for: request)
-            if let obj = try? JSONDecoder().decode(UsageResponse.self, from: data), obj.ok {
-                let mb = Double(obj.total) / 1024.0 / 1024.0
-                return "腾讯云桶共 \(obj.total_files) 个文件，占用 \(String(format: "%.1f", mb)) MB"
-            }
-            return "云端用量：拉取失败（请确认云函数已部署）"
-        } catch {
-            return "云端用量：拉取失败（网络不可用或超时）"
-        }
-    }
-
-    /// 从本地 SwiftData 拉取房源，生成文本快照注入系统提示
-    private func houseDataSnapshot() -> String {
-        let houses = (try? houseModelContext?.fetch(FetchDescriptor<House>())) ?? []
-        let active = houses.filter { !($0.isDeleted ?? false) }
-        guard !active.isEmpty else { return "" }
-        let rented = active.filter { $0.status == .rented }.count
-        let available = active.count - rented
-        var lines = ["共 \(active.count) 套（不含回收站）；待租 \(available) 套 / 已租 \(rented) 套"]
-        for h in active.sorted(by: { $0.roomNo < $1.roomNo }) {
-            let status = h.status == .rented ? "已租" : "待租"
-            var line = "房号\(h.roomNo)（\(h.tower)座）户型\(h.layout) 租金\(h.price)元 房东\(h.landlord) 状态\(status)"
-            if !h.remark.isEmpty { line += " 备注\(h.remark)" }
-            lines.append(line)
-        }
-        return lines.joined(separator: "\n")
-    }
-
-    /// v1.94：App 经营数据快照（收支/待办/电表/安居客）——与房源快照分开，注入系统提示
-    private func appDataSnapshot() -> String {
-        var lines: [String] = []
-        let cal = Calendar.current
-        let now = Date()
-        let ym = cal.dateComponents([.year, .month], from: now)
-
-        // ---- 收支（主容器 modelContext）----
-        let activeProps = (try? modelContext.fetch(FetchDescriptor<Property>(predicate: #Predicate { !$0.isDeleted }))) ?? []
-        let rentingProps = activeProps.filter { !$0.isTerminated }
-        let rents = (try? modelContext.fetch(FetchDescriptor<RentMonthRecord>())) ?? []
-        let monthRents = rents.filter { $0.year == ym.year && $0.month == ym.month }
-        let totalRent = monthRents.reduce(0.0) { $0 + $1.amount }
-        let paidRent = monthRents.filter { $0.isPaid }.reduce(0.0) { $0 + $1.amount }
-        if !rentingProps.isEmpty || !monthRents.isEmpty {
-            lines.append("收租中房源 \(rentingProps.count) 套；本月(\(ym.year)-\(ym.month))应收租金 \(Self.fmtYuan(totalRent)) 元，已收 \(Self.fmtYuan(paidRent)) 元，未收 \(Self.fmtYuan(totalRent - paidRent)) 元")
-        }
-        let utility = (try? modelContext.fetch(FetchDescriptor<UtilitySettlementRecord>(predicate: #Predicate { !$0.isSettled }))) ?? []
-        if !utility.isEmpty {
-            let totalU = utility.reduce(0.0) { $0 + $1.electricAmount + $1.waterAmount }
-            lines.append("未结清水电结算 \(utility.count) 笔，合计约 \(Self.fmtYuan(totalU)) 元")
-        }
-        let incs = (try? modelContext.fetch(FetchDescriptor<MiscIncome>(predicate: #Predicate { !$0.isDeleted }))) ?? []
-        let exps = (try? modelContext.fetch(FetchDescriptor<MiscExpense>(predicate: #Predicate { !$0.isDeleted }))) ?? []
-        let monthIncs = incs.filter { cal.isDate($0.date, equalTo: now, toGranularity: .month) }
-        let monthExps = exps.filter { cal.isDate($0.date, equalTo: now, toGranularity: .month) }
-        if !monthIncs.isEmpty || !monthExps.isEmpty {
-            let sumInc = monthIncs.reduce(0.0) { $0 + $1.amount }
-            let sumExp = monthExps.reduce(0.0) { $0 + $1.amount }
-            lines.append("本月杂项收入 \(Self.fmtYuan(sumInc)) 元（\(monthIncs.count)笔）、杂项支出 \(Self.fmtYuan(sumExp)) 元（\(monthExps.count)笔）")
-        }
-
-        // ---- 待办 ----
-        let todos = (try? modelContext.fetch(FetchDescriptor<TodoItem>(predicate: #Predicate { !$0.isCompleted && !$0.isDeleted }))) ?? []
-        if !todos.isEmpty {
-            let top = todos.sorted { $0.sortOrder < $1.sortOrder }.prefix(20)
-            var t = "未完成待办 \(todos.count) 条"
-            let tList = top.map { $0.content.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
-            if !tList.isEmpty { t += "：" + tList.joined(separator: "；") }
-            lines.append(t)
-        }
-
-        // ---- 电表（MeterStore.shared）----
-        let meters = MeterStore.shared.meters
-        if !meters.isEmpty {
-            let low = meters.filter { $0.isLow(threshold: MeterStore.shared.settings.lowThreshold) }
-            var m = "电表 \(meters.count) 个；"
-            let descs = meters.prefix(15).map { mm -> String in
-                let room = mm.room.isEmpty ? mm.uid : mm.room
-                return "\(room)剩\(Int(mm.shengyu))度\(mm.zhuangtai)"
-            }
-            m += descs.joined(separator: "；")
-            if !low.isEmpty { m += "；低电量预警 \(low.count) 个" }
-            lines.append(m)
-        }
-
-        // ---- 安居客（AjkStore.shared）----
-        let ajk = AjkStore.shared
-        if let fetch = ajk.lastFetch {
-            var a = "安居客(上次抓取 \(Self.timeStr(fetch)))：共找到 \(ajk.overview.totalHouses) 套房源；今日点击 \(ajk.overview.todayClickTotal) 次；推广 \(ajk.overview.promotedCount) 套；剩余端口 \(ajk.overview.portCount)；套餐剩 \(ajk.overview.packageDays) 天；神奇分 \(ajk.overview.score)；房产币 \(ajk.overview.coin)；全城排名 \(ajk.overview.cityRank)"
-            lines.append(a)
-        }
-
-        return lines.joined(separator: "\n")
-    }
-
-    /// 金额显示：保留两位小数（分）
-    private static func fmtYuan(_ v: Double) -> String {
-        String(format: "%.2f", v)
-    }
-
-    /// 时间显示：yyyy-MM-dd HH:mm
-    private static func timeStr(_ d: Date) -> String {
-        let f = DateFormatter()
-        f.dateFormat = "yyyy-MM-dd HH:mm"
-        return f.string(from: d)
-    }
-
-    // MARK: - 历史记录持久化（保留最近 60 条；图片不持久化，控制体积）
-
-    private func loadHistory() {
-        guard let data = UserDefaults.standard.data(forKey: historyKey),
-              let arr = try? JSONDecoder().decode([AIMessage].self, from: data) else { return }
-        // v1.91：历史去重保险（防止旧版本存了重复 id 导致 ForEach 崩溃）
-        var seen = Set<UUID>()
-        messages = arr.filter { seen.insert($0.id).inserted }
-    }
-
-    private func saveHistory() {
-        let recent = Array(messages.suffix(historyLimit))
-        // 图片 data URL 不入库（避免 UserDefaults 膨胀），只保留文本与附件名
-        let slim = recent.map { msg -> AIMessage in
-            guard !msg.images.isEmpty else { return msg }
-            return AIMessage(id: msg.id, role: msg.role, text: msg.text, time: msg.time,
-                             images: [], attachText: msg.attachText)
-        }
-        if let data = try? JSONEncoder().encode(slim) {
-            UserDefaults.standard.set(data, forKey: historyKey)
-        }
-    }
-
-    // MARK: - 附件处理
-
-    /// 相册选择结果：图片直接加，视频截取首帧当图片发
     private func handlePhotoItems(_ items: [PhotosPickerItem]) {
         guard !items.isEmpty else { return }
         Task {
@@ -888,7 +578,7 @@ struct AIAssistantView: View {
                     if let frame = extractFirstFrame(url: fileURL) {
                         pendingImages.append(frame)
                     } else {
-                        errorText = "视频首帧提取失败，请改发图片"
+                        manager.errorText = "视频首帧提取失败，请改发图片"
                     }
                 }
             }
@@ -916,30 +606,13 @@ struct AIAssistantView: View {
                     return
                 }
             }
-            errorText = "该文件类型暂不支持读取内容（支持 txt/md/json/csv/pdf）"
+            manager.errorText = "该文件类型暂不支持读取内容（支持 txt/md/json/csv/pdf）"
         } catch {
-            errorText = "文件读取失败：\(error.localizedDescription)"
+            manager.errorText = "文件读取失败：\(error.localizedDescription)"
         }
     }
 
     /// 图片压缩到长边 1280、JPEG 0.7，转 data URL
-    private func compressToDataURL(_ img: UIImage) -> String? {
-        let maxSide: CGFloat = 1280
-        var target = img
-        let side = max(img.size.width, img.size.height)
-        if side > maxSide {
-            let scale = maxSide / side
-            let newSize = CGSize(width: img.size.width * scale, height: img.size.height * scale)
-            UIGraphicsBeginImageContextWithOptions(newSize, false, 1.0)
-            img.draw(in: CGRect(origin: .zero, size: newSize))
-            target = UIGraphicsGetImageFromCurrentImageContext() ?? img
-            UIGraphicsEndImageContext()
-        }
-        guard let data = target.jpegData(compressionQuality: 0.7) else { return nil }
-        return "data:image/jpeg;base64,\(data.base64EncodedString())"
-    }
-
-    /// 视频取首帧
     private func extractFirstFrame(url: URL) -> UIImage? {
         let asset = AVAsset(url: url)
         let gen = AVAssetImageGenerator(asset: asset)
@@ -1189,15 +862,63 @@ struct AIAssistantSettingsView: View {
     private var templateSection: some View {
         Section("偏好模板（调教）") {
             TextEditor(text: $template)
-                .frame(minHeight: 90)
+                .frame(minHeight: 110)
                 .font(.system(size: 12))
             Text("填写你希望 AI 一直遵守的规则（如：报价只说每月租金；金额精确到元；先结论后明细）。每次对话都会带上。")
                 .font(.system(size: 11))
                 .foregroundColor(.themeText3)
+            // v1.97：一键填入「房产中介场景推荐模板」，可在此基础上修改
+            Button {
+                template = Self.recommendedTemplate
+            } label: {
+                Label("填入推荐模板（房产中介场景）", systemImage: "wand.and.stars")
+                    .font(.system(size: 13))
+            }
+            .disabled(template == Self.recommendedTemplate)
         }
     }
 
+    /// v1.97：房产中介场景默认偏好模板（用户可自行修改完善；首次进入 AI 设置自动写入）
+    static let recommendedTemplate = """
+【身份与口径】
+- 我是佛山顺德龙江利保米兰公馆的二房东/房产中介（梁涛），管理米兰公馆 1 座、2 座的多套出租房源。
+- 对外沟通一律自称/代称"梁涛"，语气口语化、简体中文，先结论后依据，不用"好的呢"这类敷衍词。
+
+【房号规则】
+- 房号带"2-"前缀 = 2 座（如 2-1006），不带前缀 = 1 座（如 1006、2334）；上下层等细分按用户原话保留。
+
+【报价与金额】
+- 报价只说每月租金（如"1100/月"），不主动拆算日租/押金，除非用户要求。
+- 金额一律精确到元，涉及账单/结算保留到分；汇率、比例、合计用 App 数据现算，不估。
+
+【房源信息】
+- 收录房源时按：房号/座/户型/租金/房东/状态（待租或已租）/是否上架/有无实拍图 记录；未提供的信息标"待补充"，不编造。
+- 只有用户明确提到"全屋定制"才加该备注；其他户型特征（如中空复式）不自动添加。
+- 回答房源相关问题时先检查是否重复收录，发现重复要先提醒。
+
+【操作习惯】
+- 写操作（改状态/改信息/收租/删数据）前先向用户复述将执行的内容；执行后汇报"改了谁、房号、多少钱、什么时间"。
+- 房源相关的修改记录在云端（共享）；批量操作优先合并执行。
+
+【数据与列表】
+- 列出电表/房源/安居客数据时必须完整，不省略中间项；按用户要求排序（如电量从低到高）。
+- 用户要文件时用导出工具生成 CSV/Excel 保存到 App 沙盒根目录，并告知文件名。
+
+【保密与合规】
+- 不透露租客隐私、不泄露钥匙串里的 API Key；涉及租约纠纷只提供建议与法律渠道，不代签任何文书。
+"""
+
     private func loadFromStorage() {
+        apiKey = KeychainHelper.load(key: "ai.volcengine.apiKey") ?? ""
+        // v1.97：首次使用自动写入推荐模板（用户可在设置里修改）
+        if !UserDefaults.standard.bool(forKey: "ai.templateInitialized") {
+            let saved = UserDefaults.standard.string(forKey: "ai.promptTemplate") ?? ""
+            if saved.isEmpty {
+                template = Self.recommendedTemplate
+                UserDefaults.standard.set(Self.recommendedTemplate, forKey: "ai.promptTemplate")
+            }
+            UserDefaults.standard.set(true, forKey: "ai.templateInitialized")
+        }
         apiKey = KeychainHelper.load(key: "ai.volcengine.apiKey") ?? ""
         let saved = UserDefaults.standard.string(forKey: "ai.modelName") ?? Self.defaultModel
         if Self.legacyModels.contains(saved) {

@@ -156,7 +156,7 @@ struct AIRequestService {
             body["tools"] = tools
         }
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
-        req.timeoutInterval = 120
+        req.timeoutInterval = 240 // v1.97：工具定义多+回复长，120s 易超时（用户实测生成账单超时）；提到 240s
 
         let (data, resp) = try await URLSession.shared.data(for: req)
         guard let http = resp as? HTTPURLResponse else { throw AIRequestError.parse }
