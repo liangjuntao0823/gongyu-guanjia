@@ -61,6 +61,52 @@ final class MeterStore: ObservableObject {
             try data.write(to: settingsURL, options: .atomic)
         } catch {
         }
+        // v1.95：设置变化后立即按新开关/间隔重建定时器
+        startAutoRefreshIfNeeded()
+    }
+
+    // MARK: - v1.95 全局电表盯防定时器
+    // 说明：autoRefreshEnabled 开启时，App 前台运行期间按 autoRefreshMinutes 间隔自动刷新电表并保存；
+    // iOS 系统限制 App 被杀后无法后台执行——App 下次打开时会立即补刷一次，数据不会长期过期。
+    // 配合低电量本地通知（lowAlertEnabled）即可实现「AI 盯电表」的完整闭环。
+
+    private var refreshTimer: Timer?
+
+    /// 按当前设置启动/重启定时器（设置页保存、App 启动时调用）
+    func startAutoRefreshIfNeeded() {
+        stopAutoRefresh()
+        guard settings.autoRefreshEnabled else { return }
+        let minutes = max(10, settings.autoRefreshMinutes)
+        refreshTimer = Timer.scheduledTimer(withTimeInterval: TimeInterval(minutes * 60), repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                await self?.autoRefreshOnce()
+            }
+        }
+        // 启动即先补刷一次（覆盖 App 被杀期间的缺口）
+        Task { @MainActor in
+            await self?.autoRefreshOnce()
+        }
+    }
+
+    func stopAutoRefresh() {
+        refreshTimer?.invalidate()
+        refreshTimer = nil
+    }
+
+    /// 静默自动刷新一轮（成功保存，失败等下一轮，不打扰用户）
+    private func autoRefreshOnce() async {
+        guard !meters.isEmpty else { return }
+        let provider: MeterQuerying
+        switch settings.provider {
+        case .webView: provider = MeterWebViewProvider.shared
+        default: provider = MeterQueryService.shared
+        }
+        do {
+            let ok = try await provider.refreshAll(store: self) { _, _, _ in }
+            if ok > 0 { saveMeters() }
+        } catch {
+            // 静默失败，等待下轮重试
+        }
     }
 
     // MARK: - 查询链接（设置页自定义更换入口）

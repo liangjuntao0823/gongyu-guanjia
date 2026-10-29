@@ -205,18 +205,18 @@ struct AIAssistantView: View {
         }
     }
 
-    /// 「正在思考」气泡
+    /// 「正在思考」气泡（v1.95：三个静态圆点改为动态转圈）
     private var thinkingBubble: some View {
         HStack {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 4) {
-                    Circle().fill(Color.themeText3).frame(width: 6, height: 6)
-                    Circle().fill(Color.themeText3).frame(width: 6, height: 6)
-                    Circle().fill(Color.themeText3).frame(width: 6, height: 6)
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                        .tint(.themeAccent)
+                    Text("正在思考…")
+                        .font(.system(size: 12))
+                        .foregroundColor(.themeText2)
                 }
-                Text("正在思考…")
-                    .font(.system(size: 11))
-                    .foregroundColor(.themeText3)
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 11)
@@ -318,6 +318,12 @@ struct AIAssistantView: View {
                 ForEach(quickScenes, id: \.label) { scene in
                     Button {
                         input = scene.prompt
+                        // v1.95：电表盯防场景一键开启「App 原生定时刷新」——AI 无法在后台自行定时执行
+                        //（iOS 系统限制），盯防落地为：每 2 小时自动刷新电表 + 低电量本地通知；
+                        // AI 对话时读取的即是最新电表数据（快照已接入）
+                        if scene.label == "电表盯防" {
+                            enableMeterWatch()
+                        }
                     } label: {
                         HStack(spacing: 6) {
                             Image(systemName: scene.icon)
@@ -372,6 +378,8 @@ struct AIAssistantView: View {
                 Text(msg.text)
                     .font(.system(size: 14))
                     .foregroundColor(.themeText)
+                    // v1.95：对话文字可长按复制
+                    .textSelection(.enabled)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 9)
                     .background(msg.role == .user ? Color.themeAccent.opacity(0.14) : Color.themePanel)
@@ -451,6 +459,16 @@ struct AIAssistantView: View {
 
     // MARK: - 发送
 
+    /// v1.95：电表盯防场景一键开启——App 原生定时刷新（2 小时）+ 低电量本地通知
+    private func enableMeterWatch() {
+        let store = MeterStore.shared
+        store.settings.autoRefreshEnabled = true
+        store.settings.autoRefreshMinutes = 120
+        store.settings.lowAlertEnabled = true
+        store.saveSettings() // 内部会重建定时器并立即补刷一次
+        errorText = "已开启电表盯防：每 2 小时自动刷新一次，低电量会本地通知提醒。注意：iOS 限制 App 被杀后无法后台执行，保持 App 在后台运行即可持续盯防；重新打开会立即补刷最新数据。"
+    }
+
     private func send() {
         let text = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty || !pendingImages.isEmpty, !sending else { return }
@@ -478,13 +496,15 @@ struct AIAssistantView: View {
         let apiKey = KeychainHelper.load(key: "ai.volcengine.apiKey") ?? ""
         let baseURL = storedBaseURL
         let model = storedModel
-        let systemPrompt = buildSystemPrompt()
         // 多轮上下文：除本条外的历史（最多保留最近 40 条，防 token 爆炸；历史图片不重传）
         let history = Array(messages.dropLast().suffix(40)).compactMap { msg -> AIRequestService.ChatTurn? in
             guard !msg.text.isEmpty else { return nil }
             return AIRequestService.ChatTurn(role: msg.role == .user ? "user" : "assistant", text: msg.text)
         }
         Task {
+            // v1.95：发送前先异步拉取云端用量（act=usage，失败给提示不阻断发送）
+            let cloudUsage = await fetchCloudUsageText()
+            let systemPrompt = buildSystemPrompt(cloudUsage: cloudUsage)
             do {
                 let reply = try await AIRequestService.send(apiKey: apiKey, baseURL: baseURL, model: model,
                                                             systemPrompt: systemPrompt, history: history,
@@ -498,9 +518,9 @@ struct AIAssistantView: View {
         }
     }
 
-    // MARK: - 系统提示 + 数据快照（v1.88 房源；v1.94 全量：收支/待办/电表/安居客/房源）
+    // MARK: - 系统提示 + 数据快照（v1.88 房源；v1.94 收支/待办/电表/安居客；v1.95 云端用量）
 
-    private func buildSystemPrompt() -> String {
+    private func buildSystemPrompt(cloudUsage: String = "") -> String {
         var base = AIAssistantSettingsView.defaultSystemPrompt
             + (storedTemplate.isEmpty ? "" : "\n\n【我的偏好要求】\n\(storedTemplate)")
         // 房源（独立容器）
@@ -509,7 +529,29 @@ struct AIAssistantView: View {
         // 主容器经营数据
         let appData = appDataSnapshot()
         if !appData.isEmpty { base += "\n\n【App 经营数据快照（收支/待办/电表/安居客，只读参考，据实回答）】\n" + appData }
+        // v1.95：云端用量（发送前实时拉取）
+        if !cloudUsage.isEmpty { base += "\n\n【云端用量（实时拉取，据实回答）】\n" + cloudUsage }
         return base
+    }
+
+    /// v1.95：实时拉取腾讯云桶储存用量（云函数 act=usage；未配置/失败返回提示文案，不阻断发送）
+    private func fetchCloudUsageText() async -> String {
+        guard !CloudConfig.functionURL.isEmpty, !CloudConfig.passwordHash.isEmpty,
+              let url = URL(string: "\(CloudConfig.functionURL)?act=usage&k=\(CloudConfig.passwordHash)") else {
+            return "云端用量：未配置云函数地址或密钥（设置→云端配置），无法拉取"
+        }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 8
+        do {
+            let (data, _) = try await URLSession.shared.data(for: request)
+            if let obj = try? JSONDecoder().decode(UsageResponse.self, from: data), obj.ok {
+                let mb = Double(obj.total) / 1024.0 / 1024.0
+                return "腾讯云桶共 \(obj.total_files) 个文件，占用 \(String(format: "%.1f", mb)) MB"
+            }
+            return "云端用量：拉取失败（请确认云函数已部署）"
+        } catch {
+            return "云端用量：拉取失败（网络不可用或超时）"
+        }
     }
 
     /// 从本地 SwiftData 拉取房源，生成文本快照注入系统提示

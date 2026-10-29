@@ -415,12 +415,23 @@ struct MainTabView: View {
             Task { await RemoteConfig.refresh() }
             checkMinimumVersion()
             // v1.83：上次异常退出提示（崩溃日志存在时弹一次；设置→崩溃日志可导出定位）
-            if CrashLogCollector.hasLogs() { showCrashTip = true }
+            // v1.95：改为只对【新增】的崩溃日志弹一次——用 UserDefaults 记录上次已提示的最新日志文件名，
+            // 相同日志不再重复弹窗（此前每次启动只要有日志就弹，用户反馈每次打开都弹）
+            if let newestCrash = CrashLogCollector.logFiles().first {
+                let shownKey = "crashTip.lastShownLog"
+                let lastShown = UserDefaults.standard.string(forKey: shownKey)
+                if lastShown != newestCrash.lastPathComponent {
+                    showCrashTip = true
+                    UserDefaults.standard.set(newestCrash.lastPathComponent, forKey: shownKey)
+                }
+            }
             UNUserNotificationCenter.current().setBadgeCount(0)
             // v1.12：启动时安装崩溃日志、同步日志桥、清理恢复残留、重试未上传的云端备份
             CrashLogCollector.install()
             BackupSyncLogBridge.install()
             BackupV5Manager.cleanupPreRestoreResidue()
+            // v1.95：电表全局盯防定时器（设置里开启「定时自动刷新」后 App 前台按间隔自动刷新电表）
+            MeterStore.shared.startAutoRefreshIfNeeded()
             checkAutoBackup()
             Task { await CloudBackupService.retryPendingUploads() }
             Task { await CloudBackupService.enforceCloudRetention() }
