@@ -154,22 +154,40 @@ struct AjkBoardView: View {
 
     private var overviewCard: some View {
         let o = store.overview
-        return VStack(spacing: 10) {
-            HStack(spacing: 0) {
-                statItem(value: "\(o.todayClickTotal)", label: "今日点击")
-                statItem(value: "\(o.promotedCount)", label: "推广房源")
-                statItem(value: "\(o.portCount)", label: "剩余端口")
+        return VStack(spacing: 0) {
+            // v1.91：刷新时间
+            HStack {
+                Text("刷新时间：\(fetchTimeText)")
+                    .font(.system(size: 10.5))
+                    .foregroundColor(.themeText3)
+                Spacer()
             }
-            HStack(spacing: 0) {
-                statItem(value: "\(o.packageDays)", label: "套餐剩余(天)")
-                statItem(value: "\(o.score)", label: "神奇分")
-                statItem(value: "\(o.coin)", label: "房产币")
+            .padding(.horizontal, 12)
+            .padding(.top, 10)
+            .padding(.bottom, 6)
+            VStack(spacing: 10) {
+                HStack(spacing: 0) {
+                    statItem(value: "\(o.todayClickTotal)", label: "今日点击")
+                    statItem(value: "\(o.promotedCount)", label: "推广房源")
+                    statItem(value: "\(o.portCount)", label: "剩余端口")
+                }
+                HStack(spacing: 0) {
+                    statItem(value: "\(o.packageDays)", label: "套餐剩余(天)")
+                    statItem(value: "\(o.score)", label: "神奇分")
+                    statItem(value: "\(o.coin)", label: "房产币")
+                }
             }
         }
         .padding(.vertical, 14)
         .background(Color.themePanel)
         .overlay(RoundedRectangle(cornerRadius: 0).stroke(Color.themeBorder, lineWidth: 0.5))
         .padding(.top, 8)
+    }
+
+    private var fetchTimeText: String {
+        guard let t = store.lastFetch else { return "—" }
+        let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd HH:mm"
+        return f.string(from: t)
     }
 
     private func statItem(value: String, label: String) -> some View {

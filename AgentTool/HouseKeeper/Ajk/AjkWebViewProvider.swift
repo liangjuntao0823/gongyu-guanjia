@@ -28,6 +28,10 @@ final class AjkWebViewProvider: NSObject, WKNavigationDelegate {
     /// 跨 page 消息累积（每次抓取前清空；@MainActor 单例，无并发问题）
     private var pendingHouses: [AjkHouse] = []
     private var pendingOverview: AjkOverview = .empty
+    /// v1.91：两步抓取——先工作台首页（神奇分/房产币）再房源列表页
+    private var phase = 0                 // 0=工作台概览 1=房源列表
+    private var pendingOverviewText: String? = nil
+    private static let overviewURL = "https://vip.anjuke.com/user/brokerhomeV2"
 
     // MARK: - 公开入口：抓取全部房源（当前登录态）
 
@@ -35,6 +39,8 @@ final class AjkWebViewProvider: NSObject, WKNavigationDelegate {
         pendingMaxPages = maxPages
         pendingHouses = []
         pendingOverview = .empty
+        pendingOverviewText = nil
+        phase = 0
         return try await withCheckedThrowingContinuation { (cont: CheckedContinuation<FetchResult, Error>) in
             self.continuation = cont
             let config = WKWebViewConfiguration()
@@ -45,10 +51,11 @@ final class AjkWebViewProvider: NSObject, WKNavigationDelegate {
             let controller = wv.configuration.userContentController
             controller.add(self, name: "ajkScrape")
             self.webView = wv
-            let url = URL(string: AjkStore.shared.settings.baseURL) ?? URL(string: "https://vip.anjuke.com/zufang/main/zufang/subpages/allHouse")!
+            // v1.91：先加载工作台首页抓神奇分/房产币，再进房源列表抓卡片
+            let url = URL(string: Self.overviewURL)!
             wv.load(URLRequest(url: url))
-            // 兜底超时（页面卡死/网络异常时恢复，避免无限等待）
-            DispatchQueue.main.asyncAfter(deadline: .now() + 45) {
+            // 兜底超时（页面卡死/网络异常时恢复，避免无限等待；两步加载放宽到 75s）
+            DispatchQueue.main.asyncAfter(deadline: .now() + 75) {
                 if let c = self.continuation {
                     self.continuation = nil
                     c.resume(throwing: AjkError.msg("页面加载超时，请检查网络后重试"))
@@ -61,9 +68,41 @@ final class AjkWebViewProvider: NSObject, WKNavigationDelegate {
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         pageLoadCount += 1
-        // SPA 异步渲染 + 登录判定后注入抓取脚本
+        // SPA 异步渲染 + 登录判定后注入抓取脚本；phase 0=工作台概览，1=房源列表
         DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
-            self.runScrape(on: webView)
+            if self.phase == 0 {
+                self.runOverviewScrape(on: webView)
+            } else {
+                self.runScrape(on: webView)
+            }
+        }
+    }
+
+    // MARK: - 注入 JS：收集工作台概览文本（神奇分/房产币）
+
+    private func runOverviewScrape(on webView: WKWebView) {
+        let js = """
+        (async function(){
+          function sleep(ms){ return new Promise(function(r){ setTimeout(r, ms); }); }
+          function norm(s){ return (s||'').replace(/\\s+/g,' ').trim(); }
+          // 等待 SPA 渲染出神奇分/房产币（最多 12 秒）
+          var waited = 0;
+          while (waited < 12000) {
+            var bt = (document.body && (document.body.innerText || document.body.textContent)) || '';
+            if (bt.indexOf('神奇分') >= 0 && (bt.indexOf('总分') >= 0 || bt.indexOf('房产币') >= 0)) break;
+            await sleep(500); waited += 500;
+          }
+          var bodyText = norm(document.body.innerText || document.body.textContent);
+          window.webkit.messageHandlers.ajkScrape.postMessage(JSON.stringify({type:'overview', text: bodyText}));
+        })();
+        void 0;
+        """
+        webView.evaluateJavaScript(js) { _, error in
+            if let error = error {
+                Task { @MainActor in
+                    self.finish(error: "脚本执行失败：\(error.localizedDescription)")
+                }
+            }
         }
     }
 
@@ -169,6 +208,15 @@ extension AjkWebViewProvider: WKScriptMessageHandler {
               let dict = try? JSONSerialization.jsonObject(with: Data(body.utf8)) as? [String: Any],
               let type = dict["type"] as? String else { return }
 
+        if type == "overview" {
+            // 工作台首页文本（神奇分/房产币）已拿到 → 切到房源列表页继续
+            pendingOverviewText = (dict["text"] as? String) ?? ""
+            phase = 1
+            let url = URL(string: AjkStore.shared.settings.baseURL) ?? URL(string: "https://vip.anjuke.com/zufang/main/zufang/subpages/allHouse")!
+            webView?.load(URLRequest(url: url))
+            return
+        }
+
         if type == "page" {
             let overview = (dict["overview"] as? String) ?? ""
             let page = (dict["page"] as? Int) ?? 1
@@ -189,7 +237,9 @@ extension AjkWebViewProvider: WKScriptMessageHandler {
             } else if let strs = dict["cards"] as? [String] {
                 cardTexts = strs
             }
-            let parsed = AjkParser.parse(overview: overview, cards: cardTexts, covers: covers, page: page)
+            // v1.91：概览 = 工作台文本（神奇分/房产币）+ 列表页文本（今日点击/推广/端口/套餐），合并后解析
+            let combinedOverview = [pendingOverviewText, overview].compactMap { $0 }.joined(separator: " ")
+            let parsed = AjkParser.parse(overview: combinedOverview, cards: cardTexts, covers: covers, page: page)
             if !parsed.houses.isEmpty {
                 pendingHouses += parsed.houses
                 pendingOverview = parsed.overview

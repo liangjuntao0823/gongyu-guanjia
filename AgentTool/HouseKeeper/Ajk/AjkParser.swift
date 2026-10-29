@@ -178,7 +178,15 @@ enum AjkParser {
         if let m = firstInt(text, pattern: #"套餐剩余(\d+)天"#) { o.packageDays = m }
         // v1.90：神奇分放宽（页面可能是「神奇分96分」「神奇分:96」「神奇分 96」），新增房产币
         if let m = firstInt(text, pattern: #"神奇分[:：]?\s*(\d+)"#) { o.score = m }
-        if let m = firstInt(text, pattern: #"房产币[:：]?\s*(\d+)"#) { o.coin = m }
+        // v1.91：神奇分/房产币改从工作台首页抓取——「总分 889分」「房产币 3,134.11」（含千分位逗号）
+        if let m = firstInt(text, pattern: #"总分\s*(\d+)分"#) { o.score = m }
+        if let cr = text.range(of: #"房产币\s*([\d,]+)"#, options: .regularExpression) {
+            let s = String(text[cr])
+            if let d = s.range(of: #"[\d,]+"#, options: .regularExpression) {
+                let digits = String(s[d]).replacingOccurrences(of: ",", with: "")
+                o.coin = Int(digits) ?? 0
+            }
+        }
         if let m = firstInt(text, pattern: #"全城排名[:：]?\s*(\d+)"#) { o.cityRank = m }
         if let m = firstInt(text, pattern: #"共找到\s*(\d+)\s*套房源"#) { o.totalHouses = m }
         return o

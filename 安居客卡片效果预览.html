@@ -42,7 +42,8 @@
   }
   .warn b { font-weight:700; }
   /* ===== 概览卡（v1.90：6 项，两行三列）===== */
-  .overview { margin:10px 12px 0; background:#fff; border:1px solid #E3EAE6; border-radius:0; padding:14px 0; }
+  .overview { margin:10px 12px 0; background:#fff; border:1px solid #E3EAE6; border-radius:0; padding:0 0 14px; }
+  .ov-refresh { font-size:10.5px; color:#97A49F; padding:10px 12px 6px; }
   .ov-row { display:flex; }
   .ov-item { flex:1; text-align:center; }
   .ov-item .v { font-size:19px; font-weight:800; color:#1C2D29; line-height:1.2; }
@@ -108,8 +109,9 @@
   <!-- 预警条 -->
   <div class="warn"><b>预警</b> ｜ 10套房源房态≥7天，需实地核验</div>
 
-  <!-- 概览卡 6 项（数值 = 解析器实际输出） -->
+  <!-- 概览卡 6 项（数值 = 解析器实际输出；神奇分/房产币改从工作台首页读取） -->
   <div class="overview">
+    <div class="ov-refresh">刷新时间：2026-10-29 16:20</div>
     <div class="ov-row">
       <div class="ov-item"><div class="v">56</div><div class="l">今日点击</div></div>
       <div class="ov-item"><div class="v">33</div><div class="l">推广房源</div></div>
@@ -117,8 +119,8 @@
     </div>
     <div class="ov-row">
       <div class="ov-item"><div class="v">131</div><div class="l">套餐剩余(天)</div></div>
-      <div class="ov-item"><div class="v">0</div><div class="l">神奇分</div></div>
-      <div class="ov-item"><div class="v">0</div><div class="l">房产币</div></div>
+      <div class="ov-item"><div class="v">889</div><div class="l">神奇分</div></div>
+      <div class="ov-item"><div class="v">3134</div><div class="l">房产币</div></div>
     </div>
   </div>
 
@@ -207,7 +209,7 @@
     <tr><td>质量标签</td><td>高</td><td>标题右侧（深绿胶囊）</td></tr>
   </table>
   <p style="margin-top:8px">推广状态链路：精确提取（点击量左侧 <code>安居客 普通推广 精选 58同城 普通推广 精选 11/11</code>）→ 合并显示（58与安居客同步，有精选→「精选」，只有普通推广→「普通推广」）。上方第二张卡即实抓页面（编号4813369935258638）的渲染。</p>
-  <p>封面图位置：当前这条解析结果没有封面 URL（缩略图未抓到），所以显示灰色房子占位图标，与 App 一致。</p>
+  <p style="margin-top:8px">概览卡「神奇分 / 房产币」已接入真实数据：读取时先抓工作台首页（<code>总分 889分</code>、<code>房产币 3,134.11</code>，含千分位），再抓房源列表页（今日点击/推广/端口/套餐），两页文本合并解析。概览卡顶部新增「刷新时间」行。</p>
 </div>
 
 </body>
