@@ -24,19 +24,22 @@ struct AIMessage: Identifiable, Equatable, Codable {
     var images: [String] = []
     /// 本条 user 消息附带的文件文本摘要（如 txt/pdf 提取内容）
     var attachText: String?
+    /// v1.96：本条 assistant 消息实际执行过的 AI 工具动作标签（气泡内展示，一眼可追溯）
+    var toolSummary: [String] = []
 
     enum Role: String, Codable {
         case user, assistant
     }
 
     init(id: UUID = UUID(), role: Role, text: String, time: Date = Date(),
-         images: [String] = [], attachText: String? = nil) {
+         images: [String] = [], attachText: String? = nil, toolSummary: [String] = []) {
         self.id = id
         self.role = role
         self.text = text
         self.time = time
         self.images = images
         self.attachText = attachText
+        self.toolSummary = toolSummary
     }
 }
 
@@ -54,6 +57,20 @@ struct AIAssistantView: View {
     @State private var sending = false
     @State private var showSettings = false
     @State private var errorText: String?
+
+    // MARK: v1.96 AI 工具调用（function calling）状态
+    /// 工具执行阶段文案（思考气泡动态展示：思考中/等待确认/执行中）
+    @State private var toolPhase: String?
+    /// 待用户确认的工具调用（写操作弹系统确认框）
+    @State private var pendingToolCalls: [AIRequestService.AIToolCall]?
+    @State private var pendingToolSummaries: [String] = []
+    @State private var pendingConfirm = false
+    /// 确认框结果回调容器（class 引用语义，跨 alert 回调稳定可用）
+    @State private var confirmBox = ToolConfirmBox()
+    /// v1.96：确认框回调容器（@State 包装保证 alert 按钮回调能拿到同一实例）
+    final class ToolConfirmBox {
+        var continuation: CheckedContinuation<Bool, Never>?
+    }
 
     /// 附件：待发送的图片（UIImage 源）+ 文件文本
     @State private var pendingImages: [UIImage] = []
@@ -138,6 +155,33 @@ struct AIAssistantView: View {
         } message: {
             Text(errorText ?? "")
         }
+        // v1.96：AI 写操作确认框（系统弹窗，同提示框样式；删除类动作执行按钮标红）
+        .alert("确认执行以下操作？", isPresented: $pendingConfirm) {
+            let dangerous = (pendingToolCalls ?? []).contains { AIToolExecutor.isDangerous(toolName: $0.name, arguments: $0.arguments) }
+            Button("取消", role: .cancel) {
+                pendingToolCalls = nil
+                confirmBox.continuation?.resume(returning: false)
+                confirmBox.continuation = nil
+            }
+            Button(dangerous ? "执行（谨慎）" : "执行", role: dangerous ? .destructive : .none) {
+                pendingToolCalls = nil
+                confirmBox.continuation?.resume(returning: true)
+                confirmBox.continuation = nil
+            }
+        } message: {
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(pendingToolSummaries, id: \.self) { line in
+                    Text("• \(line)")
+                        .font(.system(size: 13))
+                }
+                if (pendingToolCalls ?? []).contains(where: { AIToolExecutor.isDangerous(toolName: $0.name, arguments: $0.arguments) }) {
+                    Text("注意：其中包含删除/覆盖类操作，请确认无误后再执行。")
+                        .font(.system(size: 12))
+                        .foregroundColor(.red)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
         .onChange(of: photoPickerItems) { items in
             handlePhotoItems(items)
         }
@@ -205,7 +249,7 @@ struct AIAssistantView: View {
         }
     }
 
-    /// 「正在思考」气泡（v1.95：三个静态圆点改为动态转圈）
+    /// 「正在思考」气泡（v1.95：三个静态圆点改为动态转圈；v1.96：工具执行阶段动态显示文案）
     private var thinkingBubble: some View {
         HStack {
             VStack(alignment: .leading, spacing: 6) {
@@ -213,9 +257,14 @@ struct AIAssistantView: View {
                     ProgressView()
                         .controlSize(.small)
                         .tint(.themeAccent)
-                    Text("正在思考…")
+                    Text(toolPhase ?? "正在思考…")
                         .font(.system(size: 12))
                         .foregroundColor(.themeText2)
+                }
+                if let calls = pendingToolCalls, !calls.isEmpty {
+                    Text("共 \(calls.count) 项操作，等待你确认")
+                        .font(.system(size: 10.5))
+                        .foregroundColor(.themeText3)
                 }
             }
             .padding(.horizontal, 14)
@@ -384,6 +433,26 @@ struct AIAssistantView: View {
                     .padding(.vertical, 9)
                     .background(msg.role == .user ? Color.themeAccent.opacity(0.14) : Color.themePanel)
                     .clipShape(RoundedRectangle(cornerRadius: 12))
+                // v1.96：AI 实际执行过的动作标签（一眼可追溯）
+                if !msg.toolSummary.isEmpty {
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(msg.toolSummary, id: \.self) { label in
+                            HStack(spacing: 4) {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .font(.system(size: 10))
+                                Text(label)
+                                    .font(.system(size: 10.5))
+                                    .lineLimit(1)
+                            }
+                            .foregroundColor(.themeAccentDark)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(Color.themeAccent.opacity(0.1))
+                            .clipShape(Capsule())
+                        }
+                    }
+                    .padding(.top, 2)
+                }
                 Text(timeText(msg.time))
                     .font(.system(size: 9.5))
                     .foregroundColor(.themeText3)
@@ -493,6 +562,7 @@ struct AIAssistantView: View {
         pendingAttachName = nil
 
         sending = true
+        toolPhase = "正在思考…"
         let apiKey = KeychainHelper.load(key: "ai.volcengine.apiKey") ?? ""
         let baseURL = storedBaseURL
         let model = storedModel
@@ -505,16 +575,145 @@ struct AIAssistantView: View {
             // v1.95：发送前先异步拉取云端用量（act=usage，失败给提示不阻断发送）
             let cloudUsage = await fetchCloudUsageText()
             let systemPrompt = buildSystemPrompt(cloudUsage: cloudUsage)
+            // v1.96：组装工具循环消息（system + 历史 + 本条；工具结果逐轮回填）
+            var messages: [[String: Any]] = [["role": "system", "content": systemPrompt]]
+            for turn in history {
+                messages.append(["role": turn.role, "content": turn.text])
+            }
+            if !imageDataURLs.isEmpty {
+                var content: [Any] = []
+                for url in imageDataURLs {
+                    content.append(["type": "image_url", "image_url": ["url": url]])
+                }
+                content.append(["type": "text", "text": fullText])
+                messages.append(["role": "user", "content": content])
+            } else {
+                messages.append(["role": "user", "content": fullText])
+            }
+            var executedLabels: [String] = []
+            var finalText: String?
             do {
-                let reply = try await AIRequestService.send(apiKey: apiKey, baseURL: baseURL, model: model,
-                                                            systemPrompt: systemPrompt, history: history,
-                                                            userText: fullText, userImages: imageDataURLs)
-                messages.append(AIMessage(role: .assistant, text: reply, time: Date()))
+                for _ in 0..<3 {   // 工具循环上限 3 轮，防死循环
+                    let completion = try await AIRequestService.sendMessages(apiKey: apiKey, baseURL: baseURL,
+                                                                             model: model, messages: messages,
+                                                                             tools: AIToolExecutor.toolSchemas)
+                    if completion.toolCalls.isEmpty {
+                        finalText = completion.content ?? ""
+                        break
+                    }
+                    // 回填 assistant tool_calls 消息
+                    let assistantMsg: [String: Any] = [
+                        "role": "assistant",
+                        "content": completion.content ?? "",
+                        "tool_calls": completion.toolCalls.map { call -> [String: Any] in
+                            ["id": call.id, "type": "function",
+                             "function": ["name": call.name, "arguments": call.arguments]]
+                        }
+                    ]
+                    messages.append(assistantMsg)
+                    // 写操作 → 系统确认框；取消则终止本轮
+                    toolPhase = "等待你确认操作…"
+                    let confirmed = await confirmToolCalls(completion.toolCalls)
+                    guard confirmed else {
+                        for call in completion.toolCalls {
+                            messages.append(["role": "tool", "tool_call_id": call.id,
+                                             "content": "用户取消了该操作，未执行任何更改"])
+                        }
+                        finalText = "已取消本次操作（未执行任何更改）。需要调整的话告诉我新的指令。"
+                        break
+                    }
+                    // 执行全部工具调用，结果回填
+                    toolPhase = "正在执行操作…"
+                    let executor = AIToolExecutor(modelContext: modelContext, houseModelContext: houseModelContext)
+                    var labels: [String] = []
+                    for call in completion.toolCalls {
+                        let resultText = await executor.execute(tool: call)
+                        labels.append(actionLabel(for: call))
+                        messages.append(["role": "tool", "tool_call_id": call.id, "content": resultText])
+                    }
+                    executedLabels.append(contentsOf: labels)
+                    toolPhase = "正在思考…"
+                }
+                if finalText == nil {
+                    finalText = "操作已完成（见上方动作标签）。如需继续调整，直接告诉我。"
+                }
+                messages.append(AIMessage(role: .assistant, text: finalText!, time: Date(),
+                                          toolSummary: executedLabels))
                 saveHistory()
             } catch {
                 errorText = error.localizedDescription
             }
             sending = false
+            toolPhase = nil
+        }
+    }
+
+    // MARK: v1.96 工具确认与标签
+
+    /// 过滤出需确认的写操作并弹系统确认框；无写操作直接放行
+    private func confirmToolCalls(_ calls: [AIRequestService.AIToolCall]) async -> Bool {
+        let needing = calls.filter { call in
+            AIToolExecutor.needsConfirm(toolName: call.name, actionType: actionType(of: call))
+        }
+        if needing.isEmpty { return true }
+        pendingToolSummaries = needing.map { call in
+            let args = (try? JSONSerialization.jsonObject(with: Data(call.arguments.utf8)) as? [String: Any]) ?? [:]
+            return AIToolExecutor.summary(toolName: call.name, arguments: args)
+        }
+        pendingToolCalls = needing
+        return await withCheckedContinuation { cont in
+            confirmBox.continuation = cont
+            pendingConfirm = true
+        }
+    }
+
+    private func actionType(of call: AIRequestService.AIToolCall) -> String {
+        let args = (try? JSONSerialization.jsonObject(with: Data(call.arguments.utf8)) as? [String: Any]) ?? [:]
+        return args["action_type"] as? String ?? ""
+    }
+
+    /// 紧凑动作标签（气泡展示，如「房源·2334 已租」「收租·2-1006 已收」）
+    private func actionLabel(for call: AIRequestService.AIToolCall) -> String {
+        let args = (try? JSONSerialization.jsonObject(with: Data(call.arguments.utf8)) as? [String: Any]) ?? [:]
+        let rooms = args["room_nos"] as? [String]
+        let room = args["room_no"] as? String ?? rooms?.first ?? ""
+        let action = actionType(of: call)
+        switch (call.name, action) {
+        case ("update_property", "add_house"): return "房源·新增 \(room)"
+        case ("update_property", "edit_field"): return "房源·编辑 \(room)"
+        case ("update_property", "change_status"):
+            let status = args["status"] as? String ?? ""
+            return "房源·\(room) \(status == "rented" || status == "已租" ? "已租" : "待租")"
+        case ("update_property", "delete_house"): return "房源·移入回收站 \(room)"
+        case ("update_property", "restore_trash"): return "房源·还原 \(room)"
+        case ("update_property", "share_house"): return "房源·生成分享 \(room)"
+        case ("record_finance", "record_rent"): return "收租·\(room) 已收"
+        case ("record_finance", "unrecord_rent"): return "收租·\(room) 已取消"
+        case ("record_finance", "edit_rent_setting"): return "收租·\(room) 设置"
+        case ("record_finance", "record_deal"): return "成交·\(room)"
+        case ("record_finance", "record_income"): return "杂项·收入"
+        case ("record_finance", "record_expense"): return "杂项·支出"
+        case ("record_finance", "edit_misc"): return "杂项·编辑"
+        case ("record_finance", "delete_misc"): return "杂项·删除"
+        case ("record_finance", "utility_settle"): return "水电·\(room) 结算"
+        case ("manage_todo", "add"): return "待办·新增"
+        case ("manage_todo", "complete"): return "待办·完成"
+        case ("manage_todo", "reopen"): return "待办·恢复"
+        case ("manage_todo", "edit"): return "待办·编辑"
+        case ("manage_todo", "delete"): return "待办·删除"
+        case ("refresh_data", "refresh_meters"): return "电表·刷新"
+        case ("refresh_data", "refresh_ajk"): return "安居客·刷新"
+        case ("refresh_data", "create_quick_backup"): return "备份·快速"
+        case ("refresh_data", "create_full_backup"): return "备份·全量"
+        case ("refresh_data", "list_backups"): return "备份·列表"
+        case ("refresh_data", "sync_status"): return "同步·状态"
+        case ("manage_meter", "set_low_alert"): return "电表·预警设置"
+        case ("manage_meter", "set_auto_refresh"): return "电表·定时刷新"
+        case ("query_report", "overdue_list"): return "报表·欠租"
+        case ("query_report", "lease_expiry"): return "报表·到期"
+        case ("query_report", "rent_summary"): return "报表·收租汇总"
+        case ("query_report", "utility_settle"): return "报表·水电结算"
+        default: return call.name + "·" + action
         }
     }
 
@@ -523,6 +722,8 @@ struct AIAssistantView: View {
     private func buildSystemPrompt(cloudUsage: String = "") -> String {
         var base = AIAssistantSettingsView.defaultSystemPrompt
             + (storedTemplate.isEmpty ? "" : "\n\n【我的偏好要求】\n\(storedTemplate)")
+        // v1.96：工具调用能力说明（function calling）
+        base += "\n\n【工具操作能力（v1.96）】你可以调用工具直接执行 App 内的操作：新增/编辑房源、切换待租已租、移入回收站、标记收租、记成交与杂项、管理待办、刷新电表/安居客、新建备份、设置电表预警与定时刷新、查询欠租/租约到期/收租汇总等。调用规则：①参数名用工具定义里的字段（如 room_no、action_type），房号按用户规则（2- 前缀=2座）；②凡是写操作（新增/修改/删除/备份）系统都会先弹确认框，确认后我才执行，你不需要征求用户意见，也不要擅自替用户编造数据；③执行结果会以 tool 结果返回给你，你必须在最终回复里用大白话向用户汇报：改了什么（改了谁/房号）、多少钱、什么时间、结果如何；④批量类操作（如一次切换多套已租）优先用批量字段一次性完成；⑤查询类工具（query_report）可直接调用，不会打扰用户。"
         // 房源（独立容器）
         let house = houseDataSnapshot()
         if !house.isEmpty { base += "\n\n【房源数据快照（只读参考，涉及房源数量/租金/状态的问题据此回答，不要编造）】\n" + house }

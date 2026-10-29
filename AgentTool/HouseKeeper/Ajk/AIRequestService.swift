@@ -121,4 +121,80 @@ struct AIRequestService {
         try await send(apiKey: apiKey, baseURL: baseURL, model: model,
                        systemPrompt: systemPrompt, history: [], userText: userText, userImages: [])
     }
+
+    // MARK: - v1.96 AI 工具调用（function calling）
+
+    /// AI 返回的一次工具调用（结构化参数 JSON 字符串）
+    struct AIToolCall: Codable, Equatable {
+        let id: String
+        let name: String
+        let arguments: String
+    }
+
+    /// 一次补全结果：content 可为 nil（纯工具调用轮），toolCalls 可同时多个
+    struct AICompletion {
+        let content: String?
+        let toolCalls: [AIToolCall]
+    }
+
+    /// 通用请求：消息与工具由调用方构造，支持工具循环（assistant 带 tool_calls / tool 结果消息逐轮追加后重发）
+    static func sendMessages(apiKey: String, baseURL: String, model: String,
+                             messages: [[String: Any]],
+                             tools: [[String: Any]] = []) async throws -> AICompletion {
+        guard let url = URL(string: baseURL) else { throw AIRequestError.parse }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+
+        var body: [String: Any] = [
+            "model": model,
+            "messages": messages,
+            "temperature": 0.4
+        ]
+        if !tools.isEmpty {
+            body["tools"] = tools
+        }
+        req.httpBody = try JSONSerialization.data(withJSONObject: body)
+        req.timeoutInterval = 120
+
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        guard let http = resp as? HTTPURLResponse else { throw AIRequestError.parse }
+        guard (200..<300).contains(http.statusCode) else {
+            var raw = String(String(data: data, encoding: .utf8)?.prefix(300) ?? "")
+            if let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let err = obj["error"] as? [String: Any] {
+                let code = err["code"] as? String ?? ""
+                let message = err["message"] as? String ?? ""
+                raw = code.isEmpty ? message : "\(code) \(message)"
+            }
+            throw AIRequestError.http(http.statusCode, raw)
+        }
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let choices = json["choices"] as? [[String: Any]],
+              let first = choices.first,
+              let message = first["message"] as? [String: Any] else {
+            throw AIRequestError.parse
+        }
+        // content 可为 null（纯工具调用轮），NSNull 转 nil
+        let content: String?
+        if let c = message["content"] as? String {
+            content = c
+        } else {
+            content = nil
+        }
+        // 解析 tool_calls（可为多个）
+        var calls: [AIToolCall] = []
+        if let rawCalls = message["tool_calls"] as? [[String: Any]] {
+            for raw in rawCalls {
+                if let id = raw["id"] as? String,
+                   let fn = raw["function"] as? [String: Any],
+                   let name = fn["name"] as? String,
+                   let arguments = fn["arguments"] as? String {
+                    calls.append(AIToolCall(id: id, name: name, arguments: arguments))
+                }
+            }
+        }
+        return AICompletion(content: content, toolCalls: calls)
+    }
 }

@@ -94,9 +94,16 @@ final class MeterStore: ObservableObject {
         refreshTimer = nil
     }
 
-    /// 静默自动刷新一轮（成功保存，失败等下一轮，不打扰用户）
-    private func autoRefreshOnce() async {
-        guard !meters.isEmpty else { return }
+    /// 静默自动刷新一轮（成功保存，失败等下一轮，不打扰用户），返回成功刷新台数
+    @discardableResult
+    private func autoRefreshOnce() async -> Int {
+        return await refreshNow()
+    }
+
+    /// v1.96：AI 工具调用入口——立即刷新全部电表，返回成功台数（0 表示无清单或接口失败）
+    @MainActor
+    func refreshNow() async -> Int {
+        guard !meters.isEmpty else { return 0 }
         let provider: MeterQuerying
         switch settings.provider {
         case .webView: provider = MeterWebViewProvider.shared
@@ -105,8 +112,9 @@ final class MeterStore: ObservableObject {
         do {
             let ok = try await provider.refreshAll(store: self) { _, _, _ in }
             if ok > 0 { saveMeters() }
+            return ok
         } catch {
-            // 静默失败，等待下轮重试
+            return 0
         }
     }
 
