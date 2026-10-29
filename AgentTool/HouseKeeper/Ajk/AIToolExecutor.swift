@@ -771,7 +771,7 @@ struct AIToolExecutor {
             return "本地备份文件（最近 \(lines.count) 个）：\n" + lines.joined(separator: "\n") + "\n完整列表请在 设置→备份数据 查看"
 
         case "sync_status":
-            let state = SyncStore.shared.snapshot()
+            let state = await SyncStore.shared.snapshot()
             var parts: [String] = []
             parts.append("待同步变更 \(state.pending.count) 条")
             if !state.conflicts.isEmpty { parts.append("冲突 \(state.conflicts.count) 条（需人工处理）") }
