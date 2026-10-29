@@ -743,11 +743,7 @@ struct AIAssistantSettingsView: View {
             Section("模型") {
                 Picker("对话模型", selection: $model) {
                     ForEach(Self.allModels, id: \.modelID) { m in
-                        if Self.isActivated(m.modelID) {
-                            Text("\(m.modelID)（已开通）").tag(m.modelID)
-                        } else {
-                            Text("\(m.modelID)（未开通）").tag(m.modelID)
-                        }
+                        Text(Self.isActivated(m.modelID) ? "\(m.modelID)（已开通）" : "\(m.modelID)（未开通）").tag(m.modelID)
                     }
                     Text("自定义（填下方 ID）").tag("custom")
                 }
