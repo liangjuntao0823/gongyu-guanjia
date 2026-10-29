@@ -66,63 +66,39 @@ struct QuickActionEditSheet: View {
         return parsed.isEmpty ? QuickActionRegistry.defaultMore : parsed
     }
 
+    private enum Zone { case dash, more }
+
     var body: some View {
         NavigationStack {
             List {
                 Section {
                     ForEach(dashIDs, id: \.self) { id in
-                        row(meta: QuickActionRegistry.meta(id))
+                        row(meta: QuickActionRegistry.meta(id), zone: .dash)
                     }
                     .onMove { from, to in
                         var arr = dashIDs
                         arr.move(fromOffsets: from, toOffset: to)
                         writeDash(arr)
                     }
-                    .onDelete { indexSet in
-                        // 删除 = 移到「更多」（工作台每满 7 个，多出的自动收纳）
-                        var dash = dashIDs
-                        var more = moreIDs
-                        for idx in indexSet.sorted(by: >) where idx < dash.count {
-                            more.insert(dash.remove(at: idx), at: 0)
-                        }
-                        writeDash(dash)
-                        writeMore(more)
-                        showToast("已收纳到「更多」")
-                    }
                 } header: {
                     Text("工作台（最多 7 项，第 8 位固定为「更多」）")
                 } footer: {
-                    Text("拖动排序；左滑或点减号把某项收进「更多」")
+                    Text("点减号把某项收进「更多」；拖动排序")
                 }
 
                 Section {
                     ForEach(moreIDs, id: \.self) { id in
-                        row(meta: QuickActionRegistry.meta(id))
+                        row(meta: QuickActionRegistry.meta(id), zone: .more)
                     }
                     .onMove { from, to in
                         var arr = moreIDs
                         arr.move(fromOffsets: from, toOffset: to)
                         writeMore(arr)
                     }
-                    .onDelete { indexSet in
-                        // 删除 = 移回工作台（工作台已满 7 项则提示）
-                        guard dashIDs.count < 7 else {
-                            showToast("工作台已满（7 项），请先收纳一项")
-                            return
-                        }
-                        var dash = dashIDs
-                        var more = moreIDs
-                        for idx in indexSet.sorted(by: >) where idx < more.count {
-                            dash.append(more.remove(at: idx))
-                        }
-                        writeDash(dash)
-                        writeMore(more)
-                        showToast("已放到工作台")
-                    }
                 } header: {
                     Text("更多（收纳区）")
                 } footer: {
-                    Text("拖动排序；左滑或点减号把某项移回工作台。改动即时保存。")
+                    Text("点加号把某项移回工作台；拖动排序。改动即时保存。")
                 }
             }
             .environment(\.editMode, .constant(.active))
@@ -153,8 +129,17 @@ struct QuickActionEditSheet: View {
         }
     }
 
-    private func row(meta: QuickActionMeta?) -> some View {
+    private func row(meta: QuickActionMeta?, zone: Zone) -> some View {
         HStack(spacing: 10) {
+            // 上区减号（收进更多）/ 下区加号（移回工作台），直接点击操作，不需要左滑
+            Button {
+                moveBetweenZones(meta: meta, zone: zone)
+            } label: {
+                Image(systemName: zone == .dash ? "minus.circle.fill" : "plus.circle.fill")
+                    .font(.system(size: 19))
+                    .foregroundColor(zone == .dash ? Color(hex: "E74C3C") : Color(hex: "2E8B57"))
+            }
+            .buttonStyle(.plain)
             if let img = meta?.imageName {
                 Image(img)
                     .resizable()
@@ -171,6 +156,32 @@ struct QuickActionEditSheet: View {
             Text(meta?.label ?? "未知")
                 .font(.system(size: 15, weight: .medium))
             Spacer()
+        }
+    }
+
+    /// 上区点减号 → 收进「更多」；下区点加号 → 移回工作台（工作台满 7 项则提示）
+    private func moveBetweenZones(meta: QuickActionMeta?, zone: Zone) {
+        guard let id = meta?.id else { return }
+        var dash = dashIDs
+        var more = moreIDs
+        if zone == .dash {
+            // 收进「更多」
+            dash.removeAll { $0 == id }
+            if !more.contains(id) { more.insert(id, at: 0) }
+            writeDash(dash)
+            writeMore(more)
+            showToast("已收纳到「更多」")
+        } else {
+            // 移回工作台
+            guard dash.count < 7 else {
+                showToast("工作台已满（7 项），请先收纳一项")
+                return
+            }
+            more.removeAll { $0 == id }
+            if !dash.contains(id) { dash.append(id) }
+            writeDash(dash)
+            writeMore(more)
+            showToast("已放到工作台")
         }
     }
 

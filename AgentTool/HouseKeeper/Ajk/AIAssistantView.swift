@@ -1,22 +1,42 @@
 //
 //  AIAssistantView.swift
-//  公寓管家 · AI 助手对话（v1.85）
+//  公寓管家 · AI 助手对话（v1.88）
 //  场景：云端监控 / 用量查询 / 电表盯防 / 批量账单 / 数据问答（快捷指令一键带入）
 //  配置：API Key 存钥匙串；模型、端点、偏好模板在设置页可改
+//  v1.88：多轮上下文 / 历史保留 / 接入本地房源数据 / 正在思考提示 / 图片·视频首帧·文件发送 / 顶栏改版
 //
 
 import SwiftUI
+import PhotosUI
+import PDFKit
+import AVFoundation
+import SwiftData
+import UniformTypeIdentifiers
 
 // MARK: - 消息模型
 
-struct AIMessage: Identifiable, Equatable {
-    let id = UUID()
+struct AIMessage: Identifiable, Equatable, Codable {
+    let id: UUID
     let role: Role
     let text: String
     let time: Date
+    /// 本条 user 消息附带的图片（data URL），仅当轮展示，历史不重传
+    var images: [String] = []
+    /// 本条 user 消息附带的文件文本摘要（如 txt/pdf 提取内容）
+    var attachText: String?
 
-    enum Role: String {
+    enum Role: String, Codable {
         case user, assistant
+    }
+
+    init(id: UUID = UUID(), role: Role, text: String, time: Date = Date(),
+         images: [String] = [], attachText: String? = nil) {
+        self.id = id
+        self.role = role
+        self.text = text
+        self.time = time
+        self.images = images
+        self.attachText = attachText
     }
 }
 
@@ -24,11 +44,24 @@ struct AIMessage: Identifiable, Equatable {
 
 struct AIAssistantView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
     @State private var messages: [AIMessage] = []
     @State private var input = ""
     @State private var sending = false
     @State private var showSettings = false
     @State private var errorText: String?
+
+    /// 附件：待发送的图片（UIImage 源）+ 文件文本
+    @State private var pendingImages: [UIImage] = []
+    @State private var pendingAttachText: String?
+    @State private var pendingAttachName: String?
+    @State private var showPhotoPicker = false
+    @State private var showFilePicker = false
+    @State private var photoPickerItems: [PhotosPickerItem] = []
+
+    /// 历史记录存储键（保留最近 60 条）
+    private let historyKey = "ai.chatHistory"
+    private let historyLimit = 60
 
     /// 与设置页共用同一存储：设置改动（模型名/端点/Key 状态）立即反映到本页，无需重启
     @AppStorage("ai.modelName") private var storedModel = "doubao-seed-2-1-turbo-260628"
@@ -61,6 +94,10 @@ struct AIAssistantView: View {
                                 bubble(msg)
                                     .id(msg.id)
                             }
+                            if sending {
+                                thinkingBubble
+                                    .id("thinking")
+                            }
                         }
                     }
                     .padding(.horizontal)
@@ -69,19 +106,118 @@ struct AIAssistantView: View {
                 .onChange(of: messages.count) { _ in
                     if let last = messages.last {
                         withAnimation { proxy.scrollTo(last.id, anchor: .bottom) }
+                    } else if sending {
+                        withAnimation { proxy.scrollTo("thinking", anchor: .bottom) }
+                    }
+                }
+                .onChange(of: sending) { _ in
+                    if sending {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                            withAnimation { proxy.scrollTo("thinking", anchor: .bottom) }
+                        }
                     }
                 }
             }
+            attachBar
             inputBar()
         }
         .navigationBarHidden(true)
         .sheet(isPresented: $showSettings) {
             NavigationStack { AIAssistantSettingsView() }
         }
+        .photosPicker(isPresented: $showPhotoPicker, selection: $photoPickerItems, maxSelectionCount: 6, matching: .any(of: [.images, .videos]))
+        .fileImporter(isPresented: $showFilePicker, allowedContentTypes: [.text, .plainText, .pdf, .json, .commaSeparatedText], allowsMultipleSelection: false) { result in
+            handleFileImport(result)
+        }
         .alert("提示", isPresented: Binding(get: { errorText != nil }, set: { if !$0 { errorText = nil } })) {
             Button("好", role: .cancel) { errorText = nil }
         } message: {
             Text(errorText ?? "")
+        }
+        .onChange(of: photoPickerItems) { items in
+            handlePhotoItems(items)
+        }
+        .onAppear {
+            loadHistory()
+        }
+    }
+
+    /// 已选附件栏（图片缩略 + 文件文本），可移除
+    private var attachBar: some View {
+        Group {
+            if !pendingImages.isEmpty || pendingAttachText != nil {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(Array(pendingImages.enumerated()), id: \.offset) { idx, img in
+                            ZStack(alignment: .topTrailing) {
+                                Image(uiImage: img)
+                                    .resizable()
+                                    .scaledToFill()
+                                    .frame(width: 52, height: 52)
+                                    .clipShape(RoundedRectangle(cornerRadius: 9))
+                                Button {
+                                    pendingImages.remove(at: idx)
+                                } label: {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .font(.system(size: 15))
+                                        .foregroundColor(.white)
+                                        .background(Color.black.opacity(0.6))
+                                        .clipShape(Circle())
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        if let name = pendingAttachName {
+                            HStack(spacing: 6) {
+                                Image(systemName: "doc.text.fill")
+                                    .font(.system(size: 12))
+                                    .foregroundColor(.themeAccentDark)
+                                Text(name)
+                                    .font(.system(size: 12))
+                                    .lineLimit(1)
+                                Button {
+                                    pendingAttachText = nil
+                                    pendingAttachName = nil
+                                } label: {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .font(.system(size: 15))
+                                        .foregroundColor(.gray)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(Color.themePanel)
+                            .clipShape(Capsule())
+                            .overlay(Capsule().stroke(Color.themeBorder, lineWidth: 1))
+                        }
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                }
+                .background(Color.themePanel.opacity(0.8))
+            }
+        }
+    }
+
+    /// 「正在思考」气泡
+    private var thinkingBubble: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 4) {
+                    Circle().fill(Color.themeText3).frame(width: 6, height: 6)
+                    Circle().fill(Color.themeText3).frame(width: 6, height: 6)
+                    Circle().fill(Color.themeText3).frame(width: 6, height: 6)
+                }
+                Text("正在思考…")
+                    .font(.system(size: 11))
+                    .foregroundColor(.themeText3)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 11)
+            .background(Color.themePanel)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            Spacer(minLength: 60)
         }
     }
 
@@ -91,40 +227,58 @@ struct AIAssistantView: View {
 
     private var navBar: some View {
         ZStack {
-            LinearGradient(colors: [.themeAccentDark, .themeAccent], startPoint: .top, endPoint: .bottom)
+            // v1.88：浅色顶栏（按钮深色高对比），高度收窄为标准栏
+            Color.themePanel
                 .ignoresSafeArea(edges: .top)
             HStack(spacing: 8) {
                 Button {
                     dismiss()
                 } label: {
                     Image(systemName: "chevron.left")
-                        .font(.system(size: 18, weight: .semibold))
-                        .frame(width: 38, height: 38)
-                        .background(Color.white.opacity(0.14))
-                        .clipShape(RoundedRectangle(cornerRadius: 11))
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(.themeText)
+                        .frame(width: 32, height: 32)
+                        .background(Color.themeBorder.opacity(0.5))
+                        .clipShape(Circle())
                 }
-                VStack(alignment: .leading, spacing: 1) {
+                VStack(alignment: .leading, spacing: 0) {
                     Text("AI 助手")
-                        .font(.system(size: 17, weight: .bold))
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundColor(.themeText)
                     Text(modelLabel)
-                        .font(.system(size: 10.5))
-                        .opacity(0.75)
+                        .font(.system(size: 9.5))
+                        .foregroundColor(.themeText3)
                         .lineLimit(1)
                 }
                 Spacer()
+                if !messages.isEmpty {
+                    Button {
+                        messages = []
+                        saveHistory()
+                    } label: {
+                        Image(systemName: "trash")
+                            .font(.system(size: 14))
+                            .foregroundColor(.themeText)
+                            .frame(width: 32, height: 32)
+                            .background(Color.themeBorder.opacity(0.5))
+                            .clipShape(Circle())
+                    }
+                }
                 Button {
                     showSettings = true
                 } label: {
                     Image(systemName: "gearshape.fill")
-                        .font(.system(size: 16))
-                        .frame(width: 38, height: 38)
-                        .background(Color.white.opacity(0.14))
-                        .clipShape(RoundedRectangle(cornerRadius: 11))
+                        .font(.system(size: 15))
+                        .foregroundColor(.themeText)
+                        .frame(width: 32, height: 32)
+                        .background(Color.themeBorder.opacity(0.5))
+                        .clipShape(Circle())
                 }
             }
             .padding(.horizontal, 12)
+            .padding(.bottom, 4)
         }
-        .frame(height: 96)
+        .frame(height: 64)
     }
 
     private var modelLabel: String {
@@ -189,7 +343,27 @@ struct AIAssistantView: View {
             if msg.role == .user {
                 Spacer(minLength: 60)
             }
-            VStack(alignment: msg.role == .user ? .trailing : .leading, spacing: 4) {
+            VStack(alignment: msg.role == .user ? .trailing : .leading, spacing: 5) {
+                if !msg.images.isEmpty {
+                    // 图片缩略（base64 本地渲染）
+                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: 3), spacing: 4) {
+                        ForEach(Array(msg.images.enumerated()), id: \.offset) { _, url in
+                            if let img = imageFromDataURL(url) {
+                                Image(uiImage: img)
+                                    .resizable()
+                                    .scaledToFill()
+                                    .frame(width: 74, height: 74)
+                                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                            }
+                        }
+                    }
+                    .frame(maxWidth: 240)
+                }
+                if let attach = msg.attachText {
+                    Label(attach, systemImage: "paperclip")
+                        .font(.system(size: 11))
+                        .foregroundColor(.themeAccentDark)
+                }
                 Text(msg.text)
                     .font(.system(size: 14))
                     .foregroundColor(.themeText)
@@ -214,7 +388,29 @@ struct AIAssistantView: View {
     }
 
     private func inputBar() -> some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 6) {
+            // 相册（图片/视频，视频自动截首帧）
+            Button {
+                showPhotoPicker = true
+            } label: {
+                Image(systemName: "photo.on.rectangle.angled")
+                    .font(.system(size: 15))
+                    .foregroundColor(.themeText2)
+                    .frame(width: 34, height: 34)
+            }
+            .buttonStyle(.plain)
+            .disabled(sending)
+            // 文件（txt/md/json/csv/pdf，自动提取文本）
+            Button {
+                showFilePicker = true
+            } label: {
+                Image(systemName: "paperclip")
+                    .font(.system(size: 15))
+                    .foregroundColor(.themeText2)
+                    .frame(width: 34, height: 34)
+            }
+            .buttonStyle(.plain)
+            .disabled(sending)
             TextField(sending ? "正在思考…" : "输入指令，或点上方场景带入", text: $input)
                 .font(.system(size: 14))
                 .textFieldStyle(.plain)
@@ -241,7 +437,7 @@ struct AIAssistantView: View {
                 }
             }
             .buttonStyle(.plain)
-            .disabled(sending || input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            .disabled(sending || (input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && pendingImages.isEmpty))
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
@@ -252,29 +448,182 @@ struct AIAssistantView: View {
 
     private func send() {
         let text = input.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, !sending else { return }
+        guard !text.isEmpty || !pendingImages.isEmpty, !sending else { return }
         guard hasKey else {
             errorText = "请先点右上角设置，填写 API Key（只保存在本机钥匙串）"
             return
         }
+        // 图片 → data URL（压缩）
+        let imageDataURLs = pendingImages.compactMap { compressToDataURL($0) }
+        // 附件文件文本拼进本条
+        var fullText = text
+        if let attach = pendingAttachText, let name = pendingAttachName {
+            fullText += "\n\n【附件：\(name)】\n\(attach)"
+        }
+        let userMsg = AIMessage(role: .user, text: fullText, time: Date(),
+                                images: imageDataURLs, attachText: pendingAttachName)
+        messages.append(userMsg)
+        saveHistory()
         input = ""
-        messages.append(AIMessage(role: .user, text: text, time: Date()))
+        pendingImages = []
+        pendingAttachText = nil
+        pendingAttachName = nil
+
         sending = true
         let apiKey = KeychainHelper.load(key: "ai.volcengine.apiKey") ?? ""
         let baseURL = storedBaseURL
         let model = storedModel
-        let template = storedTemplate
-        let systemPrompt = AIAssistantSettingsView.defaultSystemPrompt + (template.isEmpty ? "" : "\n\n【我的偏好要求】\n\(template)")
+        let systemPrompt = buildSystemPrompt()
+        // 多轮上下文：除本条外的历史（最多保留最近 40 条，防 token 爆炸；历史图片不重传）
+        let history = Array(messages.dropLast().suffix(40)).compactMap { msg -> AIRequestService.ChatTurn? in
+            guard !msg.text.isEmpty else { return nil }
+            return AIRequestService.ChatTurn(role: msg.role == .user ? "user" : "assistant", text: msg.text)
+        }
         Task {
             do {
                 let reply = try await AIRequestService.send(apiKey: apiKey, baseURL: baseURL, model: model,
-                                                            systemPrompt: systemPrompt, userText: text)
+                                                            systemPrompt: systemPrompt, history: history,
+                                                            userText: fullText, userImages: imageDataURLs)
                 messages.append(AIMessage(role: .assistant, text: reply, time: Date()))
+                saveHistory()
             } catch {
                 errorText = error.localizedDescription
             }
             sending = false
         }
+    }
+
+    // MARK: - 系统提示 + 数据快照（v1.88：接入 App 本地房源数据）
+
+    private func buildSystemPrompt() -> String {
+        let base = AIAssistantSettingsView.defaultSystemPrompt
+            + (storedTemplate.isEmpty ? "" : "\n\n【我的偏好要求】\n\(storedTemplate)")
+        let snapshot = houseDataSnapshot()
+        guard !snapshot.isEmpty else { return base }
+        return base + "\n\n【当前 App 房源数据快照（只读参考，涉及房源数量/租金/状态的问题据此回答，不要编造）】\n\(snapshot)"
+    }
+
+    /// 从本地 SwiftData 拉取房源，生成文本快照注入系统提示
+    private func houseDataSnapshot() -> String {
+        let houses = (try? modelContext.fetch(FetchDescriptor<House>())) ?? []
+        let active = houses.filter { !($0.isDeleted ?? false) }
+        guard !active.isEmpty else { return "" }
+        let rented = active.filter { $0.status == .rented }.count
+        let available = active.count - rented
+        var lines = ["共 \(active.count) 套（不含回收站）；待租 \(available) 套 / 已租 \(rented) 套"]
+        for h in active.sorted(by: { $0.roomNo < $1.roomNo }) {
+            let status = h.status == .rented ? "已租" : "待租"
+            var line = "房号\(h.roomNo)（\(h.tower)座）户型\(h.layout) 租金\(h.price)元 房东\(h.landlord) 状态\(status)"
+            if !h.remark.isEmpty { line += " 备注\(h.remark)" }
+            lines.append(line)
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    // MARK: - 历史记录持久化（保留最近 60 条；图片不持久化，控制体积）
+
+    private func loadHistory() {
+        guard let data = UserDefaults.standard.data(forKey: historyKey),
+              let arr = try? JSONDecoder().decode([AIMessage].self, from: data) else { return }
+        messages = arr
+    }
+
+    private func saveHistory() {
+        let recent = Array(messages.suffix(historyLimit))
+        // 图片 data URL 不入库（避免 UserDefaults 膨胀），只保留文本与附件名
+        let slim = recent.map { msg -> AIMessage in
+            guard !msg.images.isEmpty else { return msg }
+            return AIMessage(id: msg.id, role: msg.role, text: msg.text, time: msg.time,
+                             images: [], attachText: msg.attachText)
+        }
+        if let data = try? JSONEncoder().encode(slim) {
+            UserDefaults.standard.set(data, forKey: historyKey)
+        }
+    }
+
+    // MARK: - 附件处理
+
+    /// 相册选择结果：图片直接加，视频截取首帧当图片发
+    private func handlePhotoItems(_ items: [PhotosPickerItem]) {
+        guard !items.isEmpty else { return }
+        Task {
+            for item in items {
+                if let data = try? await item.loadTransferable(type: Data.self),
+                   let img = UIImage(data: data) {
+                    pendingImages.append(img)
+                } else if let movie = try? await item.loadTransferable(type: Movie.self) {
+                    if let frame = extractFirstFrame(url: movie.url) {
+                        pendingImages.append(frame)
+                    } else {
+                        errorText = "视频首帧提取失败，请改发图片"
+                    }
+                }
+            }
+            photoPickerItems = []
+        }
+    }
+
+    private func handleFileImport(_ result: Result<URL, Error>) {
+        guard case .success(let url) = result else { return }
+        let secured = url.startAccessingSecurityScopedResource()
+        defer { if secured { url.stopAccessingSecurityScopedResource() } }
+        let name = url.lastPathComponent
+        do {
+            if url.pathExtension.lowercased() == "pdf" {
+                if let doc = PDFDocument(url: url), let text = doc.string, !text.isEmpty {
+                    pendingAttachText = String(text.prefix(4000))
+                    pendingAttachName = name
+                    return
+                }
+            } else {
+                let data = try Data(contentsOf: url)
+                if let text = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .utf16) {
+                    pendingAttachText = String(text.prefix(4000))
+                    pendingAttachName = name
+                    return
+                }
+            }
+            errorText = "该文件类型暂不支持读取内容（支持 txt/md/json/csv/pdf）"
+        } catch {
+            errorText = "文件读取失败：\(error.localizedDescription)"
+        }
+    }
+
+    /// 图片压缩到长边 1280、JPEG 0.7，转 data URL
+    private func compressToDataURL(_ img: UIImage) -> String? {
+        let maxSide: CGFloat = 1280
+        var target = img
+        let side = max(img.size.width, img.size.height)
+        if side > maxSide {
+            let scale = maxSide / side
+            let newSize = CGSize(width: img.size.width * scale, height: img.size.height * scale)
+            UIGraphicsBeginImageContextWithOptions(newSize, false, 1.0)
+            img.draw(in: CGRect(origin: .zero, size: newSize))
+            target = UIGraphicsGetImageFromCurrentImageContext() ?? img
+            UIGraphicsEndImageContext()
+        }
+        guard let data = target.jpegData(compressionQuality: 0.7) else { return nil }
+        return "data:image/jpeg;base64,\(data.base64EncodedString())"
+    }
+
+    /// 视频取首帧
+    private func extractFirstFrame(url: URL) -> UIImage? {
+        let asset = AVAsset(url: url)
+        let gen = AVAssetImageGenerator(asset: asset)
+        gen.appliesPreferredTrackTransform = true
+        gen.requestedTimeToleranceBefore = .zero
+        gen.requestedTimeToleranceAfter = .zero
+        let time = CMTime(value: 0, timescale: 60)
+        guard let cg = try? gen.copyCGImage(at: time, actualTime: nil) else { return nil }
+        return UIImage(cgImage: cg)
+    }
+
+    /// base64 data URL → UIImage
+    private func imageFromDataURL(_ s: String) -> UIImage? {
+        guard let comma = s.firstIndex(of: ",") else { return nil }
+        let b64 = String(s[s.index(after: comma)...])
+        guard let data = Data(base64Encoded: b64) else { return nil }
+        return UIImage(data: data)
     }
 }
 
