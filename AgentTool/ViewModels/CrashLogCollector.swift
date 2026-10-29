@@ -66,33 +66,50 @@ enum CrashLogCollector {
         try? content.write(to: fileURL, atomically: true, encoding: .utf8)
     }
 
-    /// 信号 handler 专用（信号安全：纯 C 接口 open/write/backtrace_symbols_fd，不碰 Foundation/Swift 对象）
+    /// 信号 handler 专用（信号安全：纯 C 接口 open/write/backtrace_symbols_fd + 静态字符串，不碰变参/堆分配）
     private static func writeLogSignal(_ sig: Int32) {
         let fileURL = nextLogURL(prefix: "Crash_Signal")
-        // 头部用 C 接口拼（信号 handler 内避免 Swift 对象分配）
+        // 日期：strftime 输出（信号 handler 内避免 Swift 对象/变参函数）
         var t = time(nil)
         var tmRaw = tm()
         localtime_r(&t, &tmRaw)
         var dateBuf = [CChar](repeating: 0, count: 64)
         strftime(&dateBuf, dateBuf.count, "%Y-%m-%d %H:%M:%S", &tmRaw)
-        var header = [CChar](repeating: 0, count: 256)
-        snprintf(&header, header.count,
-                 "时间：%s\n信号：%d (SIGABRT=6, SIGSEGV=11, SIGBUS=10, SIGILL=4, SIGFPE=8)\n调用栈：\n",
-                 dateBuf, sig)
 
         let fd = open(fileURL.path, O_WRONLY | O_CREAT | O_APPEND, 0o644)
         guard fd >= 0 else { return }
         defer { close(fd) }
-        _ = write(fd, header, strlen(header))
+
+        writeStaticStr(fd, "时间：")
+        _ = write(fd, dateBuf, strlen(dateBuf))
+        writeStaticStr(fd, "\n信号：")
+        switch sig {
+        case SIGABRT: writeStaticStr(fd, "SIGABRT=6")
+        case SIGSEGV: writeStaticStr(fd, "SIGSEGV=11")
+        case SIGBUS:  writeStaticStr(fd, "SIGBUS=10")
+        case SIGILL:  writeStaticStr(fd, "SIGILL=4")
+        case SIGFPE:  writeStaticStr(fd, "SIGFPE=8")
+        default:      writeStaticStr(fd, "UNKNOWN")
+        }
+        writeStaticStr(fd, " (SIGABRT=6, SIGSEGV=11, SIGBUS=10, SIGILL=4, SIGFPE=8)\n调用栈：\n")
+
         // 本线程调用栈（backtrace_symbols_fd 信号安全，直接写描述符）
-        let maxFrames = 128
-        let frames = UnsafeMutablePointer<UnsafeMutableRawPointer?>.allocate(capacity: maxFrames)
+        let maxFrames: Int32 = 128
+        let frames = UnsafeMutablePointer<UnsafeMutableRawPointer?>.allocate(capacity: Int(maxFrames))
         defer { frames.deallocate() }
         let count = backtrace(frames, maxFrames)
         if count > 0 {
             backtrace_symbols_fd(frames, count, fd)
         }
         _ = write(fd, "\n", 1)
+    }
+
+    /// 信号 handler 专用：写入静态字符串字面量（non-escaping 闭包，零堆分配）
+    @inline(__always)
+    private static func writeStaticStr(_ fd: Int32, _ s: StaticString) {
+        s.withUTF8Buffer { buf in
+            _ = write(fd, buf.baseAddress, buf.count)
+        }
     }
 
     /// 全部崩溃日志文件

@@ -116,12 +116,14 @@ final class AjkStore: ObservableObject {
     private func downloadCovers() {
         let toDownload = houses.filter { !($0.coverURL ?? "").isEmpty && !FileManager.default.fileExists(atPath: Self.coverFileURL(for: $0.number).path) }
         guard !toDownload.isEmpty else { return }
+        // 目录/URL 在主 actor 算好，避免 Task.detached 触碰 actor 隔离静态方法
+        let dir = Self.coversDirectory
         Task.detached {
             for house in toDownload {
                 guard let url = URL(string: house.coverURL ?? "") else { continue }
                 do {
                     let (data, _) = try await URLSession.shared.data(from: url)
-                    try data.write(to: Self.coverFileURL(for: house.number), options: .atomic)
+                    try data.write(to: dir.appendingPathComponent("\(house.number).jpg"), options: .atomic)
                     await MainActor.run { self.objectWillChange.send() }
                 } catch {
                     // 单张失败不重试（可能是防盗链/临时网络），保持无封面占位
