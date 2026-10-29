@@ -1,0 +1,165 @@
+{
+  "src": "安居客卡片效果预览.html",
+  "url": "file:///home/user/Doubao/chats/38448577444166402/%E5%AE%89%E5%B1%85%E5%AE%A2%E5%8D%A1%E7%89%87%E6%95%88%E6%9E%9C%E9%A2%84%E8%A7%88.html",
+  "outdir": "/home/user/Doubao/chats/38448577444166402/_shots",
+  "include": [
+    "lint",
+    "screenshots",
+    "structure"
+  ],
+  "shots": {
+    "desktop": {
+      "revealed": 0,
+      "screenshot": "/home/user/Doubao/chats/38448577444166402/_shots/安居客卡片效果预览_desktop.jpg",
+      "screenshotBytes": 50099,
+      "truncated": false,
+      "structure": {
+        "title": "安居客房源卡片效果预览（v1.90 解析器实际输出）",
+        "firstH1": "",
+        "viewport": {
+          "w": 1440,
+          "h": 900
+        },
+        "fullpage": {
+          "w": 1440,
+          "h": 1343
+        },
+        "counts": {
+          "section": 0,
+          "h1": 0,
+          "h2": 0,
+          "img": 0,
+          "canvas": 0,
+          "svg": 4,
+          "links": 0,
+          "buttons": 0
+        }
+      },
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "horizontalOverflow": [],
+      "resourceErrors": [],
+      "faviconWarning": {
+        "present": false
+      },
+      "faviconHint": "warning · 含义：没有任何 favicon 声明——浏览器 tab、书签、历史记录里显示的是空白默认图标，产物看起来没做完。实测模型原始产物的缺失率 94%。 | 修法：用**内联 SVG data URI**，一行搞定、零额外文件：`<link rel=\"icon\" type=\"image/svg+xml\" href=\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230F766E'/%3E%3Ctext x='32' y='44' font-size='36' text-anchor='middle' fill='white'%3EA%3C/text%3E%3C/svg%3E\">`。图形取产物主题里的一个符号（首字母、核心图标、品牌形状），配色沿用页面主色，别用无关的通用图标。 | **三个必须注意的编码细节**：外层 href 用双引号、SVG 内部属性用单引号；`<` `>` 写成 `%3C` `%3E`；**颜色的 `#` 必须写成 `%23`**——不编码会被当成 URL fragment，图标直接不显示。想做深浅色两版就写两个 link，加 `media=\"(prefers-color-scheme: dark)\"`。 | 为什么只能用 data URI：`link href` **不在发布链路的资源收集白名单里**（那里只认 `src` 属性和 CSS `url()`），指向 `assets/` 的图标文件发布后必然 404；而且额外文件破坏单文件自包含，用户拿到一个 html 就该能用。 | 会不会被平台图标覆盖：不会。发布平台把自己的默认 favicon 注入在 `<head>` 最前面，浏览器对多个 icon link **取最后一个**，模型写在后面的那个生效。 | 豁免：(1) 产物是页面片段（没有完整 `<head>`）时不适用；(2) externalRefs 指向 CDN 域名（`lf3-static.bytednsdoc.com` 之类）时，那是**发布平台注入的**默认图标，不是你写的——迭代已发布产物时会看到，忽略即可，自己另加一个 data URI 的 link 就行（浏览器对多个 icon link 取最后一个）。"
+    },
+    "mobile": {
+      "revealed": 0,
+      "screenshot": "/home/user/Doubao/chats/38448577444166402/_shots/安居客卡片效果预览_mobile.jpg",
+      "screenshotBytes": 80903,
+      "truncated": false,
+      "structure": {
+        "title": "安居客房源卡片效果预览（v1.90 解析器实际输出）",
+        "firstH1": "",
+        "viewport": {
+          "w": 390,
+          "h": 844
+        },
+        "fullpage": {
+          "w": 390,
+          "h": 1417
+        },
+        "counts": {
+          "section": 0,
+          "h1": 0,
+          "h2": 0,
+          "img": 0,
+          "canvas": 0,
+          "svg": 4,
+          "links": 0,
+          "buttons": 0
+        }
+      },
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "horizontalOverflow": [],
+      "resourceErrors": [],
+      "faviconWarning": {
+        "present": false
+      },
+      "faviconHint": "warning · 含义：没有任何 favicon 声明——浏览器 tab、书签、历史记录里显示的是空白默认图标，产物看起来没做完。实测模型原始产物的缺失率 94%。 | 修法：用**内联 SVG data URI**，一行搞定、零额外文件：`<link rel=\"icon\" type=\"image/svg+xml\" href=\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230F766E'/%3E%3Ctext x='32' y='44' font-size='36' text-anchor='middle' fill='white'%3EA%3C/text%3E%3C/svg%3E\">`。图形取产物主题里的一个符号（首字母、核心图标、品牌形状），配色沿用页面主色，别用无关的通用图标。 | **三个必须注意的编码细节**：外层 href 用双引号、SVG 内部属性用单引号；`<` `>` 写成 `%3C` `%3E`；**颜色的 `#` 必须写成 `%23`**——不编码会被当成 URL fragment，图标直接不显示。想做深浅色两版就写两个 link，加 `media=\"(prefers-color-scheme: dark)\"`。 | 为什么只能用 data URI：`link href` **不在发布链路的资源收集白名单里**（那里只认 `src` 属性和 CSS `url()`），指向 `assets/` 的图标文件发布后必然 404；而且额外文件破坏单文件自包含，用户拿到一个 html 就该能用。 | 会不会被平台图标覆盖：不会。发布平台把自己的默认 favicon 注入在 `<head>` 最前面，浏览器对多个 icon link **取最后一个**，模型写在后面的那个生效。 | 豁免：(1) 产物是页面片段（没有完整 `<head>`）时不适用；(2) externalRefs 指向 CDN 域名（`lf3-static.bytednsdoc.com` 之类）时，那是**发布平台注入的**默认图标，不是你写的——迭代已发布产物时会看到，忽略即可，自己另加一个 data URI 的 link 就行（浏览器对多个 icon link 取最后一个）。"
+    }
+  },
+  "engine": "playwright",
+  "chromiumExec": "/opt/vm/preinstall/ms-playwright/chromium-1169/chrome-linux/chrome",
+  "elapsedSec": 4.45,
+  "schemaVersion": 2,
+  "status": "warning",
+  "engineInfo": {
+    "name": "playwright",
+    "degraded": false,
+    "degradedReasons": []
+  },
+  "input": {
+    "original": "安居客卡片效果预览.html",
+    "resolvedPath": "/home/user/Doubao/chats/38448577444166402/安居客卡片效果预览.html",
+    "baseUrl": "file:///home/user/Doubao/chats/38448577444166402/%E5%AE%89%E5%B1%85%E5%AE%A2%E5%8D%A1%E7%89%87%E6%95%88%E6%9E%9C%E9%A2%84%E8%A7%88.html",
+    "protocol": "file",
+    "cwd": "/home/user/Doubao/chats/38448577444166402",
+    "mediaMode": {
+      "reducedMotion": true
+    }
+  },
+  "artifacts": {
+    "screenshots": [
+      {
+        "viewport": "desktop",
+        "path": "/home/user/Doubao/chats/38448577444166402/_shots/安居客卡片效果预览_desktop.jpg",
+        "size": 50099,
+        "visualCoverage": {
+          "complete": true,
+          "reason": null
+        }
+      },
+      {
+        "viewport": "mobile",
+        "path": "/home/user/Doubao/chats/38448577444166402/_shots/安居客卡片效果预览_mobile.jpg",
+        "size": 80903,
+        "visualCoverage": {
+          "complete": true,
+          "reason": null
+        }
+      }
+    ]
+  },
+  "summary": {
+    "blocker": 0,
+    "error": 0,
+    "warning": 2,
+    "info": 0
+  },
+  "findings": [
+    {
+      "ruleId": "faviconWarning",
+      "severity": "warning",
+      "kind": "metadata",
+      "viewport": "desktop",
+      "selector": null,
+      "evidence": {
+        "present": false
+      },
+      "dedupeKey": "faviconWarning|desktop||0"
+    },
+    {
+      "ruleId": "faviconWarning",
+      "severity": "warning",
+      "kind": "metadata",
+      "viewport": "mobile",
+      "selector": null,
+      "evidence": {
+        "present": false
+      },
+      "dedupeKey": "faviconWarning|mobile||0"
+    }
+  ],
+  "prioritizedActions": [
+    {
+      "ruleId": "faviconWarning",
+      "severity": "warning",
+      "viewport": "desktop",
+      "selector": null
+    }
+  ],
+  "reportPath": "/home/user/Doubao/chats/38448577444166402/_shots/report.json"
+}

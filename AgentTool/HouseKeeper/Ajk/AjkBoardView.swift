@@ -412,6 +412,9 @@ struct AjkHouseCard: View {
     var body: some View {
         // v1.90：封面图（本地已下载才显示；无封面走占位）
         let coverPath = AjkStore.shared.coverLocalPath(for: house.number)
+        // v1.91：显示裁剪——小区去掉「顺德-龙江，」前缀只留小区名；面积不显示；核验只显示「核验成功」
+        let communityShort = house.community.components(separatedBy: "，").last ?? house.community
+        let verifiedShort = house.verified.components(separatedBy: "·").last ?? house.verified
         return HStack(alignment: .top, spacing: 10) {
             if let cp = coverPath, let img = UIImage(contentsOfFile: cp) {
                 Image(uiImage: img)
@@ -441,7 +444,7 @@ struct AjkHouseCard: View {
                         tag(house.quality, color: house.quality == "高" ? .themeAccentDark : .themeAmber)
                     }
                 }
-                Text("\(house.community) · \(house.area) \(house.layout) \(house.floor) \(house.price)")
+                Text("\(communityShort) · \(house.layout) \(house.floor) \(house.price)")
                     .font(.system(size: 12))
                     .foregroundColor(.themeText2)
                     .lineLimit(1)
@@ -511,8 +514,8 @@ struct AjkHouseCard: View {
                 }
 
                 HStack(spacing: 10) {
-                    if !house.verified.isEmpty {
-                        Text(house.verified)
+                    if !verifiedShort.isEmpty {
+                        Text(verifiedShort)
                             .font(.system(size: 10))
                             .foregroundColor(.themeText2)
                     }

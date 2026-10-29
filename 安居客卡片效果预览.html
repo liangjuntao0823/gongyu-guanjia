@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>安居客房源卡片效果预览（v1.90 解析器实际输出）</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: #E8EDEA; display:flex; flex-direction:column; align-items:center; padding:24px 12px 48px;
+    color:#1C2D29;
+  }
+  .page-title { font-size:14px; color:#5F716C; margin-bottom:18px; text-align:center; line-height:1.6; }
+  .phone {
+    width:390px; max-width:100%; background:#F6F8F7; border-radius:24px; overflow:hidden;
+    box-shadow:0 8px 32px rgba(0,0,0,.14); border:1px solid #E3EAE6;
+  }
+  /* ===== 顶栏（v1.90：深绿渐变 + 白色按钮，高度 62）===== */
+  .navbar {
+    background:linear-gradient(180deg,#0B7A66,#0FA48B);
+    padding:14px 12px 10px; display:flex; align-items:center; gap:8px;
+  }
+  .nav-btn {
+    width:34px; height:34px; border-radius:10px; background:rgba(255,255,255,.16);
+    display:flex; align-items:center; justify-content:center; flex:none;
+  }
+  .nav-btn svg { width:17px; height:17px; }
+  .nav-title { flex:1; min-width:0; }
+  .nav-title .t1 { font-size:16px; font-weight:700; color:#fff; line-height:1.2; }
+  .nav-title .t2 { font-size:10px; color:rgba(255,255,255,.8); margin-top:1px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .nav-read {
+    height:34px; border-radius:17px; background:rgba(255,255,255,.18);
+    display:flex; align-items:center; gap:4px; padding:0 10px; flex:none;
+  }
+  .nav-read svg { width:12px; height:12px; }
+  .nav-read span { font-size:12px; font-weight:600; color:#fff; }
+  /* ===== 预警条 ===== */
+  .warn {
+    margin:10px 12px 0; padding:8px 12px; border-radius:10px;
+    background:#FFF7E6; border:1px solid #F3DFAE; font-size:11px; color:#B0761A;
+  }
+  .warn b { font-weight:700; }
+  /* ===== 概览卡（v1.90：6 项，两行三列）===== */
+  .overview { margin:10px 12px 0; background:#fff; border:1px solid #E3EAE6; border-radius:0; padding:14px 0; }
+  .ov-row { display:flex; }
+  .ov-item { flex:1; text-align:center; }
+  .ov-item .v { font-size:19px; font-weight:800; color:#1C2D29; line-height:1.2; }
+  .ov-item .l { font-size:10.5px; color:#97A49F; margin-top:3px; }
+  .ov-item + .ov-item { border-left:1px solid #E3EAE6; }
+  /* ===== 房源卡片（AjkHouseCard v1.91 复原版）===== */
+  .house-card {
+    margin:10px 12px 0; background:#fff; border:1px solid #E3EAE6; border-radius:12px;
+    padding:12px; display:flex; gap:10px;
+  }
+  .cover { width:62px; height:62px; border-radius:10px; background:rgba(227,234,230,.55); border:1px solid #E3EAE6; display:flex; align-items:center; justify-content:center; flex:none; }
+  .cover svg { width:22px; height:22px; color:#97A49F; }
+  .card-body { flex:1; min-width:0; display:flex; flex-direction:column; gap:6px; }
+  .row-title { display:flex; align-items:flex-start; gap:6px; }
+  .row-title .txt { font-size:14px; font-weight:600; color:#1C2D29; line-height:1.35; flex:1; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+  .q-tag { font-size:10px; font-weight:500; color:#0B7A66; background:rgba(11,122,102,.10); padding:2px 6px; border-radius:999px; flex:none; margin-top:1px; }
+  .row-meta { font-size:12px; color:#5F716C; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .row-info { display:flex; align-items:center; gap:10px; font-size:11px; color:#97A49F; }
+  .row-info .spacer { flex:1; }
+  .row-info .red { color:#E04545; font-weight:700; }
+  .row-click { display:flex; align-items:center; gap:10px; }
+  .click-num { display:flex; align-items:baseline; gap:3px; }
+  .click-num .today { font-size:15px; font-weight:700; color:#0B7A66; }
+  .click-num .sep { font-size:12px; color:#97A49F; }
+  .click-num .total { font-size:13px; font-weight:500; color:#5F716C; }
+  .click-delta { font-size:10px; color:#0B7A66; }
+  .click-delta.down { color:#E04545; }
+  .row-click .spacer { flex:1; }
+  .plat { font-size:10px; color:#3E7BFA; background:rgba(62,123,250,.10); padding:2px 6px; border-radius:999px; }
+  .maint { font-size:10px; color:#E09A2F; }
+  .row-status { display:flex; align-items:center; gap:10px; font-size:10px; }
+  .st-ok { color:#5F716C; }
+  .st-promo { color:#97A49F; }
+  .row-status .spacer { flex:1; }
+  /* ===== 底部说明 ===== */
+  .notes { width:390px; max-width:100%; margin-top:20px; font-size:12px; color:#5F716C; line-height:1.8; }
+  .notes h3 { font-size:13px; color:#1C2D29; margin-bottom:6px; }
+  .notes table { width:100%; border-collapse:collapse; margin-top:6px; font-size:11.5px; }
+  .notes td, .notes th { border:1px solid #E3EAE6; padding:5px 8px; text-align:left; }
+  .notes th { background:#F1F5F2; font-weight:600; color:#1C2D29; }
+  .notes code { background:#EEF3F0; padding:1px 5px; border-radius:4px; font-size:11px; color:#0B7A66; }
+</style>
+</head>
+<body>
+
+<div class="page-title">App 内「安居客后台」实际渲染效果<br>（v1.90 解析器跑你的截图文本，1:1 复刻 AjkHouseCard 布局与配色）</div>
+
+<div class="phone">
+  <!-- 顶栏 -->
+  <div class="navbar">
+    <div class="nav-btn"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg></div>
+    <div class="nav-title">
+      <div class="t1">安居客后台</div>
+      <div class="t2">上次抓取 10-29 16:20 | 共34套</div>
+    </div>
+    <div class="nav-btn"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></div>
+    <div class="nav-read">
+      <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>
+      <span>读取</span>
+    </div>
+  </div>
+
+  <!-- 预警条 -->
+  <div class="warn"><b>预警</b> ｜ 10套房源房态≥7天，需实地核验</div>
+
+  <!-- 概览卡 6 项（数值 = 解析器实际输出） -->
+  <div class="overview">
+    <div class="ov-row">
+      <div class="ov-item"><div class="v">56</div><div class="l">今日点击</div></div>
+      <div class="ov-item"><div class="v">33</div><div class="l">推广房源</div></div>
+      <div class="ov-item"><div class="v">7</div><div class="l">剩余端口</div></div>
+    </div>
+    <div class="ov-row">
+      <div class="ov-item"><div class="v">131</div><div class="l">套餐剩余(天)</div></div>
+      <div class="ov-item"><div class="v">0</div><div class="l">神奇分</div></div>
+      <div class="ov-item"><div class="v">0</div><div class="l">房产币</div></div>
+    </div>
+  </div>
+
+  <!-- 房源卡片：解析器对截图文本的真实输出 -->
+  <div class="house-card">
+    <div class="cover">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/><path d="M9 21v-6h6v6"/></svg>
+    </div>
+    <div class="card-body">
+      <div class="row-title">
+        <div class="txt">整租拥有蓝天白云的崭新单间 高层东南向 房子干净整洁 价格美丽</div>
+        <div class="q-tag">高</div>
+      </div>
+      <div class="row-meta">利保米兰公馆 · 1室0厅 23层 800元/月</div>
+      <div class="row-info">
+        <span>编号 4802013645366272</span>
+        <span class="spacer"></span>
+        <span>房态0天</span>
+        <span>已编辑9天</span>
+      </div>
+      <div class="row-click">
+        <span class="click-num"><span class="today">17</span><span class="sep">/</span><span class="total">109</span></span>
+        <span class="click-delta">较上次 +9</span>
+        <span class="spacer"></span>
+        <span class="plat">安居客</span>
+        <span class="plat">58同城</span>
+        <span class="maint">维护人</span>
+      </div>
+      <div class="row-status">
+        <span class="st-ok">核验成功</span>
+        <span class="st-ok">暂无视频</span>
+        <span class="st-promo">加推·精选·普通推广</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="notes">
+  <h3>说明：这张卡片是解析器对截图文本的【实际输出】</h3>
+  <table>
+    <tr><th>解析字段</th><th>实际提取值</th><th>卡片位置</th></tr>
+    <tr><td>编号</td><td>4802013645366272</td><td>信息行左侧</td></tr>
+    <tr><td>标题</td><td>整租拥有蓝天白云的崭新单间…</td><td>第一行（最多两行截断）</td></tr>
+    <tr><td>小区</td><td>利保米兰公馆（显示时去掉「顺德-龙江，」前缀）</td><td>第二行</td></tr>
+    <tr><td>面积（已隐藏）</td><td>42.26平（不再显示）</td><td>已从第二行删除</td></tr>
+    <tr><td>户型/楼层/租金</td><td>1室0厅 / 23层 / 800元/月</td><td>第二行</td></tr>
+    <tr><td>点击量（已复原）</td><td>17 / 109</td><td>点击量行：今日点击 17（加粗深绿）+ 累计 109</td></tr>
+    <tr><td>较上次变化（已复原）</td><td>较上次 +9（示例值，与最近一次快照对比）</td><td>点击量行右侧</td></tr>
+    <tr><td>房态/已编辑</td><td>房态0天 / 已编辑9天</td><td>信息行</td></tr>
+    <tr><td>平台</td><td>安居客 / 58同城</td><td>点击量行右侧胶囊</td></tr>
+    <tr><td>维护状态</td><td>维护人</td><td>平台旁（琥珀色）</td></tr>
+    <tr><td>核验 / 视频</td><td>核验成功（显示时去掉「实地核验·」前缀） / 暂无视频</td><td>最底行</td></tr>
+    <tr><td>推广状态</td><td>加推·精选·普通推广</td><td>最底行</td></tr>
+    <tr><td>质量标签</td><td>高</td><td>标题右侧（深绿胶囊）</td></tr>
+  </table>
+  <p style="margin-top:8px">概览卡「神奇分 / 房产币」显示 0：当前页面文本没有这两项（解析器抓不到就为 0，与 App 行为一致）；若页面有，会按 <code>神奇分[:：]?\s*(\d+)</code> / <code>房产币[:：]?\s*(\d+)</code> 自动提取。</p>
+  <p>封面图位置：当前这条解析结果没有封面 URL（缩略图未抓到），所以显示灰色房子占位图标，与 App 一致。</p>
+</div>
+
+</body>
+</html>
