@@ -392,7 +392,7 @@ struct AIAssistantView: View {
 
     private func inputBar() -> some View {
         HStack(spacing: 6) {
-            // 相册（图片/视频，视频自动截首帧）
+            // 相册（图片/视频，视频自动截首帧）——v1.93：回答期间不禁用，可提前选图排队
             Button {
                 showPhotoPicker = true
             } label: {
@@ -402,8 +402,7 @@ struct AIAssistantView: View {
                     .frame(width: 34, height: 34)
             }
             .buttonStyle(.plain)
-            .disabled(sending)
-            // 文件（txt/md/json/csv/pdf，自动提取文本）
+            // 文件（txt/md/json/csv/pdf，自动提取文本）——v1.93：回答期间不禁用
             Button {
                 showFilePicker = true
             } label: {
@@ -413,8 +412,9 @@ struct AIAssistantView: View {
                     .frame(width: 34, height: 34)
             }
             .buttonStyle(.plain)
-            .disabled(sending)
-            TextField(sending ? "正在思考…" : "输入指令，或点上方场景带入", text: $input)
+            // v1.93：回答期间输入框保持可输入——去掉 .disabled(sending)（用户反馈发送后编辑框锁死，
+            // 必须等回复完才能打字）；现在等待时也能继续编辑内容，回答完点发送即可
+            TextField(sending ? "正在思考…（仍可继续输入，回答完即可发送）" : "输入指令，或点上方场景带入", text: $input)
                 .font(.system(size: 14))
                 .textFieldStyle(.plain)
                 .padding(.horizontal, 12)
@@ -422,7 +422,6 @@ struct AIAssistantView: View {
                 .background(Color.themePanel)
                 .cornerRadius(10)
                 .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.themeBorder, lineWidth: 1))
-                .disabled(sending)
             Button {
                 send()
             } label: {
@@ -700,6 +699,16 @@ struct AIAssistantSettingsView: View {
         }
         return list
     }
+    /// 火山方舟账号已开通的模型（2026-10-29 控制台「开通管理」页核实）；
+    /// 未开通的模型直接调用会返回 ModelNotOpen(404)，本列表用于设置页实时标注开通状态
+    static let activatedModelIDs: Set<String> = [
+        "doubao-seed-2-1-turbo-260628",   // Doubao-Seed-2.1-turbo
+        "doubao-seed-2-1-lite-260915",    // Doubao-Seed-2.1-lite
+        "doubao-seed-evolving"            // Doubao-Seed-Evolving
+    ]
+    static func isActivated(_ modelID: String) -> Bool {
+        activatedModelIDs.contains(modelID)
+    }
     /// 旧版本写错的短模型名（不含 doubao- 前缀，API 会 404），进入设置时自动迁移
     static let legacyModels = ["Seed-2.1-turbo", "Seed-2.1-pro", "Seed-2.1-lite", "DeepSeek-V4-flash"]
     static let defaultSystemPrompt = "你是「公寓管家」的 AI 助手。用户是佛山顺德的二房东/房产从业者，管理米兰公馆的多套出租房源。回答要简洁、口语化、中文优先；涉及数据时先给结论再给依据；涉及金额要精确到分。你只能基于用户 App 里的数据和我提供的信息回答，不要编造数据。"
@@ -734,7 +743,11 @@ struct AIAssistantSettingsView: View {
             Section("模型") {
                 Picker("对话模型", selection: $model) {
                     ForEach(Self.allModels, id: \.modelID) { m in
-                        Text(m.modelID).tag(m.modelID)
+                        if Self.isActivated(m.modelID) {
+                            Text("\(m.modelID)（已开通）").tag(m.modelID)
+                        } else {
+                            Text("\(m.modelID)（未开通）").tag(m.modelID)
+                        }
                     }
                     Text("自定义（填下方 ID）").tag("custom")
                 }
@@ -744,7 +757,7 @@ struct AIAssistantSettingsView: View {
                 Text("输入即保存；保存过自定义 ID 后再次进入会自动回填显示")
                     .font(.system(size: 11))
                     .foregroundColor(.themeText3)
-                // v1.89：当前模型的说明介绍
+                // v1.89：当前模型的说明介绍（v1.93 起带开通状态标注）
                 VStack(alignment: .leading, spacing: 4) {
                     Text("模型说明")
                         .font(.system(size: 12, weight: .semibold))
@@ -756,6 +769,8 @@ struct AIAssistantSettingsView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(Color.themeBorder.opacity(0.35))
                 .cornerRadius(8)
+            } footer: {
+                Text("当前账号已开通：Doubao-Seed-2.1-turbo / Doubao-Seed-2.1-lite / Doubao-Seed-Evolving；其余模型需在火山方舟控制台「开通管理」页开通后调用，未开通会提示模型未开通")
             }
 
             Section("接口端点") {
@@ -819,13 +834,14 @@ struct AIAssistantSettingsView: View {
         }
     }
 
-    /// v1.89：当前选中模型的说明（内置/云端合并列表中查找）
+    /// v1.89：当前选中模型的说明（内置/云端合并列表中查找）；v1.93 起带开通状态
     private var currentModelDesc: String {
         if model == "custom" && !modelCustom.isEmpty {
             return "自定义模型：请填写火山方舟已开通模型的完整 ID（如 doubao- 开头）；ID 写错会返回 InvalidEndpointOrModel.NotFound"
         }
         if let m = Self.allModels.first(where: { $0.modelID == model }) {
-            return "\(m.name)｜\(m.desc)"
+            let state = Self.isActivated(m.modelID) ? "已开通" : "未开通（需到火山方舟控制台开通）"
+            return "【\(state)】\(m.name)｜\(m.desc)"
         }
         return "请选择上方模型查看说明"
     }

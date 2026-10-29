@@ -14,7 +14,27 @@ enum AIRequestError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .noKey: return "请先在 AI 助手设置里填写 API Key"
-        case .http(let code, let msg): return "请求失败（\(code)）：\(msg)"
+        case .http(let code, let rawMsg):
+            // v1.93：火山方舟常见错误码中文化，不再直接甩英文 JSON
+            let msg = rawMsg
+            if msg.contains("ModelNotOpen") || msg.contains("has not activated") {
+                return "模型未开通：该模型还没在火山方舟开通服务。请到火山方舟控制台「开通管理」页开通后重试，或先在设置里切换回已开通的模型（如 turbo）。"
+            }
+            if msg.contains("QuotaExhausted") || msg.contains("FreeTrialQuotaExhausted") || msg.contains("InsufficientBalance") || code == 402 || code == 429 {
+                return "额度不足或请求过于频繁：免费额度可能已用完，请到火山方舟控制台「开通管理」确认额度与计费，稍后再试。"
+            }
+            if msg.contains("InvalidApiKey") || msg.contains("AccessDenied") || code == 401 || code == 403 {
+                return "API Key 无效或没有权限：请到设置页检查 Key 是否正确（只保存在本机钥匙串）。"
+            }
+            if msg.contains("ModelOverloaded") || msg.contains("RequestLimit") || msg.contains("TooManyRequests") {
+                return "模型服务繁忙，请稍后再试。"
+            }
+            if msg.contains("ModelNotFound") || msg.contains("EndpointNotFound") || msg.contains("does not exist") {
+                return "模型不存在或无权访问：请确认设置里的模型 ID 正确，或切换到已开通模型。"
+            }
+            // 兜底：截断原始内容，避免整屏英文 JSON
+            let trimmed = String(msg.prefix(120))
+            return "请求失败（\(code)）：\(trimmed.isEmpty ? "未知错误" : trimmed)"
         case .parse: return "返回内容解析失败"
         }
     }
@@ -75,9 +95,15 @@ struct AIRequestService {
         let (data, resp) = try await URLSession.shared.data(for: req)
         guard let http = resp as? HTTPURLResponse else { throw AIRequestError.parse }
         guard (200..<300).contains(http.statusCode) else {
-            let msg = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String
-                ?? String(String(data: data, encoding: .utf8)?.prefix(200) ?? "")
-            throw AIRequestError.http(http.statusCode, msg)
+            // v1.93：解析 error 对象（code+message），供中文化映射识别（如 ModelNotOpen）
+            var raw = String(String(data: data, encoding: .utf8)?.prefix(300) ?? "")
+            if let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let err = obj["error"] as? [String: Any] {
+                let code = err["code"] as? String ?? ""
+                let message = err["message"] as? String ?? ""
+                raw = code.isEmpty ? message : "\(code) \(message)"
+            }
+            throw AIRequestError.http(http.statusCode, raw)
         }
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let choices = json["choices"] as? [[String: Any]],
