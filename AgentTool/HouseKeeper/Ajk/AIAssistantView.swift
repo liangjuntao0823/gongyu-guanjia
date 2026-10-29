@@ -551,8 +551,9 @@ struct AIAssistantView: View {
                 if let data = try? await item.loadTransferable(type: Data.self),
                    let img = UIImage(data: data) {
                     pendingImages.append(img)
-                } else if let movie = try? await item.loadTransferable(type: Movie.self) {
-                    if let frame = extractFirstFrame(url: movie.url) {
+                } else if let fileURL = try? await item.loadTransferable(type: URL.self) {
+                    // 视频：PhotosPicker 对视频返回临时文件 URL，截取首帧
+                    if let frame = extractFirstFrame(url: fileURL) {
                         pendingImages.append(frame)
                     } else {
                         errorText = "视频首帧提取失败，请改发图片"
@@ -563,8 +564,8 @@ struct AIAssistantView: View {
         }
     }
 
-    private func handleFileImport(_ result: Result<URL, Error>) {
-        guard case .success(let url) = result else { return }
+    private func handleFileImport(_ result: Result<[URL], Error>) {
+        guard case .success(let urls) = result, let url = urls.first else { return }
         let secured = url.startAccessingSecurityScopedResource()
         defer { if secured { url.stopAccessingSecurityScopedResource() } }
         let name = url.lastPathComponent
