@@ -62,16 +62,18 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          SETTINGS="$(xcodebuild -project "$PROJECT_PATH" -scheme "$SCHEME" -configuration "$CONFIGURATION" -showBuildSettings)"
-          VERSION="$(printf '%s\n' "$SETTINGS" | awk -F ' = ' '/^[[:space:]]*MARKETING_VERSION = / {print $2; exit}')"
-          BUILD="$(printf '%s\n' "$SETTINGS" | awk -F ' = ' '/^[[:space:]]*CURRENT_PROJECT_VERSION = / {print $2; exit}')"
-          PRODUCT_NAME="$(printf '%s\n' "$SETTINGS" | awk -F ' = ' '/^[[:space:]]*WRAPPER_NAME = / {print $2; exit}')"
-          if [[ -z "$PRODUCT_NAME" ]]; then
-            PRODUCT_NAME="$(printf '%s\n' "$SETTINGS" | awk -F ' = ' '/^[[:space:]]*FULL_PRODUCT_NAME = / {print $2; exit}')"
-          fi
-          test -n "$VERSION"
-          test -n "$BUILD"
-          test -n "$PRODUCT_NAME"
+          # v1.89 fix: awk 提前 exit 触发 printf Broken pipe（pipefail 下失败）；改用 python 一次读完再解析
+          SETTINGS="$(xcodebuild -project "$PROJECT_PATH" -scheme "$SCHEME" -configuration "$CONFIGURATION" -showBuildSettings 2>/dev/null || true)"
+          read VERSION BUILD PRODUCT_NAME <<< "$(printf '%s' "$SETTINGS" | python3 -c '
+import sys, re
+s = sys.stdin.read()
+def g(k):
+    m = re.search(r"^\s*" + k + r" = (\S+)", s, re.M)
+    return m.group(1) if m else ""
+v = g("MARKETING_VERSION"); b = g("CURRENT_PROJECT_VERSION")
+p = g("WRAPPER_NAME") or g("FULL_PRODUCT_NAME")
+print(v, b, p)')"
+          test -n "$VERSION" && test -n "$BUILD" && test -n "$PRODUCT_NAME"
           IPA_NAME="公寓管家${VERSION}.ipa"
           {
             echo "version=$VERSION"
