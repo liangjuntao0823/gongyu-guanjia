@@ -78,13 +78,14 @@ final class MeterStore: ObservableObject {
         guard settings.autoRefreshEnabled else { return }
         let minutes = max(10, settings.autoRefreshMinutes)
         refreshTimer = Timer.scheduledTimer(withTimeInterval: TimeInterval(minutes * 60), repeats: true) { [weak self] _ in
+            guard let self else { return }
             Task { @MainActor in
-                await self?.autoRefreshOnce()
+                await self.autoRefreshOnce()
             }
         }
         // 启动即先补刷一次（覆盖 App 被杀期间的缺口）
         Task { @MainActor in
-            await self?.autoRefreshOnce()
+            await self.autoRefreshOnce()
         }
     }
 
