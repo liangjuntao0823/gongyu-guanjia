@@ -22,7 +22,7 @@ struct AjkHouse: Identifiable, Codable, Equatable {
     let editedDays: Int     // 已编辑 N 天
     let houseStateDays: Int // 房态 N 天（≥7 需实地核验）
     let platforms: [String] // 推广平台（安居客 / 58同城）
-    let promotions: [String] // 推广状态（加推/精选/普通推广 —— 位于点击量下方，v1.90 明确提取此字段）
+    let promotions: [String] // 推广状态（v1.91：点击量左侧「平台+推广类型」精确提取，如"安居客·普通推广·精选"）
     let verified: String    // 核验状态
     let maintainer: String  // 维护状态
     let video: String       // 视频状态

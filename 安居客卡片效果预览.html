@@ -150,7 +150,39 @@
       <div class="row-status">
         <span class="st-ok">核验成功</span>
         <span class="st-ok">暂无视频</span>
-        <span class="st-promo">加推·精选·普通推广</span>
+        <span class="st-promo">安居客·普通推广·精选  58同城·普通推广·精选</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 第二张：真实登录抓取的页面卡片（推广状态=点击量左侧原文精确提取） -->
+  <div class="house-card">
+    <div class="cover">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/><path d="M9 21v-6h6v6"/></svg>
+    </div>
+    <div class="card-body">
+      <div class="row-title">
+        <div class="txt">整租米兰大loft 一房一厅 全屋定制衣橱 收纳空间足 价格实惠</div>
+        <div class="q-tag">高</div>
+      </div>
+      <div class="row-meta">利保米兰公馆 · 1室1厅 10层 1200元/月</div>
+      <div class="row-info">
+        <span>编号 4813369935258638</span>
+        <span class="spacer"></span>
+        <span>房态1天</span>
+        <span>已编辑1天</span>
+      </div>
+      <div class="row-click">
+        <span class="click-num"><span class="today">11</span><span class="sep">/</span><span class="total">11</span></span>
+        <span class="click-delta">较上次 +2</span>
+        <span class="spacer"></span>
+        <span class="plat">安居客</span>
+        <span class="plat">58同城</span>
+      </div>
+      <div class="row-status">
+        <span class="st-ok">核验成功</span>
+        <span class="st-ok">暂无视频</span>
+        <span class="st-promo">安居客·普通推广·精选  58同城·普通推广·精选</span>
       </div>
     </div>
   </div>
@@ -171,10 +203,10 @@
     <tr><td>平台</td><td>安居客 / 58同城</td><td>点击量行右侧胶囊</td></tr>
     <tr><td>维护状态</td><td>维护人</td><td>平台旁（琥珀色）</td></tr>
     <tr><td>核验 / 视频</td><td>核验成功（显示时去掉「实地核验·」前缀） / 暂无视频</td><td>最底行</td></tr>
-    <tr><td>推广状态</td><td>加推·精选·普通推广</td><td>最底行</td></tr>
+    <tr><td>推广状态（已改精确提取）</td><td>安居客·普通推广·精选 / 58同城·普通推广·精选</td><td>最底行（点击量左侧「平台+推广类型」精确提取，不再关键词猜测）</td></tr>
     <tr><td>质量标签</td><td>高</td><td>标题右侧（深绿胶囊）</td></tr>
   </table>
-  <p style="margin-top:8px">概览卡「神奇分 / 房产币」显示 0：当前页面文本没有这两项（解析器抓不到就为 0，与 App 行为一致）；若页面有，会按 <code>神奇分[:：]?\s*(\d+)</code> / <code>房产币[:：]?\s*(\d+)</code> 自动提取。</p>
+  <p style="margin-top:8px">推广状态已改为【精确提取】：以安居客后台真实页面抓取验证（已用你账号登录实抓），每张卡片点击量左侧的原文为 <code>安居客 普通推广 精选 58同城 普通推广 精选 11/11</code>，解析器按平台锚点精确拆出「平台·推广类型」——不再用"加推/精选/普通推广"关键词全文猜测。上方第二张卡即实抓页面（编号4813369935258638）的渲染。</p>
   <p>封面图位置：当前这条解析结果没有封面 URL（缩略图未抓到），所以显示灰色房子占位图标，与 App 一致。</p>
 </div>
 

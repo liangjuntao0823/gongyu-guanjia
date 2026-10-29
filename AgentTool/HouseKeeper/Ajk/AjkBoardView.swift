@@ -524,11 +524,12 @@ struct AjkHouseCard: View {
                             .font(.system(size: 10))
                             .foregroundColor(.themeText2)
                     }
-                    // 推广状态（点击量下方，v1.90 明确提取）
+                    // 推广状态（v1.91：点击量左侧「平台+推广类型」精确数据，按平台组展示）
                     if !house.promotions.isEmpty {
-                        Text(house.promotions.joined(separator: "·"))
+                        Text(house.promotions.joined(separator: "  "))
                             .font(.system(size: 10))
                             .foregroundColor(.themeText3)
+                            .lineLimit(1)
                     }
                 }
             }

@@ -102,11 +102,27 @@ enum AjkParser {
         var platforms: [String] = []
         if text.contains("安居客") { platforms.append("安居客") }
         if text.contains("58同城") { platforms.append("58同城") }
+        // 推广状态（v1.91：准确数据在点击量左侧——「平台 + 推广类型」逐平台精确提取，
+        // 例：『安居客 普通推广 精选 58同城 普通推广 精选 11/11』→ 安居客·普通推广·精选 / 58同城·普通推广·精选）
         var promotions: [String] = []
-        if text.contains("加推") { promotions.append("加推") }
-        if text.contains("免费推") { promotions.append("免费推") }
-        if text.contains("精选") { promotions.append("精选") }
-        if text.contains("普通推广") { promotions.append("普通推广") }
+        let promoTypeWords = ["普通推广", "精选", "加推", "免费推", "置顶",
+                              "智能营销助手", "低至9.8折", "占领商圈", "优先曝光", "首发推广"]
+        let promoPlatforms = ["安居客", "58同城"].filter { text.contains($0) }
+        for (idx, pname) in promoPlatforms.enumerated() {
+            guard let pRange = text.range(of: pname) else { continue }
+            var segEnd = text.endIndex
+            if idx + 1 < promoPlatforms.count, let nextR = text.range(of: promoPlatforms[idx + 1]) {
+                segEnd = nextR.lowerBound
+            } else if let clickR = text.range(of: #"\d+/\d+"#, options: .regularExpression) {
+                segEnd = clickR.lowerBound
+            }
+            let seg = text[pRange.upperBound..<segEnd]
+            var types: [String] = []
+            for w in promoTypeWords where seg.contains(w) { types.append(w) }
+            if !types.isEmpty {
+                promotions.append("\(pname)·" + types.joined(separator: "·"))
+            }
+        }
 
         // 核验状态
         var verified = "未核验"
