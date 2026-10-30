@@ -171,6 +171,8 @@ final class AIManager: ObservableObject {
             }
             var executedLabels: [String] = []
             var finalText: String?
+            // v1.98：本轮工具结果若有【图片】路径标记，提取展示在气泡（作用域在循环外，供消息拼接用）
+            var toolImagePath: String? = nil
             do {
                 // v1.97：工具循环上限提到 6 轮（批量/多动作场景不再被 3 轮截断）
                 for _ in 0..<6 {
@@ -209,6 +211,11 @@ final class AIManager: ObservableObject {
                     for call in completion.toolCalls {
                         let resultText = await executor.execute(tool: call)
                         labels.append(actionLabel(for: call))
+                        // v1.98：工具结果若带【图片】路径标记，提取出来展示在对话气泡（如 AI 生成的账单图）
+                        if let imgMark = resultText.range(of: "【图片】") {
+                            let path = String(resultText[imgMark.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+                            if !path.isEmpty { toolImagePath = path }
+                        }
                         messages.append(["role": "tool", "tool_call_id": call.id, "content": resultText])
                     }
                     executedLabels.append(contentsOf: labels)
@@ -219,7 +226,8 @@ final class AIManager: ObservableObject {
                 }
                 let (cleanText, suggestions) = Self.parseSuggestions(finalText!)
                 self.messages.append(AIMessage(role: .assistant, text: cleanText, time: Date(),
-                                               toolSummary: executedLabels, suggestedActions: suggestions))
+                                               toolSummary: executedLabels, suggestedActions: suggestions,
+                                               imagePath: toolImagePath))
                 saveHistory()
             } catch {
                 // 超时/网络错误给中文提示
@@ -313,6 +321,7 @@ final class AIManager: ObservableObject {
         case ("query_report", "rent_summary"): return "报表·收租汇总"
         case ("query_report", "utility_settle"): return "报表·水电结算"
         case ("query_report", "generate_rent_bill"): return "账单·\(room) \(args["month"] as? Int ?? 0)月"
+        case ("query_report", "generate_rent_bill_image"): return "账单图·\(room) \(args["month"] as? Int ?? 0)月"
         case ("export_data", "export_excel"): return "导出·\(args["data_type"] as? String ?? "")"
         case ("web_search", "search"): return "联网·搜索"
         default: return call.name + "·" + action
@@ -495,10 +504,11 @@ final class AIManager: ObservableObject {
     private func saveHistory() {
         let recent = Array(messages.suffix(historyLimit))
         let slim = recent.map { msg -> AIMessage in
+            // v1.98：历史精简时保留 imagePath（账单图片是本地沙盒文件，路径可长期复用）
             guard !msg.images.isEmpty else { return msg }
             return AIMessage(id: msg.id, role: msg.role, text: msg.text, time: msg.time,
                              images: [], attachText: msg.attachText, toolSummary: msg.toolSummary,
-                             suggestedActions: msg.suggestedActions)
+                             suggestedActions: msg.suggestedActions, imagePath: msg.imagePath)
         }
         if let data = try? JSONEncoder().encode(slim) {
             UserDefaults.standard.set(data, forKey: historyKey)

@@ -10,6 +10,7 @@
 
 import Foundation
 import SwiftData
+import SwiftUI
 
 /// @MainActor：内部访问 MeterStore/AjkStore/SyncStore/BackupV5Manager 等主线程隔离单例
 @MainActor
@@ -156,11 +157,11 @@ struct AIToolExecutor {
             "parameters": [
                 "type": "object",
                 "properties": [
-                    "action_type": ["type": "string", "description": "overdue_list=未收租金清单；lease_expiry=租约即将到期清单；rent_summary=指定年月收租汇总；utility_settle=指定房号水电结算文本；generate_rent_bill=生成指定房号指定月份收租账单文本", "enum": ["overdue_list", "lease_expiry", "rent_summary", "utility_settle", "generate_rent_bill"]],
-                    "year": ["type": "integer", "description": "年份（rent_summary/generate_rent_bill 用，默认当前年）"],
-                    "month": ["type": "integer", "description": "月份 1-12（rent_summary/generate_rent_bill 用，默认当前月）"],
+                    "action_type": ["type": "string", "description": "overdue_list=未收租金清单；lease_expiry=租约即将到期清单；rent_summary=指定年月收租汇总；utility_settle=指定房号水电结算文本；generate_rent_bill=生成指定房号指定月份收租账单文本；generate_rent_bill_image=生成指定房号指定月份收租账单图片（渲染与收租页手动生成一致的账单图，直接展示给用户）", "enum": ["overdue_list", "lease_expiry", "rent_summary", "utility_settle", "generate_rent_bill", "generate_rent_bill_image"]],
+                    "year": ["type": "integer", "description": "年份（rent_summary/generate_rent_bill/generate_rent_bill_image 用，默认当前年）"],
+                    "month": ["type": "integer", "description": "月份 1-12（rent_summary/generate_rent_bill/generate_rent_bill_image 用，默认当前月）"],
                     "days": ["type": "integer", "description": "lease_expiry 提前天数，默认 30"],
-                    "room_no": ["type": "string", "description": "utility_settle / generate_rent_bill 房号"],
+                    "room_no": ["type": "string", "description": "utility_settle / generate_rent_bill / generate_rent_bill_image 房号"],
                     "no_extra": ["type": "boolean", "description": "generate_rent_bill 是否无附加费（true=账单注明无附加费；缺省=false）"]
                 ],
                 "required": ["action_type"]
@@ -316,6 +317,7 @@ struct AIToolExecutor {
             case "rent_summary": return "查询 \(a["year"] as? Int ?? 0)年\(a["month"] as? Int ?? 0)月收租汇总"
             case "utility_settle": return "生成 \(a["room_no"] as? String ?? "?") 水电结算文本"
             case "generate_rent_bill": return "生成 \(a["room_no"] as? String ?? "?") 的 \(a["year"] as? Int ?? 0)年\(a["month"] as? Int ?? 0)月收租账单文本"
+            case "generate_rent_bill_image": return "生成 \(a["room_no"] as? String ?? "?") 的 \(a["year"] as? Int ?? 0)年\(a["month"] as? Int ?? 0)月收租账单图片"
             default: return "执行查询"
             }
         case "export_data":
@@ -957,9 +959,53 @@ struct AIToolExecutor {
             lines.append("收款方式：在 App「收租」页按此金额收款即可")
             return lines.joined(separator: "\n")
 
+        case "generate_rent_bill_image":
+            // v1.98：账单图片直出——复用收租页手动生成的 RentBillShareView + ImageRenderer 渲染，
+            // 与手动点「生成账单」版式完全一致（360 宽 ×3 倍图），PNG 存沙盒 Documents 并返回图片路径
+            guard let prop = findProperty(s(a, "room_no")) else { return "未找到收租合同房号 \(s(a, "room_no"))" }
+            let year = i(a, "year") ?? Calendar.current.component(.year, from: Date())
+            let month = i(a, "month") ?? Calendar.current.component(.month, from: Date())
+            guard let rent = prop.monthlyRentRecords.first(where: { $0.year == year && $0.month == month }) else {
+                // 该月无记录也按合同租金生成（与收租页行为一致：月账单行未建时默认合同金额）
+                let rec = RentMonthRecord(year: year, month: month, amount: prop.rent + prop.prepayment, isPaid: false)
+                return renderBillImage(prop: prop, rent: rec, year: year, month: month)
+            }
+            return renderBillImage(prop: prop, rent: rent, year: year, month: month)
+
         default:
             return "未知查询动作：\(action)"
         }
+    }
+
+    /// v1.98：渲染账单图为 PNG 存沙盒，返回含路径的文本（AIManager 解析【图片】标记注入气泡）
+    private func renderBillImage(prop: Property, rent: RentMonthRecord, year: Int, month: Int) -> String {
+        let utility = prop.utilitySettlementRecords.first { rec in
+            guard let d = rec.dueDate else { return false }
+            return Calendar.current.component(.year, from: d) == year && Calendar.current.component(.month, from: d) == month
+        }
+        let view = RentBillShareView(property: prop, rent: rent, utility: utility, extras: [])
+        let renderer = ImageRenderer(content: view.frame(width: 360).background(Color.white))
+        renderer.scale = 3
+        guard let image = renderer.uiImage,
+              let data = image.pngData() else {
+            return "账单图片生成失败：无法渲染图片，请稍后重试"
+        }
+        let fm = FileManager.default
+        let dir = fm.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let fileName = "账单_\(prop.roomNumber)_\(year)\(String(format: "%02d", month)).png"
+        let fileURL = dir.appendingPathComponent(fileName)
+        do {
+            try data.write(to: fileURL)
+        } catch {
+            return "账单图片保存失败：\(error.localizedDescription)"
+        }
+        var lines = ["【\(prop.roomNumber) 收租账单 \(year)年\(month)月】已生成账单图片（与收租页手动生成版式一致）："]
+        lines.append("租金：¥\(Int(rent.amount))")
+        if prop.prepayment != 0 { lines.append("水电预存：¥\(Int(prop.prepayment))") }
+        if let u = utility, u.balance != 0 { lines.append("预存结余：¥\(Int(u.balance))") }
+        lines.append("收款方式：在 App「收租」页按此金额收款即可")
+        lines.append("【图片】\(fileURL.path)")
+        return lines.joined(separator: "\n")
     }
 
     /// 两个日期之间的天数差（now 到 target，正数=未来）
@@ -1080,60 +1126,117 @@ struct AIToolExecutor {
         }
     }
 
-    // MARK: - 联网搜索域（web_search，v1.97）
+    // MARK: - 联网搜索域（web_search，v1.97 / v1.98 稳定通道）
 
+    /// v1.98：必应 HTML 页易被反爬拦截（返回验证页/空结果），改为双通道：
+    /// 主通道 Bing RSS（format=rss 轻量 XML，不渲染 JS，反爬阈值低）；备用 DuckDuckGo HTML。
+    /// 两条通道都失败才报错，AI 拿到的始终是结构化 title/link/snippet。
     private func webSearch(_ a: [String: Any]) async -> String {
         let query = s(a, "query")
         guard !query.isEmpty else { return "缺少搜索关键词 query" }
         let q = (query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query)
-        guard let url = URL(string: "https://www.bing.com/search?q=\(q)&mkt=zh-CN&setlang=zh-hans") else {
-            return "搜索地址构造失败"
+
+        // 主通道：Bing RSS
+        if let items = await fetchBingRSS(q) {
+            return Self.formatSearchResults(items, query: query, source: "必应")
         }
+        // 备用通道：DuckDuckGo HTML
+        if let items = await fetchDuckDuckGo(q) {
+            return Self.formatSearchResults(items, query: query, source: "DuckDuckGo")
+        }
+        return "联网搜索失败：必应与 DuckDuckGo 通道都被拦截或超时，请稍后重试，或换更简短的关键词。"
+    }
+
+    private struct SearchItem { let title: String; let link: String; let snippet: String }
+
+    /// 拉取 Bing RSS 并解析；失败返回 nil
+    private func fetchBingRSS(_ q: String) async -> [SearchItem]? {
+        guard let url = URL(string: "https://www.bing.com/search?q=\(q)&format=rss&mkt=zh-CN&setlang=zh-hans") else { return nil }
         var req = URLRequest(url: url)
         req.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
                      forHTTPHeaderField: "User-Agent")
         req.setValue("zh-CN,zh;q=0.9", forHTTPHeaderField: "Accept-Language")
         req.timeoutInterval = 20
-        do {
-            let (data, resp) = try await URLSession.shared.data(for: req)
-            guard let http = resp as? HTTPURLResponse, http.statusCode == 200,
-                  let html = String(data: data, encoding: .utf8) else {
-                return "联网搜索失败：必应返回异常（HTTP \((resp as? HTTPURLResponse)?.statusCode ?? -1)），请稍后重试"
-            }
-            let items = Self.parseBingResults(html)
-            if items.isEmpty {
-                return "搜索完成但未解析到结果（页面结构可能变化或结果被反爬拦截），建议换关键词，或到 App 的浏览器中直接访问必应查看"
-            }
-            var lines = ["搜索结果（关键词：\(query)）："]
-            for (idx, it) in items.prefix(8).enumerated() {
-                lines.append("\(idx + 1). \(it.title)")
-                lines.append("   链接：\(it.link)")
-                if !it.snippet.isEmpty { lines.append("   摘要：\(it.snippet)") }
-            }
-            return lines.joined(separator: "\n")
-        } catch {
-            return "联网搜索失败：\(error.localizedDescription)（网络不可用或超时，请稍后重试）"
-        }
+        guard let (data, resp) = try? await URLSession.shared.data(for: req),
+              let http = resp as? HTTPURLResponse, http.statusCode == 200,
+              let xml = String(data: data, encoding: .utf8) else { return nil }
+        let items = Self.parseRSSItems(xml)
+        return items.isEmpty ? nil : items
     }
 
-    private struct BingItem { let title: String; let link: String; let snippet: String }
-
-    /// 必应 HTML 结果解析（b_algo 块，容错：字段缺失给空串）
-    private static func parseBingResults(_ html: String) -> [BingItem] {
-        var items: [BingItem] = []
-        let blocks = html.components(separatedBy: #"<li class="b_algo""#)
-        for block in blocks.dropFirst() {
-            guard let linkRange = block.range(of: #"href="https?://[^"]+""#) else { continue }
-            let href = String(block[linkRange]).replacingOccurrences(of: #"href=""#, with: "")
-            guard let titleRange = block.range(of: #"<h2[^>]*>.*?<a[^>]*>(.*?)</a>"#, options: .regularExpression) else { continue }
-            let title = stripTags(String(block[titleRange]))
+    /// 拉取 DuckDuckGo HTML 并解析；失败返回 nil
+    private func fetchDuckDuckGo(_ q: String) async -> [SearchItem]? {
+        guard let url = URL(string: "https://html.duckduckgo.com/html/?q=\(q)") else { return nil }
+        var req = URLRequest(url: url)
+        req.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
+                     forHTTPHeaderField: "User-Agent")
+        req.setValue("zh-CN,zh;q=0.9", forHTTPHeaderField: "Accept-Language")
+        req.timeoutInterval = 20
+        guard let (data, resp) = try? await URLSession.shared.data(for: req),
+              let http = resp as? HTTPURLResponse, http.statusCode == 200,
+              let html = String(data: data, encoding: .utf8) else { return nil }
+        var items: [SearchItem] = []
+        let blocks = html.components(separatedBy: #"class="result results_links""#)
+        for block in blocks.dropFirst().prefix(8) {
+            // 完整匹配 <a class="result__a" href="...">标题</a>，再分别抠出 href 与标题文本
+            guard let aRange = block.range(of: #"result__a[^>]*href="[^"]+"[^>]*>[^<]+</a>"#, options: .regularExpression) else { continue }
+            let full = String(block[aRange])
+            guard let hrefOpen = full.range(of: #"href=""#) else { continue }
+            let afterHref = full[hrefOpen.upperBound...]
+            guard let hrefClose = afterHref.range(of: "\"") else { continue }
+            let href = String(afterHref[..<hrefClose.lowerBound])
+            guard let titleStart = full.range(of: #">([^<]+)</a>"#, options: .regularExpression) else { continue }
+            let title = String(full[titleStart]).dropFirst().dropLast(4)
             var snippet = ""
-            if let pRange = block.range(of: #"<p[^>]*>.*?</p>"#, options: .regularExpression) {
-                snippet = stripTags(String(block[pRange]))
+            if let sRange = block.range(of: #"class="result__snippet"[^>]*>(.*?)</a>"#, options: .regularExpression) {
+                snippet = Self.stripTags(String(block[sRange]))
             }
-            items.append(BingItem(title: title, link: href, snippet: snippet))
+            if !href.isEmpty && !title.isEmpty {
+                items.append(SearchItem(title: title.trimmingCharacters(in: .whitespacesAndNewlines),
+                                        link: href, snippet: snippet.trimmingCharacters(in: .whitespacesAndNewlines)))
+            }
+        }
+        return items.isEmpty ? nil : items
+    }
+
+    /// 解析 RSS XML 的 <item> 块（title/link/description）
+    private static func parseRSSItems(_ xml: String) -> [SearchItem] {
+        var items: [SearchItem] = []
+        let blocks = xml.components(separatedBy: "<item>")
+        for block in blocks.dropFirst() {
+            let title = extractTag(block, "title")
+            let link = extractTag(block, "link")
+            var snippet = extractTag(block, "description")
+            if snippet.hasPrefix("<") { snippet = stripTags(snippet) }
+            if !title.isEmpty && !link.isEmpty {
+                items.append(SearchItem(title: title, link: link, snippet: snippet))
+            }
         }
         return items
+    }
+
+    /// 提取单个 XML/HTML 标签内容（只取第一处）
+    private static func extractTag(_ s: String, _ tag: String) -> String {
+        guard let open = s.range(of: "<\(tag)>"), let close = s.range(of: "</\(tag)>", range: open.upperBound..<s.endIndex) else { return "" }
+        return String(s[open.upperBound..<close.lowerBound])
+            .replacingOccurrences(of: "&amp;", with: "&")
+            .replacingOccurrences(of: "&lt;", with: "<")
+            .replacingOccurrences(of: "&gt;", with: ">")
+            .replacingOccurrences(of: "&quot;", with: "\"")
+            .replacingOccurrences(of: "&#39;", with: "'")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// 统一格式化搜索结果
+    private static func formatSearchResults(_ items: [SearchItem], query: String, source: String) -> String {
+        guard !items.isEmpty else { return "搜索完成但未解析到结果（\(source) 通道异常），建议换关键词重试" }
+        var lines = ["搜索结果（\(source)，关键词：\(query)）："]
+        for (idx, it) in items.prefix(8).enumerated() {
+            lines.append("\(idx + 1). \(it.title)")
+            lines.append("   链接：\(it.link)")
+            if !it.snippet.isEmpty { lines.append("   摘要：\(it.snippet)") }
+        }
+        return lines.joined(separator: "\n")
     }
 
     private static func stripTags(_ s: String) -> String {

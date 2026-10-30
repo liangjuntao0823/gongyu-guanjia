@@ -29,6 +29,9 @@ struct AIMessage: Identifiable, Equatable, Codable {
     var toolSummary: [String]? = nil
     /// v1.97：AI 回复末尾给出的预选项快捷指令（点击直接发送）
     var suggestedActions: [String]? = nil
+    /// v1.98：assistant 消息附带的本地图片路径（AI 工具生成的账单图片，如 RentBillShareView 渲染 PNG）
+    /// Optional：历史兼容
+    var imagePath: String? = nil
 
     enum Role: String, Codable {
         case user, assistant
@@ -36,7 +39,7 @@ struct AIMessage: Identifiable, Equatable, Codable {
 
     init(id: UUID = UUID(), role: Role, text: String, time: Date = Date(),
          images: [String] = [], attachText: String? = nil, toolSummary: [String]? = nil,
-         suggestedActions: [String]? = nil) {
+         suggestedActions: [String]? = nil, imagePath: String? = nil) {
         self.id = id
         self.role = role
         self.text = text
@@ -45,6 +48,7 @@ struct AIMessage: Identifiable, Equatable, Codable {
         self.attachText = attachText
         self.toolSummary = toolSummary
         self.suggestedActions = suggestedActions
+        self.imagePath = imagePath
     }
 }
 
@@ -61,6 +65,8 @@ struct AIAssistantView: View {
     @StateObject private var manager = AIManager.shared
     @State private var input = ""
     @State private var showSettings = false
+    /// v1.98：历史消息查看（弹 sheet 浏览全部历史，可一键清空）
+    @State private var showHistory = false
 
     /// 附件：待发送的图片（UIImage 源）+ 文件文本
     @State private var pendingImages: [UIImage] = []
@@ -129,6 +135,9 @@ struct AIAssistantView: View {
             inputBar()
         }
         .navigationBarHidden(true)
+        .sheet(isPresented: $showHistory) {
+            NavigationStack { AIHistoryView(manager: manager) }
+        }
         .sheet(isPresented: $showSettings) {
             NavigationStack { AIAssistantSettingsView() }
         }
@@ -288,6 +297,17 @@ struct AIAssistantView: View {
                         .lineLimit(1)
                 }
                 Spacer()
+                // v1.98：历史查看按钮（浏览全部历史对话，可一键清空）
+                Button {
+                    showHistory = true
+                } label: {
+                    Image(systemName: "clock.arrow.circlepath")
+                        .font(.system(size: 14))
+                        .foregroundColor(.white)
+                        .frame(width: 32, height: 32)
+                        .background(Color.white.opacity(0.16))
+                        .clipShape(Circle())
+                }
                 if !manager.messages.isEmpty {
                     Button {
                         manager.clearChat()
@@ -400,6 +420,14 @@ struct AIAssistantView: View {
                         }
                     }
                     .frame(maxWidth: 240)
+                }
+                // v1.98：AI 工具生成的图片（如收租账单图）直接展示在气泡里
+                if let path = msg.imagePath, let img = UIImage(contentsOfFile: path) {
+                    Image(uiImage: img)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(maxWidth: 300)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
                 }
                 if let attach = msg.attachText {
                     Label(attach, systemImage: "paperclip")
@@ -630,6 +658,95 @@ struct AIAssistantView: View {
         let b64 = String(s[s.index(after: comma)...])
         guard let data = Data(base64Encoded: b64) else { return nil }
         return UIImage(data: data)
+    }
+}
+
+// MARK: - 历史查看（v1.98）
+
+/// AI 对话历史查看：浏览全部历史消息，可一键清空
+struct AIHistoryView: View {
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject var manager: AIManager
+    @State private var confirmClear = false
+
+    var body: some View {
+        Group {
+            if manager.messages.isEmpty {
+                VStack(spacing: 10) {
+                    Image(systemName: "clock")
+                        .font(.system(size: 34))
+                        .foregroundColor(.themeText3)
+                    Text("暂无历史记录")
+                        .font(.system(size: 14))
+                        .foregroundColor(.themeText2)
+                    Text("发送第一条指令后，历史会保存在这里")
+                        .font(.system(size: 12))
+                        .foregroundColor(.themeText3)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                List {
+                    ForEach(manager.messages) { msg in
+                        VStack(alignment: .leading, spacing: 5) {
+                            HStack(spacing: 6) {
+                                Text(msg.role == .user ? "我" : "AI")
+                                    .font(.system(size: 11, weight: .bold))
+                                    .foregroundColor(.white)
+                                    .padding(.horizontal, 7)
+                                    .padding(.vertical, 2)
+                                    .background(msg.role == .user ? Color.themeAccent : Color.gray.opacity(0.65))
+                                    .clipShape(Capsule())
+                                Text(timeFullText(msg.time))
+                                    .font(.system(size: 11))
+                                    .foregroundColor(.themeText3)
+                                if let ts = msg.toolSummary, !ts.isEmpty {
+                                    Text("执行 \(ts.count) 项操作")
+                                        .font(.system(size: 10))
+                                        .foregroundColor(.themeAccentDark)
+                                }
+                                if msg.imagePath != nil {
+                                    Text("含账单图")
+                                        .font(.system(size: 10))
+                                        .foregroundColor(.themeAccentDark)
+                                }
+                            }
+                            Text(msg.text)
+                                .font(.system(size: 13))
+                                .foregroundColor(.themeText)
+                                .lineLimit(3)
+                                .textSelection(.enabled)
+                        }
+                        .padding(.vertical, 3)
+                    }
+                }
+                .listStyle(.insetGrouped)
+            }
+        }
+        .navigationTitle("对话历史（\(manager.messages.count) 条）")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("关闭") { dismiss() }
+            }
+            if !manager.messages.isEmpty {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("清空") { confirmClear = true }
+                        .foregroundColor(.red)
+                }
+            }
+        }
+        .alert("清空全部对话历史？", isPresented: $confirmClear) {
+            Button("取消", role: .cancel) {}
+            Button("清空", role: .destructive) { manager.clearChat() }
+        } message: {
+            Text("历史记录将被删除，AI 将不再记得之前的对话内容。")
+        }
+    }
+
+    private func timeFullText(_ d: Date) -> String {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd HH:mm"
+        return f.string(from: d)
     }
 }
 

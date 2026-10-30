@@ -531,7 +531,13 @@ struct DashboardView: View {
                                 // 按自定义顺序渲染工作台动作（最多 7 个），第 8 位固定「更多」入口
                                 ForEach(dashboardActionIDs, id: \.self) { id in
                                     if let spec = quickActionSpec(id) {
-                                        QuickActionItem(icon: spec.icon, label: spec.label, color: spec.color, action: spec.action, imageName: spec.imageName)
+                                        // v1.98：主格快捷按钮与「更多」面板同模式——延迟一拍触发，规避同一 presenter
+                                        // 的 sheet 关闭/打开竞争导致点了没反应（与 v1.84 更多面板 0.45s 修复同根因）
+                                        QuickActionItem(icon: spec.icon, label: spec.label, color: spec.color, action: {
+                                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+                                                spec.action()
+                                            }
+                                        }, imageName: spec.imageName)
                                     }
                                 }
                                 // 第 8 位固定「更多」入口
@@ -1381,6 +1387,8 @@ struct QuickActionItem: View {
             .padding(.vertical, 4)
         }
         .buttonStyle(.plain)
+        // v1.98：显式点击热区，防个别机型按钮区域点击无响应
+        .contentShape(Rectangle())
     }
 }
 
