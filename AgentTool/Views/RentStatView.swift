@@ -47,14 +47,20 @@ struct RentStatView: View {
 
     // MARK: - 判定与文案
 
-    /// 当月账单是否含水电结算：与收租板块生成账单口径一致——
-    /// utilitySettlementRecords 中存在 dueDate 落在所选年/月的结算记录，账单里才显示水电结算项
-    private func hasUtility(_ p: Property) -> Bool {
+    /// 当月账单结算标注：与收租板块生成账单口径一致（dueDate 落在所选年/月的结算记录），
+    /// 按结算内容细分：只算水费→含水费结算；只算电费→含电费结算；都有→含水电结算；无结算记录→nil
+    private func utilityText(_ p: Property) -> String? {
         let cal = Calendar.current
-        return p.utilitySettlementRecords.contains { rec in
+        guard let rec = p.utilitySettlementRecords.first(where: { rec in
             guard let d = rec.dueDate else { return false }
             return cal.component(.year, from: d) == selectedYear && cal.component(.month, from: d) == selectedMonth
-        }
+        }) else { return nil }
+        let e = rec.electricAmount > 0
+        let w = rec.waterAmount > 0
+        if e && w { return "含水电结算" }
+        if e { return "含电费结算" }
+        if w { return "含水费结算" }
+        return nil
     }
 
     /// 所选月份收租状态：true=已收；false=未收（已建记录）；nil=当月尚未生成收租记录（视为未收）
@@ -108,10 +114,15 @@ struct RentStatView: View {
             let amount = actualAmount(p)   // 当月实际金额（收租计划优先）
             total += amount
             parts.append(fmt(amount))
+            let ut = utilityText(p)
             if pre <= 0 {
-                lines.append("\(name) \(selectedMonth)月份租金\(fmt(amount))元。")
-            } else if hasUtility(p) {
-                lines.append("\(name) \(selectedMonth)月份租金+预存\(fmt(amount))元（含水电结算）。")
+                if let ut {
+                    lines.append("\(name) \(selectedMonth)月份租金\(fmt(amount))元（\(ut)）。")
+                } else {
+                    lines.append("\(name) \(selectedMonth)月份租金\(fmt(amount))元。")
+                }
+            } else if let ut {
+                lines.append("\(name) \(selectedMonth)月份租金+预存\(fmt(amount))元（\(ut)）。")
             } else {
                 lines.append("\(name) \(selectedMonth)月份租金+预存\(fmt(amount))元。")
             }
@@ -241,7 +252,7 @@ struct RentStatView: View {
 
     private func row(_ p: Property) -> some View {
         let selected = selectedIDs.contains(p.id)
-        let util = hasUtility(p)
+        let ut = utilityText(p)
         let paid = paidState(p) == true
         return HStack(spacing: 10) {
             Image(systemName: selected ? "checkmark.circle.fill" : "circle")
@@ -267,8 +278,8 @@ struct RentStatView: View {
                             .foregroundColor(.orange)
                             .cornerRadius(4)
                     }
-                    if util {
-                        Text("含水电")
+                    if let ut {
+                        Text(ut)
                             .font(.system(size: 10, weight: .medium))
                             .padding(.horizontal, 5).padding(.vertical, 1)
                             .background(Color.red.opacity(0.12))
