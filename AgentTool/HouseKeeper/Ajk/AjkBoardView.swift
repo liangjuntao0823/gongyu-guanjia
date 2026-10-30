@@ -522,15 +522,6 @@ struct AjkHouseCard: View {
                             .foregroundColor(.red)
                     }
                     Spacer()
-                    ForEach(house.platforms, id: \.self) { p in
-                        Text(p)
-                            .font(.system(size: 10))
-                            .foregroundColor(.themeBlue)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(Color.themeBlue.opacity(0.1))
-                            .clipShape(Capsule())
-                    }
                     if !house.maintainer.isEmpty {
                         Text(house.maintainer)
                             .font(.system(size: 10))

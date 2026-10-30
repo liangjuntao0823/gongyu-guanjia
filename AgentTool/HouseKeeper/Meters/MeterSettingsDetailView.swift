@@ -74,23 +74,6 @@ struct MeterSettingsDetailView: View {
             }
 
             Section {
-                Picker("刷新速度", selection: Binding(
-                    get: { store.settings.refreshSpeed },
-                    set: { store.settings.refreshSpeed = $0; store.saveSettings() }
-                )) {
-                    Text("一台一台刷（最稳）").tag(0)
-                    Text("标准").tag(1)
-                    Text("快速（推荐）").tag(2)
-                    Text("极速").tag(3)
-                }
-                .pickerStyle(.menu)
-            } header: {
-                Text("总刷新速度")
-            } footer: {
-                Text("选择后立即生效，下次点总刷新即按此速度执行。实测 32 台表：一台一台刷约 85 秒 / 标准约 70 秒 / 快速约 44 秒 / 极速约 14 秒，均能全部成功；个别失败的表会自动重建会话后慢速补刷，不用担心查漏。若遇到失败，可先切换回「一台一台刷」最稳档。")
-            }
-
-            Section {
                 HStack {
                     Text("低电量阈值")
                     Spacer()

@@ -96,9 +96,6 @@ struct MeterSettings: Codable {
     var autoRefreshMinutes: Int = 30 // 定时自动刷新间隔（分钟），默认 30
     var autoRefreshEnabled: Bool = false // 定时刷新开关，默认关
     var lowAlertEnabled: Bool = true  // 低电量本地通知提醒，默认开
-    /// 总刷新倍速：0=一台一台刷(原版串行1.5s/台,最稳) 1=标准(并发3路0.3s) 2=快速(并发4路0.25s,默认) 3=极速(并发8路0.1s)
-    /// 实测（32台）：一台一台刷≈85s / 标准≈70s / 快速≈44s / 极速≈14s，均全成功；失败表自动重建会话补刷兜底
-    var refreshSpeed: Int = 2
 
     static let `default` = MeterSettings()
 }
