@@ -15,6 +15,7 @@ struct RentStatView: View {
     @State private var toast: String?
     @State private var filterLandlord: String?      // nil=全部房东
     @State private var filterPaid: Int = 0          // 0=全部 1=已收 2=未收
+    @State private var previewText = ""             // 文案预览缓存（只在选中/筛选/年月变化时重算，避免每次 body 重建 TextEditor）
 
     init() {
         let now = Date()
@@ -29,11 +30,31 @@ struct RentStatView: View {
         return [y - 1, y]
     }
 
+    /// 行级元数据（按房 ID 一次性构建，供排序/筛选/行/文案共用，避免每行重复查记录集合）
+    private struct RowMeta {
+        var paid: Bool?      // 所选月份收租状态
+        var amount: Double   // 所选月份实际金额（收租计划优先）
+        var utility: String? // 当月结算标注
+    }
+
+    private var rowMeta: [UUID: RowMeta] {
+        var d: [UUID: RowMeta] = [:]
+        d.reserveCapacity(properties.count)
+        for p in properties {
+            let rec = p.monthlyRentRecords.first { $0.year == selectedYear && $0.month == selectedMonth }
+            d[p.id] = RowMeta(paid: rec?.isPaid,
+                              amount: rec?.amount ?? (p.rent + p.prepayment),
+                              utility: utilityText(p))
+        }
+        return d
+    }
+
     private var sortedProperties: [Property] {
+        let meta = rowMeta
         // 已收租的排在上面，未收的排下面，各自按房号排序
-        properties.sorted {
-            let a = paidState($0) == true
-            let b = paidState($1) == true
+        return properties.sorted {
+            let a = meta[$0.id]?.paid == true
+            let b = meta[$1.id]?.paid == true
             if a != b { return a }
             return $0.roomNumber < $1.roomNumber
         }
@@ -46,11 +67,12 @@ struct RentStatView: View {
         return names.sorted()
     }
 
-    /// 应用筛选后的列表：房东 + 已收/未收；保持"已收排上、未收排下"的相对顺序
+    /// 应用筛选后的列表：房东 + 已收/未收；保持"已收排上、未收排下"的相对顺序（rowMeta 只构建一次）
     private var filteredProperties: [Property] {
-        sortedProperties.filter { p in
+        let meta = rowMeta
+        let filtered = properties.filter { p in
             let okLandlord = filterLandlord == nil || p.landlord == filterLandlord
-            let paid = paidState(p) == true
+            let paid = meta[p.id]?.paid == true
             let okPaid: Bool
             switch filterPaid {
             case 1: okPaid = paid
@@ -58,6 +80,12 @@ struct RentStatView: View {
             default: okPaid = true
             }
             return okLandlord && okPaid
+        }
+        return filtered.sorted {
+            let a = meta[$0.id]?.paid == true
+            let b = meta[$1.id]?.paid == true
+            if a != b { return a }
+            return $0.roomNumber < $1.roomNumber
         }
     }
 
@@ -87,11 +115,6 @@ struct RentStatView: View {
         return nil
     }
 
-    /// 所选月份收租状态：true=已收；false=未收（已建记录）；nil=当月尚未生成收租记录（视为未收）
-    private func paidState(_ p: Property) -> Bool? {
-        p.monthlyRentRecords.first { $0.year == selectedYear && $0.month == selectedMonth }?.isPaid
-    }
-
     /// 房号上下层后缀判定：
     /// ① 房号本身带「上/下」后缀（如 1-2246下）→ 直接按完整房号展示，不再追加「房」；
     /// ② 否则看户型（含「上层/下层/上/下」）→ 附加后缀；都没有 → 房号后加「房」。
@@ -119,14 +142,8 @@ struct RentStatView: View {
         return String(format: "%.2f", v)
     }
 
-    /// 当月实际金额：优先读房号详情「收租计划」中该月记录的 amount（用户/系统生成的当月应收），
-    /// 当月尚无记录时按 租金+预存 兜底（与收租板块导出口径一致）
-    private func actualAmount(_ p: Property) -> Double {
-        p.monthlyRentRecords.first { $0.year == selectedYear && $0.month == selectedMonth }?.amount ?? (p.rent + p.prepayment)
-    }
-
-    /// 生成统计文案（模板：X月份租金合计 / 每户一行「房号 X月份租金[+预存]金额」/ 合计）
-    private func statText() -> String {
+    /// 生成统计文案（模板：X月份租金合计 / 每户一行「房号 X月份租金[+预存]金额」/ 合计），按传入 meta 一次构建
+    private func statText(meta: [UUID: RowMeta] = [:]) -> String {
         let chosen = selectedProperties
         guard !chosen.isEmpty else { return "请先勾选要统计的房间" }
         var lines: [String] = ["\(selectedMonth)月份租金合计"]
@@ -135,10 +152,10 @@ struct RentStatView: View {
         for p in chosen {
             let name = displayName(p)
             let pre = p.prepayment
-            let amount = actualAmount(p)   // 当月实际金额（收租计划优先）
+            let amount = meta[p.id]?.amount ?? (p.rent + p.prepayment)
             total += amount
             parts.append(fmt(amount))
-            let ut = utilityText(p)
+            let ut = meta[p.id]?.utility
             if pre <= 0 {
                 if let ut {
                     lines.append("\(name) \(selectedMonth)月份租金\(fmt(amount))元（\(ut)）。")
@@ -155,42 +172,38 @@ struct RentStatView: View {
         return lines.joined(separator: "\n")
     }
 
+    /// 重建文案预览缓存（选中/筛选/年月变化时调用）
+    private func refreshPreview() {
+        previewText = statText(meta: rowMeta)
+    }
+
     private var totalAmount: Double {
-        selectedProperties.reduce(0) { $0 + actualAmount($1) }
+        let meta = rowMeta
+        return selectedProperties.reduce(0) { $0 + (meta[$1.id]?.amount ?? ($1.rent + $1.prepayment)) }
     }
 
     // MARK: - UI
 
     var body: some View {
+        let meta = rowMeta   // 一次构建行元数据，供列表/合计/筛选共用
         NavigationStack {
             VStack(spacing: 0) {
-                // 第一行：年月选择 + 全选（年份按钮固定单行，防止窄屏换行）
-                HStack(spacing: 10) {
+                // 筛选一排：年份/月份/房东/已收未收（紧凑布局防换行）
+                HStack(spacing: 8) {
                     Picker("", selection: $selectedYear) {
                         ForEach(years, id: \.self) { Text("\($0)年").tag($0) }
                     }
                     .pickerStyle(.menu)
                     .font(.system(size: 15))
-                    .frame(width: 106)
+                    .frame(width: 86)
                     .lineLimit(1)
                     Picker("", selection: $selectedMonth) {
                         ForEach(1...12, id: \.self) { Text("\($0)月").tag($0) }
                     }
                     .pickerStyle(.menu)
                     .font(.system(size: 15))
-                    .frame(width: 84)
+                    .frame(width: 66)
                     .lineLimit(1)
-                    Spacer()
-                    Button(allSelected ? "取消全选" : "全选") {
-                        selectedIDs = allSelected ? [] : Set(filteredProperties.map { $0.id })
-                    }
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundColor(.themeAccent)
-                }
-                .padding(.horizontal, 16)
-                .padding(.top, 10)
-                // 第二行：筛选（按房东 + 按已收/未收）
-                HStack(spacing: 10) {
                     Picker("", selection: $filterLandlord) {
                         Text("全部房东").tag(String?.none)
                         ForEach(landlordNames, id: \.self) { name in
@@ -200,6 +213,7 @@ struct RentStatView: View {
                     .pickerStyle(.menu)
                     .font(.system(size: 13))
                     .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     Picker("", selection: $filterPaid) {
                         Text("全部").tag(0)
                         Text("已收").tag(1)
@@ -208,16 +222,20 @@ struct RentStatView: View {
                     .pickerStyle(.menu)
                     .font(.system(size: 13))
                     .lineLimit(1)
-                    Spacer(minLength: 0)
+                    .frame(width: 78)
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 6)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .onChange(of: selectedYear) { _, _ in refreshPreview() }
+                .onChange(of: selectedMonth) { _, _ in refreshPreview() }
+                .onChange(of: filterLandlord) { _, _ in refreshPreview() }
+                .onChange(of: filterPaid) { _, _ in refreshPreview() }
                 Divider()
 
                 // 选房列表：房号 + 房东 + 交租日 + 当月水电结算标记
                 List {
                     ForEach(filteredProperties) { p in
-                        row(p)
+                        row(p, meta: meta)
                             .contentShape(Rectangle())
                             .onTapGesture { toggle(p.id) }
                     }
@@ -225,16 +243,22 @@ struct RentStatView: View {
                 .listStyle(.plain)
 
                 Divider()
-                // 底部：文案预览 + 一键复制
+                // 底部：已选合计 + 全选 + 文案预览 + 一键复制
                 VStack(spacing: 8) {
                     HStack {
                         Text("已选 \(selectedProperties.count) 户 · 合计 ¥\(fmt(totalAmount))")
                             .font(.system(size: 12, weight: .medium))
                             .foregroundColor(.themeText2)
                         Spacer()
+                        Button(allSelected ? "取消全选" : "全选") {
+                            selectedIDs = allSelected ? [] : Set(filteredProperties.map { $0.id })
+                            refreshPreview()
+                        }
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(.themeAccent)
                     }
                     .padding(.horizontal, 16)
-                    TextEditor(text: .constant(statText()))
+                    TextEditor(text: .constant(previewText))
                         .font(.system(size: 13))
                         .foregroundColor(.themeText)
                         .frame(height: 128)
@@ -244,7 +268,7 @@ struct RentStatView: View {
                         .padding(.horizontal, 16)
                         .disabled(true)
                     Button {
-                        let text = statText()
+                        let text = previewText
                         guard !text.hasPrefix("请先勾选") else { return }
                         UIPasteboard.general.string = text
                         toast = "文案已复制"
@@ -266,6 +290,7 @@ struct RentStatView: View {
             .background(Color.themeBg)
             .navigationTitle("单月收租统计")
             .navigationBarTitleDisplayMode(.inline)
+            .onAppear { refreshPreview() }
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button {
@@ -299,12 +324,13 @@ struct RentStatView: View {
     private func toggle(_ id: UUID) {
         if selectedIDs.contains(id) { selectedIDs.remove(id) }
         else { selectedIDs.insert(id) }
+        refreshPreview()
     }
 
-    private func row(_ p: Property) -> some View {
+    private func row(_ p: Property, meta: [UUID: RowMeta]) -> some View {
         let selected = selectedIDs.contains(p.id)
-        let ut = utilityText(p)
-        let paid = paidState(p) == true
+        let ut = meta[p.id]?.utility
+        let paid = meta[p.id]?.paid == true
         return HStack(spacing: 10) {
             Image(systemName: selected ? "checkmark.circle.fill" : "circle")
                 .font(.system(size: 20))
@@ -351,7 +377,7 @@ struct RentStatView: View {
                     .foregroundColor(.themeText2)
             }
             Spacer()
-            Text("¥\(fmt(actualAmount(p)))")
+            Text("¥\(fmt(meta[p.id]?.amount ?? (p.rent + p.prepayment)))")
                 .font(.system(size: 14, weight: .medium))
                 .foregroundColor(.themeText)
         }
