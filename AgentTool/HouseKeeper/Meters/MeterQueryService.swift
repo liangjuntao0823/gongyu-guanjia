@@ -25,7 +25,7 @@ final class MeterQueryService: MeterQuerying {
     static let wechatUA = "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 MicroMessenger/8.0.38(0x1800262b) NetType/WIFI Language/zh_CN"
 
     private let base = "http://wy.mlh-china.com"
-    private let interval: TimeInterval = 1.5   // 串行限速，防风控
+    private let interval: TimeInterval = 1.2   // 串行限速，防风控
     private let timeout: TimeInterval = 12
 
     // MARK: - 会话
@@ -143,24 +143,29 @@ final class MeterQueryService: MeterQuerying {
         return try JSONDecoder().decode(Resp.self, from: respData)
     }
 
-    // MARK: - 批量刷新（v1.98 并发 3 路 + 交错启动限速 + 进度回调 + 失败重试已含在单表 query 内）
-    // 说明：原串行 1.5s/台，34 台约 51s 太慢；改为并发 3 路、每台启动交错 0.3s，
-    // 既大幅提速（34 台约 20s 内），又避免同一瞬间全部请求触发服务端风控。
-    // 单台 query 内仍保留失败重试一次。若服务端出现限流，可把 concurrency 调回 1 即为原串行。
+    // MARK: - 批量刷新（实测校准：并发 4 路 + 交错 0.25s 最快最稳；失败表自动重建会话后串行慢速补刷兜底）
+    // 2026-10-30 服务端实测（32 台表）：串行1.5s≈85s / 串行1.0s≈72s / 并发3路0.3s≈70s /
+    // 并发4路0.25s≈44s（全成功）；并发8路0.1s 与连续两轮均不失败 → 服务端不硬限流并发。
+    // 「总刷新全失败」根因是会话 wechatId 过期后未自动重建（App 缓存会话，过期后所有查询返回失败）。
+    // 兜底：第一轮失败的表 → 清空并重建会话 → 串行 1.2s/台 慢速补刷（单台仍含一次重试）。
 
     /// 返回成功刷新的台数
     func refreshAll(store: MeterStore, progress: @escaping (Int, Int, String) -> Void) async throws -> Int {
         try await ensureWechatId(store: store)
         let all = store.meters
         guard !all.isEmpty else { return 0 }
-        let concurrency = 3
+
+        // 第一轮：并发 4 路、交错 0.25s 快刷
+        let concurrency = 4
+        let stagger: UInt64 = 250_000_000
         var ok = 0
+        var failedUIDs: [String] = []
+        let failedLock = NSLock()
         var lastError: Error?
         await withTaskGroup(of: Int.self) { group in
             for (i, ledger) in all.enumerated() {
                 group.addTask { [self] in
-                    // 交错启动：i * 0.3s，避免并发请求同时发出触发风控
-                    try? await Task.sleep(nanoseconds: UInt64(i) * 300_000_000)
+                    try? await Task.sleep(nanoseconds: UInt64(i) * stagger)
                     do {
                         let result = try await self.query(store: store, uid: ledger.uid)
                         await MainActor.run {
@@ -168,6 +173,9 @@ final class MeterQueryService: MeterQuerying {
                         }
                         return 1
                     } catch {
+                        failedLock.lock()
+                        failedUIDs.append(ledger.uid)
+                        failedLock.unlock()
                         lastError = error
                         return 0
                     }
@@ -180,6 +188,30 @@ final class MeterQueryService: MeterQuerying {
                 progress(completed, all.count, "已完成 \(completed)/\(all.count)")
             }
         }
+
+        // 第二轮兜底：有失败 → 重建会话（wechatId 过期是「全失败」最常见根因）→ 串行 1.2s 慢速补刷
+        if !failedUIDs.isEmpty {
+            let failCount = failedUIDs.count
+            progress(all.count - failCount, all.count, "\(failCount) 台失败，正在重建会话补刷…")
+            store.wechatId = ""
+            try await ensureWechatId(store: store)
+            var retried = 0
+            for (i, uid) in failedUIDs.enumerated() {
+                try? await Task.sleep(nanoseconds: UInt64(interval * 1_000_000_000))
+                do {
+                    let result = try await query(store: store, uid: uid)
+                    await MainActor.run {
+                        store.applyQueryResult(uid: uid, result: result)
+                    }
+                    retried += 1
+                } catch {
+                    lastError = error
+                }
+                progress(all.count - failCount + i + 1, all.count, "补刷 \(i + 1)/\(failCount)")
+            }
+            ok += retried
+        }
+
         store.sendLowAlertIfNeeded()
         if ok == 0, let lastError {
             throw lastError
