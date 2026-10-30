@@ -19,6 +19,7 @@ struct DashboardView: View {
     @State private var showMeter = false   // v1.84：电表监控板块
     @State private var showAjk = false     // v1.85：安居客经纪人后台数据
     @State private var showAI = false      // v1.85：AI 助手（对话驱动动作）
+    @State private var showRentStat = false // v1.99：单月收租统计
     @State private var showMoreActions = false  // v1.84：更多收纳面板
     @State private var showQuickActionEdit = false // v1.84：快捷操作自定义排序
     @AppStorage("qa.dashboardOrder") private var qaDashOrder = ""
@@ -103,6 +104,8 @@ struct DashboardView: View {
                 valid.removeLast()
                 if !more.contains(last) { more.insert(last, at: 0) }
             }
+            // v1.99：旧缓存补入「收租统计」入口（收进更多区，不挤占工作台）
+            if !more.contains("rentStat") { more.append("rentStat") }
             return valid
         }
         return QuickActionRegistry.defaultDashboard
@@ -132,6 +135,11 @@ struct DashboardView: View {
             migrated = true
             valid.removeLast()
             if !more.contains(last) { more.insert(last, at: 0) }
+        }
+        // v1.99：旧缓存补入「收租统计」入口（更多区）
+        if !more.contains("rentStat") {
+            migrated = true
+            more.append("rentStat")
         }
         if migrated {
             writeDashOrder(valid)
@@ -167,6 +175,7 @@ struct DashboardView: View {
         case "payout": action = { showAddPayout = true }
         case "utility": action = { showUtility = true }
         case "house": action = { showAddHouse = true }
+        case "rentStat": action = { showRentStat = true }
         default: return nil
         }
         return (meta.imageName, meta.icon, meta.label, meta.color, action)
@@ -763,6 +772,9 @@ struct DashboardView: View {
         }
         .sheet(isPresented: $showAI) {
             NavigationStack { AIAssistantView() }
+        }
+        .sheet(isPresented: $showRentStat) {
+            RentStatView()
         }
         .sheet(isPresented: $showMoreActions, onDismiss: { showMoreActions = false }) {
             MoreActionsSheet(specs: moreActionIDs.compactMap { quickActionSpec($0) })

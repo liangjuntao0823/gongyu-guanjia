@@ -22,6 +22,7 @@
 		A10000010000000000000096 /* DataBackupManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000096 /* DataBackupManager.swift */; };
 		A30000010000000000000001 /* LocalNotificationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = B30000010000000000000001 /* LocalNotificationManager.swift */; };
 		A10000010000000000000011 /* UtilityView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000011 /* UtilityView.swift */; };
+	A10000010000000000000100 /* RentStatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000100 /* RentStatView.swift */; };
 		A10000010000000000000015 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000015 /* Theme.swift */; };
 		A10000010000000000000012 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000012 /* Assets.xcassets */; };
 		A10000010000000000000097 /* initialData.json in Resources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000097 /* initialData.json */; };
@@ -36,6 +37,8 @@
 		WA /* WidgetDataSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = WB /* WidgetDataSync.swift */; };
 		W1 /* AgentToolWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = W2 /* AgentToolWidget.swift */; };
 		W3 /* AgentToolWidget.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = W4 /* AgentToolWidget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+				B10000010000000000000100 /* RentStatView.swift */,
+				A10000010000000000000100 /* RentStatView.swift in Sources */,
 		PE1 /* PlanEditors.swift in Sources */ = {isa = PBXBuildFile; fileRef = PE2 /* PlanEditors.swift */; };
 		A10000010000000000000099 /* TrashView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000099 /* TrashView.swift */; };
 		A10000010000000000000100 /* House.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000100 /* House.swift */; };
@@ -98,6 +101,7 @@
 		B10000010000000000000096 /* DataBackupManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DataBackupManager.swift; sourceTree = "<group>"; };
 		B30000010000000000000001 /* LocalNotificationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalNotificationManager.swift; sourceTree = "<group>"; };
 		B10000010000000000000011 /* UtilityView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UtilityView.swift; sourceTree = "<group>"; };
+	B10000010000000000000100 /* RentStatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RentStatView.swift; sourceTree = "<group>"; };
 		B10000010000000000000015 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
 		B10000010000000000000012 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		B10000010000000000000097 /* initialData.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = initialData.json; sourceTree = "<group>"; };
