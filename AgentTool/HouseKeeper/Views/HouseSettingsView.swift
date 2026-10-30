@@ -94,7 +94,8 @@ func houseDocumentsSizeText() -> String {
 
 /// v1.98：AI 产物缓存大小（Documents/AI产物/，设置页「AI对话缓存」行展示）
 func aiCacheSizeText() -> String {
-    ByteCountFormatter.string(fromByteCount: AIToolExecutor.aiArtifactSizeBytes(), countStyle: .file)
+    let bytes = MainActor.assumeIsolated { AIToolExecutor.aiArtifactSizeBytes() }
+    return ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
 }
 
 // MARK: - 远程配置（腾讯云 COS）

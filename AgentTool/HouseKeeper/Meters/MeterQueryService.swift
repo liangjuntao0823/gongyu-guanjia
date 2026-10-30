@@ -163,7 +163,9 @@ final class MeterQueryService: MeterQuerying {
                     try? await Task.sleep(nanoseconds: UInt64(i) * 300_000_000)
                     do {
                         let result = try await self.query(store: store, uid: ledger.uid)
-                        store.applyQueryResult(uid: ledger.uid, result: result)
+                        await MainActor.run {
+                            store.applyQueryResult(uid: ledger.uid, result: result)
+                        }
                         return 1
                     } catch {
                         lastError = error

@@ -1065,7 +1065,7 @@ struct AIToolExecutor {
         var badTools: [String] = []
         for raw in rawSteps {
             let tool = s(raw, "tool")
-            guard knownToolNames.contains(tool) else {
+            guard Self.knownToolNames.contains(tool) else {
                 badTools.append(tool.isEmpty ? "空" : tool)
                 continue
             }
@@ -1081,7 +1081,7 @@ struct AIToolExecutor {
             steps.append(TaughtStep(tool: tool, arguments: args, description: desc))
         }
         if !badTools.isEmpty {
-            return "以下步骤使用了未知工具，无法教学：\(badTools.joined(separator: "、"))。可用工具：\(knownToolNames.sorted().joined(separator: "/"))"
+            return "以下步骤使用了未知工具，无法教学：\(badTools.joined(separator: "、"))。可用工具：\(Self.knownToolNames.sorted().joined(separator: "/"))"
         }
         guard !steps.isEmpty else { return "教学失败：没有可用的步骤" }
         // 覆盖同名操作（同名=更新教学）
