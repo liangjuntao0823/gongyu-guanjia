@@ -1128,15 +1128,19 @@ struct AIToolExecutor {
 
     // MARK: - 联网搜索域（web_search，v1.97 / v1.98 稳定通道）
 
-    /// v1.98：必应 HTML 页易被反爬拦截（返回验证页/空结果），改为双通道：
-    /// 主通道 Bing RSS（format=rss 轻量 XML，不渲染 JS，反爬阈值低）；备用 DuckDuckGo HTML。
-    /// 两条通道都失败才报错，AI 拿到的始终是结构化 title/link/snippet。
+    /// v1.98 返修：主通道改为百度（国内主搜索引擎，HTML 轻量解析，真实可用）；
+    /// 备用通道 Bing RSS（format=rss 轻量 XML）→ DuckDuckGo HTML，百度搜不到/被拦时才降级。
+    /// 三条通道都失败才报错，AI 拿到的始终是结构化 title/link/snippet。
     private func webSearch(_ a: [String: Any]) async -> String {
         let query = s(a, "query")
         guard !query.isEmpty else { return "缺少搜索关键词 query" }
         let q = (query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query)
 
-        // 主通道：Bing RSS
+        // 主通道：百度
+        if let items = await fetchBaidu(q) {
+            return Self.formatSearchResults(items, query: query, source: "百度")
+        }
+        // 备用通道：必应 RSS
         if let items = await fetchBingRSS(q) {
             return Self.formatSearchResults(items, query: query, source: "必应")
         }
@@ -1144,10 +1148,47 @@ struct AIToolExecutor {
         if let items = await fetchDuckDuckGo(q) {
             return Self.formatSearchResults(items, query: query, source: "DuckDuckGo")
         }
-        return "联网搜索失败：必应与 DuckDuckGo 通道都被拦截或超时，请稍后重试，或换更简短的关键词。"
+        return "联网搜索失败：百度、必应、DuckDuckGo 通道均不可用，请稍后重试，或换更简短的关键词。"
     }
 
     private struct SearchItem { let title: String; let link: String; let snippet: String }
+
+    /// 拉取百度搜索结果并解析（新版 h3.t>a 标题块 + content-right/c-abstract 摘要）；失败返回 nil
+    private func fetchBaidu(_ q: String) async -> [SearchItem]? {
+        guard let url = URL(string: "https://www.baidu.com/s?wd=\(q)&ie=utf-8&rn=10") else { return nil }
+        var req = URLRequest(url: url)
+        req.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
+                     forHTTPHeaderField: "User-Agent")
+        req.setValue("zh-CN,zh;q=0.9", forHTTPHeaderField: "Accept-Language")
+        req.setValue("text/html,application/xhtml+xml", forHTTPHeaderField: "Accept")
+        req.timeoutInterval = 20
+        guard let (data, resp) = try? await URLSession.shared.data(for: req),
+              let http = resp as? HTTPURLResponse, http.statusCode == 200,
+              let html = String(data: data, encoding: .utf8) else { return nil }
+        var items: [SearchItem] = []
+        // 按 <h3 切结果块（百度新旧版均为 h3 承载标题链接）
+        for chunk in html.components(separatedBy: "<h3").dropFirst().prefix(10) {
+            guard let aRange = chunk.range(of: #"<a[^>]*href="([^"]+)"[^>]*>(.*?)</a>"#, options: .regularExpression) else { continue }
+            let full = String(chunk[aRange])
+            guard let hrefOpen = full.range(of: #"href=""#) else { continue }
+            let afterHref = full[hrefOpen.upperBound...]
+            guard let hrefClose = afterHref.range(of: "\"") else { continue }
+            let href = String(afterHref[..<hrefClose.lowerBound])
+            guard let titleStart = full.range(of: #">([^<]+)</a>"#, options: .regularExpression) else { continue }
+            let title = String(full[titleStart]).dropFirst().dropLast(4)
+            if href.isEmpty || title.isEmpty { continue }
+            // 摘要：新版 content-right_xxx；旧版 c-abstract
+            var snippet = ""
+            if let sRange = chunk.range(of: #"content-right_[A-Za-z0-9_]+[^>]*>(.*?)</span>"#, options: .regularExpression) {
+                snippet = Self.stripTags(String(chunk[sRange]))
+            } else if let sRange = chunk.range(of: #"class="c-abstract[^"]*"[^>]*>(.*?)</"#, options: .regularExpression) {
+                snippet = Self.stripTags(String(chunk[sRange]))
+            }
+            items.append(SearchItem(title: title.trimmingCharacters(in: .whitespacesAndNewlines),
+                                    link: href, snippet: snippet.trimmingCharacters(in: .whitespacesAndNewlines)))
+        }
+        return items.isEmpty ? nil : items
+    }
 
     /// 拉取 Bing RSS 并解析；失败返回 nil
     private func fetchBingRSS(_ q: String) async -> [SearchItem]? {

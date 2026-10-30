@@ -39,6 +39,8 @@ struct DashboardView: View {
     @AppStorage("dashboardPayoutReminderCollapsed") private var payoutReminderCollapsed = false
     @AppStorage("dashboardExpiryCollapsed") private var expiryCollapsed = false
     @State private var quickCollectProperty: Property?
+    /// v1.98：快捷收租保存失败提示（修复"点收保存无效"无任何提示的问题）
+    @State private var collectErrorText: String?
     @State private var quickCollectRent = ""
     // 包租快捷付租
     @State private var quickPayPayout: PayoutRecord?
@@ -373,8 +375,9 @@ struct DashboardView: View {
         }
     }
 
-    // 快捷收租保存
-    private func saveQuickCollect(property: Property) {
+    // 快捷收租保存（v1.98：修复"点收保存无效"——新建月度记录必须先 insert 进容器再 append，
+    // 否则 SwiftData 保存抛异常被 try? 吞掉、界面无提示；保存失败保留弹窗并明确提示）
+    private func saveQuickCollect(property: Property) -> Bool {
         let calendar = Calendar.current
         let now = Date()
         let currentMonth = calendar.component(.month, from: now)
@@ -390,13 +393,20 @@ struct DashboardView: View {
         } else {
             let record = RentMonthRecord(year: currentYear, month: currentMonth, amount: rentAmount, isPaid: true)
             record.paidDate = now
+            modelContext.insert(record)
             property.monthlyRentRecords.append(record)
         }
 
         // 水电结算由收租详情表单的结算计划维护，快捷收租只记录租金
-        try? modelContext.save()
+        do {
+            try modelContext.save()
+        } catch {
+            collectErrorText = "保存失败：\(error.localizedDescription)"
+            return false
+        }
         refreshDashboard()
         quickCollectProperty = nil
+        return true
     }
 
     // 计算距离到期的天数
@@ -531,13 +541,7 @@ struct DashboardView: View {
                                 // 按自定义顺序渲染工作台动作（最多 7 个），第 8 位固定「更多」入口
                                 ForEach(dashboardActionIDs, id: \.self) { id in
                                     if let spec = quickActionSpec(id) {
-                                        // v1.98：主格快捷按钮与「更多」面板同模式——延迟一拍触发，规避同一 presenter
-                                        // 的 sheet 关闭/打开竞争导致点了没反应（与 v1.84 更多面板 0.45s 修复同根因）
-                                        QuickActionItem(icon: spec.icon, label: spec.label, color: spec.color, action: {
-                                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
-                                                spec.action()
-                                            }
-                                        }, imageName: spec.imageName)
+                                        QuickActionItem(icon: spec.icon, label: spec.label, color: spec.color, action: spec.action, imageName: spec.imageName)
                                     }
                                 }
                                 // 第 8 位固定「更多」入口
@@ -812,6 +816,12 @@ struct DashboardView: View {
             QuickCollectSheet(property: prop, rentText: $quickCollectRent, onSave: {
                 saveQuickCollect(property: prop)
             })
+        }
+        // v1.98：快捷收租保存失败提示（失败时弹窗不关闭，修正后可重试）
+        .alert("保存失败", isPresented: Binding(get: { collectErrorText != nil }, set: { if !$0 { collectErrorText = nil } })) {
+            Button("好", role: .cancel) { collectErrorText = nil }
+        } message: {
+            Text(collectErrorText ?? "")
         }
         .sheet(item: $quickPayPayout) { payout in
             QuickPaySheet(payout: payout, amountText: $quickPayAmount, payMonth: quickPayMonth, recordMonth: quickPayRecordMonth, onSave: {
@@ -1171,7 +1181,8 @@ struct QuickCollectSheet: View {
     @Environment(\.dismiss) private var dismiss
     let property: Property
     @Binding var rentText: String
-    let onSave: () -> Void
+    /// v1.98：返回 true=保存成功才关闭弹窗；false=保存失败保留弹窗可重试
+    let onSave: () -> Bool
 
     var body: some View {
         NavigationStack {
@@ -1194,8 +1205,8 @@ struct QuickCollectSheet: View {
                 ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("保存") {
-                        onSave()
-                        dismiss()
+                        // v1.98：保存成功才关弹窗；失败保留弹窗（父级弹错误提示）
+                        if onSave() { dismiss() }
                     }
                     .foregroundColor(.themeAccent)
                 }
@@ -1387,8 +1398,6 @@ struct QuickActionItem: View {
             .padding(.vertical, 4)
         }
         .buttonStyle(.plain)
-        // v1.98：显式点击热区，防个别机型按钮区域点击无响应
-        .contentShape(Rectangle())
     }
 }
 
