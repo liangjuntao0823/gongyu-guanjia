@@ -37,8 +37,6 @@
 		WA /* WidgetDataSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = WB /* WidgetDataSync.swift */; };
 		W1 /* AgentToolWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = W2 /* AgentToolWidget.swift */; };
 		W3 /* AgentToolWidget.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = W4 /* AgentToolWidget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
-				B10000010000000000000100 /* RentStatView.swift */,
-				A10000010000000000000100 /* RentStatView.swift in Sources */,
 		PE1 /* PlanEditors.swift in Sources */ = {isa = PBXBuildFile; fileRef = PE2 /* PlanEditors.swift */; };
 		A10000010000000000000099 /* TrashView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000099 /* TrashView.swift */; };
 		A10000010000000000000100 /* House.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000100 /* House.swift */; };
@@ -298,6 +296,7 @@
 				B10000010000000000000011 /* UtilityView.swift */,
 				B10000010000000000000099 /* TrashView.swift */,
 				B10000010000000000000015 /* Theme.swift */,
+				B10000010000000000000100 /* RentStatView.swift */,
 				PE2 /* PlanEditors.swift */,
 			);
 			path = Views;
@@ -492,6 +491,7 @@
 				A10000010000000000000011 /* UtilityView.swift in Sources */,
 				A10000010000000000000099 /* TrashView.swift in Sources */,
 				A10000010000000000000015 /* Theme.swift in Sources */,
+				A10000010000000000000100 /* RentStatView.swift in Sources */,
 				PE1 /* PlanEditors.swift in Sources */,
 				A20000010000000000000001 /* SyncDTO.swift in Sources */,
 				A20000010000000000000002 /* ManualSyncView.swift in Sources */,
