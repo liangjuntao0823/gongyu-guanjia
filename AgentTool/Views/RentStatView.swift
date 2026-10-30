@@ -28,7 +28,13 @@ struct RentStatView: View {
     }
 
     private var sortedProperties: [Property] {
-        properties.sorted { $0.roomNumber < $1.roomNumber }
+        // 已收租的排在上面，未收的排下面，各自按房号排序
+        properties.sorted {
+            let a = paidState($0) == true
+            let b = paidState($1) == true
+            if a != b { return a }
+            return $0.roomNumber < $1.roomNumber
+        }
     }
 
     private var selectedProperties: [Property] {
@@ -83,7 +89,13 @@ struct RentStatView: View {
         return String(format: "%.2f", v)
     }
 
-    /// 生成统计文案（模板：X月份租金合计 / 每户一行 / 合计）
+    /// 当月实际金额：优先读房号详情「收租计划」中该月记录的 amount（用户/系统生成的当月应收），
+    /// 当月尚无记录时按 租金+预存 兜底（与收租板块导出口径一致）
+    private func actualAmount(_ p: Property) -> Double {
+        p.monthlyRentRecords.first { $0.year == selectedYear && $0.month == selectedMonth }?.amount ?? (p.rent + p.prepayment)
+    }
+
+    /// 生成统计文案（模板：X月份租金合计 / 每户一行「房号 X月份租金[+预存]金额」/ 合计）
     private func statText() -> String {
         let chosen = selectedProperties
         guard !chosen.isEmpty else { return "请先勾选要统计的房间" }
@@ -93,15 +105,15 @@ struct RentStatView: View {
         for p in chosen {
             let name = displayName(p)
             let pre = p.prepayment
-            let amount = p.rent + pre      // 每户实收合计 = 租金 + 预存
+            let amount = actualAmount(p)   // 当月实际金额（收租计划优先）
             total += amount
             parts.append(fmt(amount))
             if pre <= 0 {
-                lines.append("\(name)租金\(fmt(amount))元。")
+                lines.append("\(name) \(selectedMonth)月份租金\(fmt(amount))元。")
             } else if hasUtility(p) {
-                lines.append("\(name)租金+预存\(fmt(amount))元（含水电结算）。")
+                lines.append("\(name) \(selectedMonth)月份租金+预存\(fmt(amount))元（含水电结算）。")
             } else {
-                lines.append("\(name)租金+预存\(fmt(amount))元。")
+                lines.append("\(name) \(selectedMonth)月份租金+预存\(fmt(amount))元。")
             }
         }
         lines.append("合计：\(parts.joined(separator: "+"))=\(fmt(total))元")
@@ -109,7 +121,7 @@ struct RentStatView: View {
     }
 
     private var totalAmount: Double {
-        selectedProperties.reduce(0) { $0 + $1.rent + $1.prepayment }
+        selectedProperties.reduce(0) { $0 + actualAmount($1) }
     }
 
     // MARK: - UI
@@ -277,7 +289,7 @@ struct RentStatView: View {
                     .foregroundColor(.themeText2)
             }
             Spacer()
-            Text("¥\(fmt(p.rent))")
+            Text("¥\(fmt(actualAmount(p)))")
                 .font(.system(size: 14, weight: .medium))
                 .foregroundColor(.themeText)
         }
