@@ -22,7 +22,7 @@
 		A10000010000000000000096 /* DataBackupManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000096 /* DataBackupManager.swift */; };
 		A30000010000000000000001 /* LocalNotificationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = B30000010000000000000001 /* LocalNotificationManager.swift */; };
 		A10000010000000000000011 /* UtilityView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000011 /* UtilityView.swift */; };
-	A10000010000000000000100 /* RentStatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000100 /* RentStatView.swift */; };
+	A10000010000000000000119 /* RentStatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000119 /* RentStatView.swift */; };
 		A10000010000000000000015 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000015 /* Theme.swift */; };
 		A10000010000000000000012 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000012 /* Assets.xcassets */; };
 		A10000010000000000000097 /* initialData.json in Resources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000097 /* initialData.json */; };
@@ -99,7 +99,7 @@
 		B10000010000000000000096 /* DataBackupManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DataBackupManager.swift; sourceTree = "<group>"; };
 		B30000010000000000000001 /* LocalNotificationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalNotificationManager.swift; sourceTree = "<group>"; };
 		B10000010000000000000011 /* UtilityView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UtilityView.swift; sourceTree = "<group>"; };
-	B10000010000000000000100 /* RentStatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RentStatView.swift; sourceTree = "<group>"; };
+	B10000010000000000000119 /* RentStatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RentStatView.swift; sourceTree = "<group>"; };
 		B10000010000000000000015 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
 		B10000010000000000000012 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		B10000010000000000000097 /* initialData.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = initialData.json; sourceTree = "<group>"; };
@@ -296,7 +296,7 @@
 				B10000010000000000000011 /* UtilityView.swift */,
 				B10000010000000000000099 /* TrashView.swift */,
 				B10000010000000000000015 /* Theme.swift */,
-				B10000010000000000000100 /* RentStatView.swift */,
+				B10000010000000000000119 /* RentStatView.swift */,
 				PE2 /* PlanEditors.swift */,
 			);
 			path = Views;
@@ -491,7 +491,7 @@
 				A10000010000000000000011 /* UtilityView.swift in Sources */,
 				A10000010000000000000099 /* TrashView.swift in Sources */,
 				A10000010000000000000015 /* Theme.swift in Sources */,
-				A10000010000000000000100 /* RentStatView.swift in Sources */,
+				A10000010000000000000119 /* RentStatView.swift in Sources */,
 				PE1 /* PlanEditors.swift in Sources */,
 				A20000010000000000000001 /* SyncDTO.swift in Sources */,
 				A20000010000000000000002 /* ManualSyncView.swift in Sources */,

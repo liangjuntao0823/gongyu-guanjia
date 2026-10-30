@@ -7,7 +7,7 @@ import UIKit
 struct RentStatView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
-    @Query(filter: #Predicate<Property> { !$0.isDeleted }, sort: \Property.roomNumber) private var properties: [Property]
+    @Query(filter: #Predicate<Property> { !$0.isDeleted && !$0.isTerminated }, sort: \Property.roomNumber) private var properties: [Property]
 
     @State private var selectedYear: Int
     @State private var selectedMonth: Int
@@ -50,14 +50,26 @@ struct RentStatView: View {
         }
     }
 
-    /// 房号上下层后缀（户型含「上层」→上、「下层」→下，否则无）
+    /// 房号上下层后缀判定：
+    /// ① 房号本身带「上/下」后缀（如 1-2246下）→ 直接按完整房号展示，不再追加「房」；
+    /// ② 否则看户型（含「上层/下层/上/下」）→ 附加后缀；都没有 → 房号后加「房」。
     private func layerSuffix(_ p: Property) -> String {
+        let r = p.roomNumber
+        if r.hasSuffix("上") || r.hasSuffix("下") { return "" }
         let t = p.unitType
         if t.contains("上层") { return "上" }
         if t.contains("下层") { return "下" }
         if t.contains("上") { return "上" }
         if t.contains("下") { return "下" }
         return ""
+    }
+
+    /// 文案中的房间显示名（模板：xx房 / xx上 / xx下）
+    private func displayName(_ p: Property) -> String {
+        let r = p.roomNumber
+        if r.hasSuffix("上") || r.hasSuffix("下") { return r }
+        let s = layerSuffix(p)
+        return s.isEmpty ? "\(r)房" : "\(r)\(s)"
     }
 
     private func fmt(_ v: Double) -> String {
@@ -73,8 +85,7 @@ struct RentStatView: View {
         var parts: [String] = []
         var total: Double = 0
         for p in chosen {
-            let suffix = layerSuffix(p)
-            let name = suffix.isEmpty ? "\(p.roomNumber)房" : "\(p.roomNumber)\(suffix)"
+            let name = displayName(p)
             let pre = p.prepayment
             let amount = p.rent + pre
             total += amount
