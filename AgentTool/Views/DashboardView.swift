@@ -224,7 +224,6 @@ struct DashboardView: View {
         let calendar = Calendar.current
         let now = Date()
         let currentMonth = calendar.component(.month, from: now)
-        let currentDay = calendar.component(.day, from: now)
         let currentYear = calendar.component(.year, from: now)
 
         var reminders: [RentReminder] = []
@@ -235,16 +234,16 @@ struct DashboardView: View {
             if prop.isTerminated { continue }
             let dueDay = prop.rentDueDay
 
-            // 确定关注的应收期：当月记录未收 → 当月；当月已收（或无记录）→ 下一期
-            let currentRecord = prop.monthlyRentRecords.first { $0.year == currentYear && $0.month == currentMonth }
-            let targetYear: Int
-            let targetMonth: Int
-            if let rec = currentRecord, !rec.isPaid {
-                targetYear = currentYear
-                targetMonth = currentMonth
-            } else {
-                targetYear = currentMonth == 12 ? currentYear + 1 : currentYear
-                targetMonth = currentMonth == 12 ? 1 : currentMonth + 1
+            // 确定关注的应收期：从当前月起向后滚动找第一个"未收"的期（无记录或未收即视为未收）。
+            // v1.98：原逻辑只判断"当月已收→看下月"，不校验下月是否已收——提前交了下期租
+            // （如10月收11月）后，提醒仍把11月当应收期、永不消失（"保存后待收租还在"根因）。
+            var targetYear = currentYear
+            var targetMonth = currentMonth
+            for _ in 0..<12 {
+                let rec = prop.monthlyRentRecords.first { $0.year == targetYear && $0.month == targetMonth }
+                if rec == nil || !rec!.isPaid { break }
+                targetMonth += 1
+                if targetMonth > 12 { targetMonth = 1; targetYear += 1 }
             }
 
             // 计算距离目标期交租日的天数和逾期状态（按真实日期差，跨月也准确）

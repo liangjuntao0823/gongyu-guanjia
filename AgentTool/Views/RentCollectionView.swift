@@ -829,12 +829,12 @@ struct PropertyDetailView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) { Button("编辑") { if property.isTerminated { showTerminationForm = true } else { showEditProperty = true } }.foregroundColor(.themeAccent) }
             }
-                        .sheet(isPresented: $showShareSheet) { if let image = shareImage { ActivityView(activityItems: [image]) } }
+                        .sheet(isPresented: $showShareSheet) { if let image = shareImage { StableShareView(image: image, onComplete: { showShareSheet = false }) } }
             .sheet(isPresented:$showUtilitySheet){UtilityView(presetProperty:property, onWriteSuccess:{ dataRefreshID = UUID() })}
             .confirmationDialog("选择账单月份",isPresented:$showBillMonths,titleVisibility:.visible){ForEach(property.monthlyRentRecords.sorted{$0.year==$1.year ? $0.month<$1.month:$0.year<$1.year},id:\.id){r in Button("\(r.year)年\(r.month)月"){pendingBill=r;extraItems=[];extraName="";extraAmount="";showExtraChoice=true}};Button("取消",role:.cancel){}}
             .confirmationDialog("是否添加附加费用",isPresented:$showExtraChoice,titleVisibility:.visible){Button("有"){extraFormToken=ExtraFormToken()};Button("无"){if let r=pendingBill{makeBill(r)}};Button("取消",role:.cancel){}}
             .sheet(item:$extraFormToken){_ in BillExtraForm(items:$extraItems,name:$extraName,amount:$extraAmount){extraFormToken=nil;DispatchQueue.main.asyncAfter(deadline:.now()+0.2){if let r=pendingBill{makeBill(r)}}}}
-                        .sheet(isPresented:$showBillShare){if let billImage{ActivityView(activityItems:[billImage])}}
+                        .sheet(isPresented:$showBillShare){if let billImage{StableShareView(image: billImage, onComplete: { showBillShare = false })}}
             .sheet(isPresented:$showEditProperty){AddPropertyView(property:property)}
             .sheet(isPresented:$showRentPlanEditor){RentPlanEditorView(property:property)}
             .sheet(isPresented:$showUtilityPlanEditor){UtilityPlanEditorView(property:property)}
@@ -1484,6 +1484,43 @@ struct ActivityView: UIViewControllerRepresentable {
 
     func makeUIViewController(context: Context) -> UIActivityViewController {
         UIActivityViewController(activityItems: activityItems, applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
+}
+
+// MARK: - 稳定分享（v1.98：修复"分享账单点微信卡死"+"跳转微信后分享面板不自动关闭"）
+/// 分享图片的最稳写法：
+/// ① 先把 UIImage 压缩写为临时 JPEG 文件，再以文件 URL 分享——直接传 UIImage 时，
+///    微信等目标应用会对高清大图反复解码/拷贝，内存暴涨导致卡死（分享一次成功、第二次卡死）。
+/// ② completion 回调后通过 onComplete 通知 SwiftUI 强制关闭外层 sheet——系统分享面板
+///    在跳转微信后不保证自动关闭，SwiftUI 层兜底关闭，杜绝"分享完面板还在"。
+struct StableShareView: UIViewControllerRepresentable {
+    let image: UIImage
+    var onComplete: () -> Void = {}
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        var items: [Any] = []
+        // 写临时文件（tmp 目录由系统自动清理）；JPEG 0.9 保留清晰度且体积远小于 PNG
+        if let data = image.jpegData(compressionQuality: 0.9) {
+            let url = FileManager.default.temporaryDirectory
+                .appendingPathComponent("share_\(Int(Date().timeIntervalSince1970)).jpg")
+            do {
+                try data.write(to: url)
+                items.append(url)
+            } catch {
+                items.append(image) // 写文件失败才退回内存图，避免分享失败
+            }
+        } else {
+            items.append(image)
+        }
+        let controller = UIActivityViewController(activityItems: items, applicationActivities: nil)
+        controller.completionWithItemsHandler = { _, _, _, _ in
+            DispatchQueue.main.async {
+                onComplete()
+            }
+        }
+        return controller
     }
 
     func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}

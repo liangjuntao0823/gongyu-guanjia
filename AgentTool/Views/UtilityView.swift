@@ -158,7 +158,7 @@ struct UtilityHistoryPreview: View {
     @State private var image:UIImage?
     @State private var sharing=false
     @State private var previewing=false
-    var body:some View{NavigationStack{ScrollView{UtilityStatementCard(history:history).padding()}.navigationTitle(history.roomNumber+"房结算单").navigationBarTitleDisplayMode(.inline).toolbar{ToolbarItem(placement:.navigationBarLeading){Button{makeImage()}label:{Image(systemName:"square.and.arrow.up")}};ToolbarItem(placement:.confirmationAction){Button("关闭"){dismiss()}}}.sheet(isPresented:$sharing){if let image{ActivityView(activityItems:[image])}}}}
+    var body:some View{NavigationStack{ScrollView{UtilityStatementCard(history:history).padding()}.navigationTitle(history.roomNumber+"房结算单").navigationBarTitleDisplayMode(.inline).toolbar{ToolbarItem(placement:.navigationBarLeading){Button{makeImage()}label:{Image(systemName:"square.and.arrow.up")}};ToolbarItem(placement:.confirmationAction){Button("关闭"){dismiss()}}}.sheet(isPresented:$sharing){if let image{StableShareView(image: image, onComplete: { sharing = false })}}}}
     private func makeImage(){let renderer=ImageRenderer(content:UtilityStatementCard(history:history).frame(width:360).padding().background(Color.white));renderer.scale=3;if let result=renderer.uiImage{image=result;sharing=true}}
 }
 

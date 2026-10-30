@@ -673,12 +673,14 @@ struct AIAssistantView: View {
 
 // MARK: - 历史查看（v1.98）
 
-/// AI 对话历史查看：倒序展示（最新在最上，进来即看到最新内容），支持关键词搜索，可一键清空
+/// AI 对话历史查看：正序展示（旧→新，进入自动滚到最新），长消息单击折叠/展开，支持关键词搜索，可一键清空
 struct AIHistoryView: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject var manager: AIManager
     @State private var confirmClear = false
     @State private var searchText = ""
+    /// v1.98：已展开的消息 id（单击文本在"折叠3行/展开全文"间切换）
+    @State private var expandedIDs: Set<UUID> = []
 
     /// v1.98：按关键词过滤（匹配 我/AI 角色、正文、动作标签、账单图标记）；保持时间正序
     private var filtered: [AIMessage] {
@@ -689,6 +691,12 @@ struct AIHistoryView: View {
                 || (msg.toolSummary?.joined(separator: " ") ?? "").localizedCaseInsensitiveContains(kw)
                 || (msg.role == .user ? "我" : "AI").contains(kw)
         }
+    }
+
+    /// v1.98：长消息（超过3行才显示"展开/收起"提示）单击切换折叠状态
+    private func isLong(_ msg: AIMessage) -> Bool {
+        // 粗略判断：文本较长或含较多换行即视为长消息
+        msg.text.count > 80 || msg.text.filter { $0 == "\n" }.count >= 2
     }
 
     var body: some View {
@@ -764,11 +772,33 @@ struct AIHistoryView: View {
                                     Text(msg.text)
                                         .font(.system(size: 13))
                                         .foregroundColor(.themeText)
-                                        .lineLimit(3)
+                                        // v1.98：默认折叠3行，展开后显示全文；点击文本区切换
+                                        .lineLimit(expandedIDs.contains(msg.id) ? nil : 3)
                                         .textSelection(.enabled)
+                                    if isLong(msg) {
+                                        HStack(spacing: 4) {
+                                            Text(expandedIDs.contains(msg.id) ? "收起" : "展开全文")
+                                                .font(.system(size: 11))
+                                                .foregroundColor(.themeAccentDark)
+                                            Image(systemName: expandedIDs.contains(msg.id) ? "chevron.up" : "chevron.down")
+                                                .font(.system(size: 10))
+                                                .foregroundColor(.themeAccentDark)
+                                        }
+                                    }
                                 }
                                 .padding(.vertical, 3)
                                 .id(msg.id)
+                                // v1.98：单击切换折叠/展开（长按仍可选中复制文本）
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    if isLong(msg) {
+                                        if expandedIDs.contains(msg.id) {
+                                            expandedIDs.remove(msg.id)
+                                        } else {
+                                            expandedIDs.insert(msg.id)
+                                        }
+                                    }
+                                }
                             }
                         }
                         .listStyle(.insetGrouped)
