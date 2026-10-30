@@ -87,7 +87,9 @@ struct AIRequestService {
         let body: [String: Any] = [
             "model": model,
             "messages": messages,
-            "temperature": 0.7
+            "temperature": 0.7,
+            // v1.98：限制回复长度，防模型自由生成长文拖慢响应；普通问答 800 token 足够
+            "max_tokens": 800
         ]
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
         req.timeoutInterval = 90
@@ -150,7 +152,10 @@ struct AIRequestService {
         var body: [String: Any] = [
             "model": model,
             "messages": messages,
-            "temperature": 0.4
+            "temperature": 0.4,
+            // v1.98：上限 2000——足够完整列出 25+ 套房源/电表明细（v1.97 用户要求列表完整），
+            // 同时防模型无限生成长文导致回复慢
+            "max_tokens": 2000
         ]
         if !tools.isEmpty {
             body["tools"] = tools

@@ -378,6 +378,7 @@ struct DashboardView: View {
     // 快捷收租保存（v1.98：修复"点收保存无效"——新建月度记录必须先 insert 进容器再 append，
     // 否则 SwiftData 保存抛异常被 try? 吞掉、界面无提示；保存失败保留弹窗并明确提示）
     private func saveQuickCollect(property: Property) -> Bool {
+        collectErrorText = nil // 重试时清空上次错误
         let calendar = Calendar.current
         let now = Date()
         let currentMonth = calendar.component(.month, from: now)
@@ -813,7 +814,7 @@ struct DashboardView: View {
             Text("完成后将归档到“已办”。")
         }
         .sheet(item: $quickCollectProperty) { prop in
-            QuickCollectSheet(property: prop, rentText: $quickCollectRent, onSave: {
+            QuickCollectSheet(property: prop, rentText: $quickCollectRent, errorText: $collectErrorText, onSave: {
                 saveQuickCollect(property: prop)
             })
         }
@@ -1181,6 +1182,8 @@ struct QuickCollectSheet: View {
     @Environment(\.dismiss) private var dismiss
     let property: Property
     @Binding var rentText: String
+    /// v1.98：保存失败原因回显在弹窗内（红字），无论系统 alert 是否被遮挡都可见
+    @Binding var errorText: String?
     /// v1.98：返回 true=保存成功才关闭弹窗；false=保存失败保留弹窗可重试
     let onSave: () -> Bool
 
@@ -1194,6 +1197,11 @@ struct QuickCollectSheet: View {
                 Section("收租金额") {
                     TextField("实收租金", text: $rentText)
                         .keyboardType(.decimalPad)
+                    if let errorText {
+                        Text(errorText)
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(.red)
+                    }
                 }
             }
             .scrollContentBackground(.hidden)

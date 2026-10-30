@@ -116,6 +116,16 @@ struct AIAssistantView: View {
                     .padding(.horizontal)
                     .padding(.vertical, 12)
                 }
+                // v1.98：进入页面直接定位到对话最底端（最新消息），不再停在顶端
+                .onAppear {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                        if let last = manager.messages.last {
+                            withAnimation(.none) { proxy.scrollTo(last.id, anchor: .bottom) }
+                        } else if manager.sending {
+                            withAnimation(.none) { proxy.scrollTo("thinking", anchor: .bottom) }
+                        }
+                    }
+                }
                 .onChange(of: manager.messages.count) { _ in
                     if let last = manager.messages.last {
                         withAnimation { proxy.scrollTo(last.id, anchor: .bottom) }
@@ -663,11 +673,23 @@ struct AIAssistantView: View {
 
 // MARK: - 历史查看（v1.98）
 
-/// AI 对话历史查看：浏览全部历史消息，可一键清空
+/// AI 对话历史查看：倒序展示（最新在最上，进来即看到最新内容），支持关键词搜索，可一键清空
 struct AIHistoryView: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject var manager: AIManager
     @State private var confirmClear = false
+    @State private var searchText = ""
+
+    /// v1.98：按关键词过滤（匹配 我/AI 角色、正文、动作标签、账单图标记）；保持时间正序
+    private var filtered: [AIMessage] {
+        let kw = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !kw.isEmpty else { return manager.messages }
+        return manager.messages.filter { msg in
+            msg.text.localizedCaseInsensitiveContains(kw)
+                || (msg.toolSummary?.joined(separator: " ") ?? "").localizedCaseInsensitiveContains(kw)
+                || (msg.role == .user ? "我" : "AI").contains(kw)
+        }
+    }
 
     var body: some View {
         Group {
@@ -679,50 +701,96 @@ struct AIHistoryView: View {
                     Text("暂无历史记录")
                         .font(.system(size: 14))
                         .foregroundColor(.themeText2)
-                    Text("发送第一条指令后，历史会保存在这里")
+                    Text("发送第一条指令后，历史会保存在这里（保留最近 1 年）")
                         .font(.system(size: 12))
                         .foregroundColor(.themeText3)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                List {
-                    ForEach(manager.messages) { msg in
-                        VStack(alignment: .leading, spacing: 5) {
-                            HStack(spacing: 6) {
-                                Text(msg.role == .user ? "我" : "AI")
-                                    .font(.system(size: 11, weight: .bold))
-                                    .foregroundColor(.white)
-                                    .padding(.horizontal, 7)
-                                    .padding(.vertical, 2)
-                                    .background(msg.role == .user ? Color.themeAccent : Color.gray.opacity(0.65))
-                                    .clipShape(Capsule())
-                                Text(timeFullText(msg.time))
-                                    .font(.system(size: 11))
+                VStack(spacing: 0) {
+                    // v1.98：历史搜索框
+                    HStack(spacing: 8) {
+                        Image(systemName: "magnifyingglass")
+                            .font(.system(size: 14))
+                            .foregroundColor(.themeText3)
+                        TextField("搜索历史消息（房号/租金/关键词）", text: $searchText)
+                            .font(.system(size: 14))
+                            .autocorrectionDisabled()
+                        if !searchText.isEmpty {
+                            Button {
+                                searchText = ""
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .font(.system(size: 14))
                                     .foregroundColor(.themeText3)
-                                if let ts = msg.toolSummary, !ts.isEmpty {
-                                    Text("执行 \(ts.count) 项操作")
-                                        .font(.system(size: 10))
-                                        .foregroundColor(.themeAccentDark)
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
+                    .background(Color(.systemGray6).opacity(0.7))
+                    .cornerRadius(10)
+                    .padding(.horizontal, 14)
+                    .padding(.top, 10)
+                    .padding(.bottom, 4)
+
+                    // v1.98：正序列表，进入后自动滚动到最底部（最新消息），不改变阅读顺序
+                    ScrollViewReader { proxy in
+                        List {
+                            ForEach(filtered) { msg in
+                                VStack(alignment: .leading, spacing: 5) {
+                                    HStack(spacing: 6) {
+                                        Text(msg.role == .user ? "我" : "AI")
+                                            .font(.system(size: 11, weight: .bold))
+                                            .foregroundColor(.white)
+                                            .padding(.horizontal, 7)
+                                            .padding(.vertical, 2)
+                                            .background(msg.role == .user ? Color.themeAccent : Color.gray.opacity(0.65))
+                                            .clipShape(Capsule())
+                                        Text(timeFullText(msg.time))
+                                            .font(.system(size: 11))
+                                            .foregroundColor(.themeText3)
+                                        if let ts = msg.toolSummary, !ts.isEmpty {
+                                            Text("执行 \(ts.count) 项操作")
+                                                .font(.system(size: 10))
+                                                .foregroundColor(.themeAccentDark)
+                                        }
+                                        if msg.imagePath != nil {
+                                            Text("含账单图")
+                                                .font(.system(size: 10))
+                                                .foregroundColor(.themeAccentDark)
+                                        }
+                                    }
+                                    Text(msg.text)
+                                        .font(.system(size: 13))
+                                        .foregroundColor(.themeText)
+                                        .lineLimit(3)
+                                        .textSelection(.enabled)
                                 }
-                                if msg.imagePath != nil {
-                                    Text("含账单图")
-                                        .font(.system(size: 10))
-                                        .foregroundColor(.themeAccentDark)
+                                .padding(.vertical, 3)
+                                .id(msg.id)
+                            }
+                        }
+                        .listStyle(.insetGrouped)
+                        .onAppear {
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                                if let last = filtered.last {
+                                    withAnimation(.none) { proxy.scrollTo(last.id, anchor: .bottom) }
                                 }
                             }
-                            Text(msg.text)
-                                .font(.system(size: 13))
-                                .foregroundColor(.themeText)
-                                .lineLimit(3)
-                                .textSelection(.enabled)
                         }
-                        .padding(.vertical, 3)
+                        .onChange(of: searchText) { _ in
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                                if let last = filtered.last {
+                                    withAnimation(.none) { proxy.scrollTo(last.id, anchor: .bottom) }
+                                }
+                            }
+                        }
                     }
                 }
-                .listStyle(.insetGrouped)
             }
         }
-        .navigationTitle("对话历史（\(manager.messages.count) 条）")
+        .navigationTitle("对话历史（\(manager.messages.count) 条，近 1 年）")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {

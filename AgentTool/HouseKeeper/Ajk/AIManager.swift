@@ -55,7 +55,7 @@ final class AIManager: ObservableObject {
     private var houseModelContext: ModelContext?
 
     private let historyKey = "ai.chatHistory"
-    private let historyLimit = 60
+    // v1.98：历史不再按条数截断，改按时间保留最近 1 年（见 loadHistory/saveHistory）
 
     // MARK: - 页面生命周期
 
@@ -144,8 +144,8 @@ final class AIManager: ObservableObject {
         let apiKey = KeychainHelper.load(key: "ai.volcengine.apiKey") ?? ""
         let baseURL = UserDefaults.standard.string(forKey: "ai.baseURL") ?? AIRequestService.defaultBaseURL
         let model = UserDefaults.standard.string(forKey: "ai.modelName") ?? AIAssistantSettingsView.defaultModel
-        // 多轮上下文：除本条外的历史（最多最近 40 条；历史图片不重传）
-        let history = Array(messages.dropLast().suffix(40)).compactMap { msg -> AIRequestService.ChatTurn? in
+        // 多轮上下文：除本条外的历史（v1.98：40→20 条，prompt 减半、首字更快；历史仍全量本地保存 1 年）
+        let history = Array(messages.dropLast().suffix(20)).compactMap { msg -> AIRequestService.ChatTurn? in
             guard !msg.text.isEmpty else { return nil }
             return AIRequestService.ChatTurn(role: msg.role == .user ? "user" : "assistant", text: msg.text)
         }
@@ -364,22 +364,35 @@ final class AIManager: ObservableObject {
     }
 
     /// v1.95：实时拉取腾讯云桶用量（云函数 act=usage；未配置/失败返回提示，不阻断发送）
+    /// v1.98：加缓存——成功缓存 5 分钟、失败缓存 60 秒，避免每次发消息前都串行等网络（慢的根因之一）
+    private var usageCache: (text: String, time: Date)?
     private func fetchCloudUsageText() async -> String {
+        // 命中缓存直接返回，不发请求
+        if let cache = usageCache,
+           Date().timeIntervalSince(cache.time) < (cache.text.contains("拉取失败") ? 60 : 300) {
+            return cache.text
+        }
         guard !CloudConfig.functionURL.isEmpty, !CloudConfig.passwordHash.isEmpty,
               let url = URL(string: "\(CloudConfig.functionURL)?act=usage&k=\(CloudConfig.passwordHash)") else {
             return "云端用量：未配置云函数地址或密钥（设置→云端配置），无法拉取"
         }
         var request = URLRequest(url: url)
-        request.timeoutInterval = 8
+        request.timeoutInterval = 4 // v1.98：8s→4s，减少对首条回复的拖累
         do {
             let (data, _) = try await URLSession.shared.data(for: request)
             if let obj = try? JSONDecoder().decode(UsageResponse.self, from: data), obj.ok {
                 let mb = Double(obj.total) / 1024.0 / 1024.0
-                return "腾讯云桶共 \(obj.total_files) 个文件，占用 \(String(format: "%.1f", mb)) MB"
+                let text = "腾讯云桶共 \(obj.total_files) 个文件，占用 \(String(format: "%.1f", mb)) MB"
+                usageCache = (text, Date())
+                return text
             }
-            return "云端用量：拉取失败（请确认云函数已部署）"
+            let text = "云端用量：拉取失败（请确认云函数已部署）"
+            usageCache = (text, Date())
+            return text
         } catch {
-            return "云端用量：拉取失败（网络不可用或超时）"
+            let text = "云端用量：拉取失败（网络不可用或超时）"
+            usageCache = (text, Date())
+            return text
         }
     }
 
@@ -498,11 +511,15 @@ final class AIManager: ObservableObject {
         guard let data = UserDefaults.standard.data(forKey: historyKey),
               let arr = try? JSONDecoder().decode([AIMessage].self, from: data) else { return }
         var seen = Set<UUID>()
-        messages = arr.filter { seen.insert($0.id).inserted }
+        // v1.98：只保留最近 1 年（兼容旧版本超期数据）
+        let cutoff = Calendar.current.date(byAdding: .year, value: -1, to: Date()) ?? Date()
+        messages = arr.filter { $0.time >= cutoff && seen.insert($0.id).inserted }
     }
 
+    // v1.98：历史保存策略改为"保留最近 1 年"，不再按 60 条截断
     private func saveHistory() {
-        let recent = Array(messages.suffix(historyLimit))
+        let cutoff = Calendar.current.date(byAdding: .year, value: -1, to: Date()) ?? Date()
+        let recent = messages.filter { $0.time >= cutoff }
         let slim = recent.map { msg -> AIMessage in
             // v1.98：历史精简时保留 imagePath（账单图片是本地沙盒文件，路径可长期复用）
             guard !msg.images.isEmpty else { return msg }
