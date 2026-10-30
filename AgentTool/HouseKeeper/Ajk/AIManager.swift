@@ -171,8 +171,8 @@ final class AIManager: ObservableObject {
             }
             var executedLabels: [String] = []
             var finalText: String?
-            // v1.98：本轮工具结果若有【图片】路径标记，提取展示在气泡（作用域在循环外，供消息拼接用）
-            var toolImagePath: String? = nil
+            // v1.98：工具结果若带【图片】路径标记，提取展示在气泡；v1.98：支持多张（多套房账单各一张，按生成顺序）
+            var toolImagePaths: [String] = []
             do {
                 // v1.97：工具循环上限提到 6 轮（批量/多动作场景不再被 3 轮截断）
                 for _ in 0..<6 {
@@ -206,20 +206,29 @@ final class AIManager: ObservableObject {
                     }
                     // 执行全部工具调用，结果回填
                     toolPhase = "正在执行操作…"
-                    let executor = AIToolExecutor(modelContext: mc, houseModelContext: hc)
+                    var executor = AIToolExecutor(modelContext: mc, houseModelContext: hc)
+                    // v1.98：执行过程中实时上报具体步骤（如「正在抄表 012030（2/3）」「正在生成 1-2319 账单图片」）
+                    executor.phase = { [weak self] step in
+                        self?.toolPhase = step
+                    }
                     var labels: [String] = []
                     for call in completion.toolCalls {
+                        let label = actionLabel(for: call)
+                        toolPhase = "正在执行：\(label)…"
                         let resultText = await executor.execute(tool: call)
-                        labels.append(actionLabel(for: call))
+                        labels.append(label)
                         // v1.98：工具结果若带【图片】路径标记，提取出来展示在对话气泡（如 AI 生成的账单图）
+                        // v1.98：多张图片全部收集（每套房账单一张），按生成顺序展示
                         if let imgMark = resultText.range(of: "【图片】") {
                             let path = String(resultText[imgMark.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
-                            if !path.isEmpty { toolImagePath = path }
+                            if !path.isEmpty, !toolImagePaths.contains(path) {
+                                toolImagePaths.append(path)
+                            }
                         }
                         messages.append(["role": "tool", "tool_call_id": call.id, "content": resultText])
                     }
                     executedLabels.append(contentsOf: labels)
-                    toolPhase = "正在思考…"
+                    toolPhase = "正在整理回复…"
                 }
                 if finalText == nil {
                     finalText = "操作已完成（见上方动作标签）。如需继续调整，直接告诉我。"
@@ -227,7 +236,7 @@ final class AIManager: ObservableObject {
                 let (cleanText, suggestions) = Self.parseSuggestions(finalText!)
                 self.messages.append(AIMessage(role: .assistant, text: cleanText, time: Date(),
                                                toolSummary: executedLabels, suggestedActions: suggestions,
-                                               imagePath: toolImagePath))
+                                               imagePath: toolImagePaths.first, imagePaths: toolImagePaths))
                 saveHistory()
             } catch {
                 // 超时/网络错误给中文提示
@@ -309,11 +318,16 @@ final class AIManager: ObservableObject {
         case ("manage_todo", "edit"): return "待办·编辑"
         case ("manage_todo", "delete"): return "待办·删除"
         case ("refresh_data", "refresh_meters"): return "电表·刷新"
+        case ("refresh_data", "query_meters"):
+            let uids = args["uids"] as? [String] ?? []
+            let rooms = args["room_nos"] as? [String] ?? []
+            return "电表·抄表 \((uids + rooms).joined(separator: "、"))"
         case ("refresh_data", "refresh_ajk"): return "安居客·刷新"
         case ("refresh_data", "create_quick_backup"): return "备份·快速"
         case ("refresh_data", "create_full_backup"): return "备份·全量"
         case ("refresh_data", "list_backups"): return "备份·列表"
         case ("refresh_data", "sync_status"): return "同步·状态"
+        case ("teach_action", _): return "教学·\(args["action_name"] as? String ?? "")"
         case ("manage_meter", "set_low_alert"): return "电表·预警设置"
         case ("manage_meter", "set_auto_refresh"): return "电表·定时刷新"
         case ("query_report", "overdue_list"): return "报表·欠租"
@@ -350,6 +364,10 @@ final class AIManager: ObservableObject {
                ? "\n\n【我的偏好要求】\n\(UserDefaults.standard.string(forKey: "ai.promptTemplate") ?? "")" : "")
         // v1.96：工具调用能力说明
         base += "\n\n【工具操作能力】你可以调用工具直接执行 App 内的操作：新增/编辑房源、切换待租已租、移入回收站、标记收租、记成交与杂项、管理待办、刷新电表/安居客、新建备份、设置电表预警与定时刷新、查询欠租/租约到期/收租汇总、生成收租账单、导出 Excel/CSV 文件、联网搜索资料。调用规则：①参数名用工具定义里的字段（如 room_no、action_type），房号按用户规则（2- 前缀=2座）；②凡是写操作（新增/修改/删除/备份）系统都会先弹确认框，确认后我才执行，你不需要征求用户意见，也不要擅自替用户编造数据；③执行结果会以 tool 结果返回给你，你必须在最终回复里用大白话向用户汇报：改了什么（改了谁/房号）、多少钱、什么时间、结果如何；④批量类操作（如一次切换多套已租）优先用批量字段一次性完成；⑤查询类工具（query_report/export_data/web_search）可直接调用，不会打扰用户。"
+        // v1.98：抄表与教学规则
+        base += "\n\n【抄表与自定义操作规则（v1.98）】①用户指定某几个表号/房号抄表时，必须调用 refresh_data 的 query_meters 动作只抄指定表（绝不要刷新全部电表）；②用户指定的表号不在绑定列表时，query_meters 会自动添加后再抄，你直接调用即可，不要回答"暂不支持"；③用户教你的复合操作（先说出操作名、再一步步步骤）用 teach_action 记录，之后用户说该操作名就直接按步骤展开执行。"
+        // v1.98：已教学操作注入
+        base += AIToolExecutor.taughtActionsSummary()
         // v1.97：回复格式要求（预选项 + 长内容收敛）
         base += "\n\n【回复格式要求（v1.97）】①回答完每轮对话后，在结尾附上 2-3 个最可能的下一个指令预选项，格式必须严格为一行：【预选项】{\"suggestions\":[\"选项1\",\"选项2\"]}（JSON 里中文引号不可用，用英文双引号；最多 3 个；如果用户指令不需要后续动作可不给）；②涉及列表类内容（电表、房源、安居客）必须完整列出，不要省略中间项；③生成账单任务必须调用 generate_rent_bill 工具获取账单文本，然后只给用户摘要+金额，不要自行编造长账单；④用户要求导出文件时调用 export_data 工具生成并告知保存位置。"
         // 房源（独立容器）
@@ -521,11 +539,12 @@ final class AIManager: ObservableObject {
         let cutoff = Calendar.current.date(byAdding: .year, value: -1, to: Date()) ?? Date()
         let recent = messages.filter { $0.time >= cutoff }
         let slim = recent.map { msg -> AIMessage in
-            // v1.98：历史精简时保留 imagePath（账单图片是本地沙盒文件，路径可长期复用）
+            // v1.98：历史精简时保留 imagePath（账单图片是本地沙盒文件，路径可长期复用）；v1.98：多图 imagePaths 一并保留
             guard !msg.images.isEmpty else { return msg }
             return AIMessage(id: msg.id, role: msg.role, text: msg.text, time: msg.time,
                              images: [], attachText: msg.attachText, toolSummary: msg.toolSummary,
-                             suggestedActions: msg.suggestedActions, imagePath: msg.imagePath)
+                             suggestedActions: msg.suggestedActions, imagePath: msg.imagePath,
+                             imagePaths: msg.imagePaths)
         }
         if let data = try? JSONEncoder().encode(slim) {
             UserDefaults.standard.set(data, forKey: historyKey)

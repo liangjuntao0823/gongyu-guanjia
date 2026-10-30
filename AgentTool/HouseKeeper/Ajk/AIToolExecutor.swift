@@ -19,6 +19,103 @@ struct AIToolExecutor {
     let modelContext: ModelContext        // 主容器：Property / DealRecord / MiscIncome / MiscExpense / TodoItem / Utility*
     let houseModelContext: ModelContext?  // 房源容器：House / MediaItem
 
+    /// v1.98：执行过程中的实时步骤上报（AIManager 注入，驱动「正在思考」气泡展示具体执行到哪一步）
+    var phase: ((String) -> Void)?
+
+    // MARK: - AI 产物统一存储（v1.98）
+    // 规则：AI 生成的账单图片、导出文件等产物统一存沙盒根目录「AI产物」文件夹；
+    // 设置页「AI对话缓存」条目显示其大小并可一键清空（二级确认）。
+
+    /// AI 产物根目录：Documents/AI产物/
+    static func aiArtifactDir() -> URL {
+        let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("AI产物", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    /// AI 产物目录大小（字节，递归统计）
+    static func aiArtifactSizeBytes() -> Int64 {
+        let dir = aiArtifactDir()
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: dir, includingPropertiesForKeys: [.fileSizeKey, .isDirectoryKey], options: []) else { return 0 }
+        var total: Int64 = 0
+        for f in files {
+            let isDir = (try? f.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory ?? false
+            if isDir, let sub = try? FileManager.default.subpathsOfDirectory(atPath: f.path) {
+                for p in sub {
+                    let full = f.appendingPathComponent(p)
+                    if let size = (try? full.resourceValues(forKeys: [.fileSizeKey]))?.fileSize {
+                        total += Int64(size)
+                    }
+                }
+            } else if let size = (try? f.resourceValues(forKeys: [.fileSizeKey]))?.fileSize {
+                total += Int64(size)
+            }
+        }
+        return total
+    }
+
+    /// 清空 AI 产物文件夹（设置页二级确认后调用）
+    static func clearAIArtifacts() {
+        let dir = aiArtifactDir()
+        if let files = try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil, options: []) {
+            for f in files { try? FileManager.default.removeItem(at: f) }
+        }
+    }
+
+    // MARK: - 已教学的自定义操作（v1.98「AI 可教学」）
+    // 用户可用指令一步步教 AI 完成代码里没有的复合操作：AI 把操作名+步骤存本地规则库，
+    // 之后用户说出该操作名时，AI 直接把步骤展开为多个工具调用一次性执行。
+
+    /// 教学规则库存储键
+    static let taughtActionsKey = "ai.taughtActions"
+
+    /// 一个教学步骤（arguments 为完整参数 JSON 字符串，AI 可直接构造工具调用）
+    struct TaughtStep: Codable {
+        let tool: String
+        let arguments: String
+        let description: String
+    }
+
+    /// 一个已教学操作
+    struct TaughtAction: Codable {
+        let name: String
+        let steps: [TaughtStep]
+    }
+
+    /// 读本地教学规则库
+    static func loadTaughtActions() -> [TaughtAction] {
+        guard let data = UserDefaults.standard.data(forKey: taughtActionsKey),
+              let arr = try? JSONDecoder().decode([TaughtAction].self, from: data) else { return [] }
+        return arr
+    }
+
+    static func saveTaughtActions(_ actions: [TaughtAction]) {
+        if let data = try? JSONEncoder().encode(actions) {
+            UserDefaults.standard.set(data, forKey: taughtActionsKey)
+        }
+    }
+
+    /// 教学步骤只允许引用这些已注册工具
+    static let knownToolNames: Set<String> = [
+        "update_property", "record_finance", "manage_todo", "refresh_data",
+        "manage_meter", "query_report", "export_data", "web_search"
+    ]
+
+    /// 教学规则库摘要文本（注入 systemPrompt，AI 知道有哪些已学会的操作）
+    static func taughtActionsSummary() -> String {
+        let actions = loadTaughtActions()
+        guard !actions.isEmpty else { return "" }
+        var lines = ["【你已学会的自定义操作（用户教过你的）】"]
+        for act in actions {
+            let steps = act.steps.enumerated().map { "第\($0.offset + 1)步 \($0.element.tool)：\($0.element.description)" }
+            lines.append("- 操作名「\(act.name)」：\n  " + steps.joined(separator: "\n  "))
+        }
+        lines.append("规则：当用户说出某个已学会的操作名时，你必须把该操作的每一步展开为对应的工具调用，一次性返回全部 tool_calls 依次执行（不要问用户怎么做，直接照步骤做）；参数值按用户本次指令和 App 数据补全。")
+        return "\n\n" + lines.joined(separator: "\n")
+    }
+
     // MARK: - 工具 Schema（注册给火山方舟 function calling 用）
 
     /// 工具 Schema 列表（注册给火山方舟 function calling 用）
@@ -30,7 +127,8 @@ struct AIToolExecutor {
         manageMeterSchema,
         queryReportSchema,
         exportDataSchema,
-        webSearchSchema
+        webSearchSchema,
+        teachActionSchema
     ]
 
     static let updatePropertySchema: [String: Any] = [
@@ -120,13 +218,36 @@ struct AIToolExecutor {
         "type": "function",
         "function": [
             "name": "refresh_data",
-            "description": "刷新/备份域通用工具：刷新电表、刷新安居客、新建快速/全量备份、列出备份文件、查看同步状态。",
+            "description": "刷新/备份域通用工具：刷新全部电表、按用户指定表号/房号抄表、刷新安居客、新建快速/全量备份、列出备份文件、查看同步状态。",
             "parameters": [
                 "type": "object",
                 "properties": [
-                    "action_type": ["type": "string", "description": "refresh_meters=刷新全部电表；refresh_ajk=重新抓取安居客数据；create_quick_backup=新建快速备份；create_full_backup=新建全量备份；list_backups=列出本地备份；sync_status=查看待同步状态", "enum": ["refresh_meters", "refresh_ajk", "create_quick_backup", "create_full_backup", "list_backups", "sync_status"]]
+                    "action_type": ["type": "string", "description": "refresh_meters=刷新全部电表；query_meters=只抄用户指定表号/房号的电表（未绑定表号会自动加入清单后再抄）；refresh_ajk=重新抓取安居客数据；create_quick_backup=新建快速备份；create_full_backup=新建全量备份；list_backups=列出本地备份；sync_status=查看待同步状态", "enum": ["refresh_meters", "query_meters", "refresh_ajk", "create_quick_backup", "create_full_backup", "list_backups", "sync_status"]],
+                    "uids": ["type": "array", "items": ["type": "string"], "description": "query_meters 指定抄表的电表用户号数组，如 [\"012030\",\"010904\"]"],
+                    "room_nos": ["type": "array", "items": ["type": "string"], "description": "query_meters 指定抄表的房号数组（按电表清单备注房号匹配），如 [\"1-2319\"]"]
                 ],
                 "required": ["action_type"]
+            ]
+        ]
+    ]
+
+    /// v1.98：教学/自定义操作工具——用户教 AI 的复合操作记录到本地规则库
+    static let teachActionSchema: [String: Any] = [
+        "type": "function",
+        "function": [
+            "name": "teach_action",
+            "description": "教学/自定义操作：用户教 AI 一个由多个已有工具步骤组成的新操作时调用，把「操作名 + 步骤列表」记录到本地规则库（不修改任何业务数据）。之后用户说出该操作名，AI 会把这些步骤展开为工具调用直接执行。",
+            "parameters": [
+                "type": "object",
+                "properties": [
+                    "action_name": ["type": "string", "description": "给这个操作起的名字（用户以后叫它就会执行），如 全屋抄表并汇总"],
+                    "steps": ["type": "array", "items": ["type": "object", "properties": [
+                        "tool": ["type": "string", "description": "已有工具名：update_property/record_finance/manage_todo/refresh_data/manage_meter/query_report/export_data/web_search"],
+                        "arguments": ["type": "string", "description": "该步骤调用工具的完整参数 JSON 字符串（英文双引号），如 {\"action_type\":\"query_meters\",\"room_nos\":[\"1-2319\"]}"],
+                        "description": ["type": "string", "description": "该步骤做什么（一句话说明）"]
+                    ], "required": ["tool", "arguments", "description"]]]
+                ],
+                "required": ["action_name", "steps"]
             ]
         ]
     ]
@@ -297,6 +418,7 @@ struct AIToolExecutor {
         case "refresh_data":
             switch a["action_type"] as? String ?? "" {
             case "refresh_meters": return "刷新全部电表数据"
+            case "query_meters": return "抄表：只刷新指定的 \(((a["uids"] as? [String]) ?? (a["room_nos"] as? [String]) ?? []).joined(separator: "、")) 并返回数据（未绑定自动添加，只读不修改数据）"
             case "refresh_ajk": return "重新抓取安居客房源数据"
             case "create_quick_backup": return "新建快速备份（账本+媒体清单，自动上传云端）"
             case "create_full_backup": return "新建全量备份（账本+房源+媒体清单+诊断数据）"
@@ -304,6 +426,8 @@ struct AIToolExecutor {
             case "sync_status": return "查看待同步状态"
             default: return "执行刷新/备份操作"
             }
+        case "teach_action":
+            return "教学：记住新操作「\(a["action_name"] as? String ?? "?")」（\(((a["steps"] as? [[String: Any]]) ?? []).count) 步，之后可直接按名执行）"
         case "manage_meter":
             switch a["action_type"] as? String ?? "" {
             case "set_low_alert": return "设置低电量预警：阈值 \(a["threshold"] as? Double ?? 30) 度，\(a["enabled"] as? Bool == true ? "开启" : "关闭")"
@@ -348,6 +472,7 @@ struct AIToolExecutor {
         case "query_report": return queryReport(arguments)
         case "export_data": return exportData(arguments)
         case "web_search": return await webSearch(arguments)
+        case "teach_action": return teachAction(arguments)
         default: return "未知工具：\(tool.name)"
         }
     }
@@ -773,11 +898,16 @@ struct AIToolExecutor {
         let action = s(a, "action_type")
         switch action {
         case "refresh_meters":
+            phase?("正在刷新全部电表…")
             let ok = await MeterStore.shared.refreshNow()
             if ok > 0 {
                 return "电表刷新完成：共刷新 \(ok) 台电表，最新剩余电量已更新，时间 \(dateText(Date()))"
             }
             return "电表刷新完成（0 台成功）：可能当前无电表清单或接口暂不可用，稍后可在电表板块手动刷新重试"
+
+        case "query_meters":
+            // v1.98：AI 抄表精准化——只刷新用户指定表号/房号；未绑定表号自动添加后再抄
+            return await queryMeters(a)
 
         case "refresh_ajk":
             let store = AjkStore.shared
@@ -830,6 +960,138 @@ struct AIToolExecutor {
         default:
             return "未知刷新动作：\(action)"
         }
+    }
+
+    // MARK: - v1.98 指定抄表（query_meters）
+    // 只刷新用户指定的表号/房号；指定表号不在本地清单时，先拉云端绑定列表自动添加再抄，抄完汇报明细。
+
+    private func queryMeters(_ a: [String: Any]) async -> String {
+        let store = MeterStore.shared
+        let uids = (a["uids"] as? [String] ?? []).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        let roomNos = (a["room_nos"] as? [String] ?? []).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        guard !uids.isEmpty || !roomNos.isEmpty else {
+            return "缺少要抄的表号或房号：请告诉我要抄哪几个（如 抄一下 012030、010904），或指定房号"
+        }
+        let provider: MeterQuerying
+        switch store.settings.provider {
+        case .webView: provider = MeterWebViewProvider.shared
+        default: provider = MeterQueryService.shared
+        }
+
+        // 1) 本地清单匹配（表号精确匹配 + 房号按备注匹配）
+        var targets: [MeterLedger] = []
+        var missingCandidates: [String] = []   // 本地清单里没有的（表号或房号）
+        for uid in uids {
+            if let m = store.meters.first(where: { $0.uid == uid }) {
+                if !targets.contains(where: { $0.uid == m.uid }) { targets.append(m) }
+            } else {
+                missingCandidates.append(uid)
+            }
+        }
+        for room in roomNos {
+            if let m = store.meters.first(where: { $0.room == room }) {
+                if !targets.contains(where: { $0.uid == m.uid }) { targets.append(m) }
+            } else {
+                // 房号没匹配到：也当作候选表号尝试（部分电表 room 为空、用户号即显示名）
+                missingCandidates.append(room)
+            }
+        }
+
+        // 2) 有缺失 → 拉云端绑定列表自动添加
+        var autoAdded: [String] = []
+        if !missingCandidates.isEmpty {
+            phase?("正在获取绑定列表，添加 \(missingCandidates.joined(separator: "、"))…")
+            do {
+                let bindings = try await provider.fetchBindings(store: store)
+                store.importBindings(bindings)
+                for cand in missingCandidates {
+                    if let m = store.meters.first(where: { $0.uid == cand }) {
+                        if !targets.contains(where: { $0.uid == m.uid }) {
+                            targets.append(m)
+                            autoAdded.append(cand)
+                        }
+                    }
+                }
+            } catch {
+                // 拉绑定失败不阻断：已匹配到的照常抄
+            }
+        }
+
+        // 3) 仍未找到的
+        let stillMissing = missingCandidates.filter { cand in
+            !store.meters.contains(where: { $0.uid == cand })
+        }
+
+        // 4) 逐台抄表（按指定顺序，步骤上报）
+        guard !targets.isEmpty else {
+            var out = "没找到可查询的电表"
+            if !stillMissing.isEmpty { out += "：\(stillMissing.joined(separator: "、")) 不在你的绑定列表里" }
+            out += "。请核对表号/房号，或到「电表管理 → 一键导入」确认绑定后再让我抄"
+            return out
+        }
+        var lines: [String] = []
+        var failed: [String] = []
+        var okCount = 0
+        for (i, m) in targets.enumerated() {
+            let display = m.room.isEmpty ? m.uid : "\(m.room)（\(m.uid)）"
+            phase?("正在抄表 \(display)（\(i + 1)/\(targets.count)）")
+            do {
+                let result = try await provider.query(store: store, uid: m.uid)
+                store.applyQueryResult(uid: m.uid, result: result)
+                lines.append("\(display)：剩余 \(result.shengyu) 度，累计 \(result.leiji) 度，\(result.zhuangtai)，抄表时间 \(result.shijian.isEmpty ? "暂无" : result.shijian)")
+                okCount += 1
+            } catch {
+                failed.append(display)
+            }
+        }
+        var out = "已按你指定的 \(targets.count) 台电表抄表：\n" + lines.joined(separator: "\n")
+        if !autoAdded.isEmpty { out += "\n\n注：\(autoAdded.joined(separator: "、")) 原来不在清单里，已自动加入后刷新" }
+        if !failed.isEmpty { out += "\n\n以下查询失败（可稍后重试或到电表板块手动刷新）：\(failed.joined(separator: "、"))" }
+        if !stillMissing.isEmpty { out += "\n\n以下不在绑定列表，未查询：\(stillMissing.joined(separator: "、"))" }
+        if okCount == 0 && failed.isEmpty { out += "\n\n（本次全部表号已在绑定列表，无需新增）" }
+        out += "\n抄表时间 \(dateText(Date()))"
+        return out
+    }
+
+    // MARK: - v1.98 教学/自定义操作（teach_action）
+
+    /// 记录用户教的新操作：操作名 + 步骤（步骤工具必须在白名单内），存本地规则库
+    private func teachAction(_ a: [String: Any]) -> String {
+        let name = s(a, "action_name").trimmingCharacters(in: .whitespaces)
+        guard !name.isEmpty else { return "缺少操作名：请给这个操作起个名字，如 全屋抄表并汇总" }
+        let rawSteps = a["steps"] as? [[String: Any]] ?? []
+        guard !rawSteps.isEmpty else { return "缺少步骤：请一步步告诉我先做什么、再做什么（每步=一个已有工具调用）" }
+        var steps: [TaughtStep] = []
+        var badTools: [String] = []
+        for raw in rawSteps {
+            let tool = s(raw, "tool")
+            guard knownToolNames.contains(tool) else {
+                badTools.append(tool.isEmpty ? "空" : tool)
+                continue
+            }
+            let args = s(raw, "arguments")
+            let desc = s(raw, "description")
+            // 校验 arguments 是合法 JSON（给 AI 的步骤必须是可执行的完整参数）
+            if !args.isEmpty {
+                guard let data = args.data(using: .utf8),
+                      let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any], !obj.isEmpty else {
+                    return "步骤「\(desc.isEmpty ? tool : desc)」的参数不是合法 JSON 字符串，请用英文双引号重写参数再教我"
+                }
+            }
+            steps.append(TaughtStep(tool: tool, arguments: args, description: desc))
+        }
+        if !badTools.isEmpty {
+            return "以下步骤使用了未知工具，无法教学：\(badTools.joined(separator: "、"))。可用工具：\(knownToolNames.sorted().joined(separator: "/"))"
+        }
+        guard !steps.isEmpty else { return "教学失败：没有可用的步骤" }
+        // 覆盖同名操作（同名=更新教学）
+        var actions = Self.loadTaughtActions()
+        actions.removeAll { $0.name == name }
+        actions.append(TaughtAction(name: name, steps: steps))
+        Self.saveTaughtActions(actions)
+        let stepDesc = steps.enumerated().map { "第\($0.offset + 1)步 \($0.element.tool)（\($0.element.description.isEmpty ? "见参数" : $0.element.description)）" }
+        logAI(category: "AI教学", action: "记录操作 \(name)", result: "成功", detail: "\(steps.count) 步")
+        return "已学会新操作「\(name)」（\(steps.count) 步）：\n" + stepDesc.joined(separator: "\n") + "\n下次你说「\(name)」，我会按这些步骤直接执行。"
     }
 
     // MARK: - 电表设置域（manage_meter）
@@ -977,8 +1239,9 @@ struct AIToolExecutor {
         }
     }
 
-    /// v1.98：渲染账单图为 PNG 存沙盒，返回含路径的文本（AIManager 解析【图片】标记注入气泡）
+    /// v1.98：渲染账单图为 PNG 存沙盒（v1.98 起统一存「AI产物」文件夹），返回含路径的文本（AIManager 解析【图片】标记注入气泡）
     private func renderBillImage(prop: Property, rent: RentMonthRecord, year: Int, month: Int) -> String {
+        phase?("正在生成 \(prop.roomNumber) \(year)年\(month)月账单图片…")
         let utility = prop.utilitySettlementRecords.first { rec in
             guard let d = rec.dueDate else { return false }
             return Calendar.current.component(.year, from: d) == year && Calendar.current.component(.month, from: d) == month
@@ -991,7 +1254,7 @@ struct AIToolExecutor {
             return "账单图片生成失败：无法渲染图片，请稍后重试"
         }
         let fm = FileManager.default
-        let dir = fm.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let dir = Self.aiArtifactDir()
         let fileName = "账单_\(prop.roomNumber)_\(year)\(String(format: "%02d", month)).png"
         let fileURL = dir.appendingPathComponent(fileName)
         do {
@@ -1112,7 +1375,7 @@ struct AIToolExecutor {
         }
 
         let fileName = "\(prefix)_\(stamp).csv"
-        let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+        let dir = Self.aiArtifactDir()
         let url = dir.appendingPathComponent(fileName)
         var csv = header.map { Self.esc($0) }.joined(separator: ",")
         for r in rows {
@@ -1120,7 +1383,7 @@ struct AIToolExecutor {
         }
         do {
             try csv.write(to: url, atomically: true, encoding: .utf8)
-            return "已导出 \(rows.count) 行：\(fileName)（已保存到 App 沙盒根目录 Documents/，可通过「文件」App 或本机文件管理器查看；也可在 App 对应板块内分享）"
+            return "已导出 \(rows.count) 行：\(fileName)（已保存到 App 沙盒根目录「AI产物」文件夹，可通过「文件」App 查看或转发；也可在 App 对应板块内分享）"
         } catch {
             return "导出失败：\(error.localizedDescription)"
         }

@@ -92,6 +92,11 @@ func houseDocumentsSizeText() -> String {
     return ByteCountFormatter.string(fromByteCount: total, countStyle: .file)
 }
 
+/// v1.98：AI 产物缓存大小（Documents/AI产物/，设置页「AI对话缓存」行展示）
+func aiCacheSizeText() -> String {
+    ByteCountFormatter.string(fromByteCount: AIToolExecutor.aiArtifactSizeBytes(), countStyle: .file)
+}
+
 // MARK: - 远程配置（腾讯云 COS）
 
 /// v1.19：新增「自定义域名（可选）」——腾讯云 2024 年后新建桶默认域名会被微信识别成文件，

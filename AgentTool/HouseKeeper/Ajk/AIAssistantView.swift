@@ -32,14 +32,23 @@ struct AIMessage: Identifiable, Equatable, Codable {
     /// v1.98：assistant 消息附带的本地图片路径（AI 工具生成的账单图片，如 RentBillShareView 渲染 PNG）
     /// Optional：历史兼容
     var imagePath: String? = nil
+    /// v1.98：多张 AI 产物图片路径（一次生成多套房账单时各一张，按生成顺序）；历史兼容 Optional
+    var imagePaths: [String]? = nil
 
     enum Role: String, Codable {
         case user, assistant
     }
 
+    /// 全部 AI 产物图片路径（优先多图，回退单图，兼容老历史）
+    var aiImagePaths: [String] {
+        if let p = imagePaths, !p.isEmpty { return p }
+        if let p = imagePath { return [p] }
+        return []
+    }
+
     init(id: UUID = UUID(), role: Role, text: String, time: Date = Date(),
          images: [String] = [], attachText: String? = nil, toolSummary: [String]? = nil,
-         suggestedActions: [String]? = nil, imagePath: String? = nil) {
+         suggestedActions: [String]? = nil, imagePath: String? = nil, imagePaths: [String]? = nil) {
         self.id = id
         self.role = role
         self.text = text
@@ -49,6 +58,7 @@ struct AIMessage: Identifiable, Equatable, Codable {
         self.toolSummary = toolSummary
         self.suggestedActions = suggestedActions
         self.imagePath = imagePath
+        self.imagePaths = imagePaths
     }
 }
 
@@ -67,6 +77,8 @@ struct AIAssistantView: View {
     @State private var showSettings = false
     /// v1.98：历史消息查看（弹 sheet 浏览全部历史，可一键清空）
     @State private var showHistory = false
+    /// v1.98：AI 产物图片单击放大预览（全屏黑底查看，单击关闭）
+    @State private var zoomImage: UIImage?
 
     /// 附件：待发送的图片（UIImage 源）+ 文件文本
     @State private var pendingImages: [UIImage] = []
@@ -189,6 +201,45 @@ struct AIAssistantView: View {
         }
         .onAppear {
             manager.onAppear(modelContext: modelContext, houseModelContext: houseModelContext)
+        }
+        // v1.98：AI 产物图片单击放大预览（全屏黑底，单击关闭）
+        .fullScreenCover(isPresented: Binding(
+            get: { zoomImage != nil },
+            set: { if !$0 { zoomImage = nil } }
+        )) {
+            if let img = zoomImage {
+                ZoomImageView(image: img) { zoomImage = nil }
+            }
+        }
+    }
+
+    // MARK: - v1.98 图片辅助
+
+    /// 从账单文件名解析房号：账单_1-2319_202611.png → 1-2319
+    static func roomNoFromBillPath(_ path: String) -> String? {
+        let name = (path as NSString).lastPathComponent
+        guard name.hasPrefix("账单_") else { return nil }
+        let body = String(name.dropFirst(3))
+        // 去掉末尾 _YYYYMM.png
+        guard let r = body.range(of: "_\\d{6}\\.png$", options: .regularExpression) else { return nil }
+        let room = String(body[..<r.lowerBound])
+        return room.isEmpty ? nil : room
+    }
+
+    static func imageFileURL(_ path: String) -> URL {
+        URL(fileURLWithPath: path)
+    }
+
+    private func saveImageToAlbum(_ img: UIImage) {
+        UIImageWriteToSavedPhotosAlbum(img, nil, nil, nil)
+        // 短暂 toast 反馈
+        if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+           let root = scene.windows.first?.rootViewController {
+            let alert = UIAlertController(title: "已保存到相册", message: nil, preferredStyle: .alert)
+            root.present(alert, animated: true)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                alert.dismiss(animated: true)
+            }
         }
     }
 
@@ -432,12 +483,39 @@ struct AIAssistantView: View {
                     .frame(maxWidth: 240)
                 }
                 // v1.98：AI 工具生成的图片（如收租账单图）直接展示在气泡里
-                if let path = msg.imagePath, let img = UIImage(contentsOfFile: path) {
-                    Image(uiImage: img)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(maxWidth: 300)
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                // v1.98：一次生成多张全展示，每张标注对应房号；单击放大；长按分享/保存相册
+                let aiPaths = msg.aiImagePaths
+                if !aiPaths.isEmpty {
+                    VStack(alignment: msg.role == .user ? .trailing : .leading, spacing: 6) {
+                        ForEach(Array(aiPaths.enumerated()), id: \.offset) { _, path in
+                            if let img = UIImage(contentsOfFile: path) {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    if let room = Self.roomNoFromBillPath(path) {
+                                        Text("房号 \(room)")
+                                            .font(.system(size: 11, weight: .semibold))
+                                            .foregroundColor(.themeAccentDark)
+                                    }
+                                    Image(uiImage: img)
+                                        .resizable()
+                                        .scaledToFit()
+                                        .frame(maxWidth: 280)
+                                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                                        .onTapGesture { zoomImage = img }
+                                        .contextMenu {
+                                            Button {
+                                                saveImageToAlbum(img)
+                                            } label: {
+                                                Label("保存到相册", systemImage: "photo.badge.plus")
+                                            }
+                                            ShareLink(item: Self.imageFileURL(path)) {
+                                                Label("分享…", systemImage: "square.and.arrow.up")
+                                            }
+                                        }
+                                }
+                            }
+                        }
+                    }
+                    .frame(maxWidth: 300, alignment: msg.role == .user ? .trailing : .leading)
                 }
                 if let attach = msg.attachText {
                     Label(attach, systemImage: "paperclip")
@@ -679,6 +757,8 @@ struct AIHistoryView: View {
     @ObservedObject var manager: AIManager
     @State private var confirmClear = false
     @State private var searchText = ""
+    /// v1.98：历史图片单击放大预览
+    @State private var zoomImage: UIImage?
     /// v1.98：已展开的消息 id（单击文本在"折叠3行/展开全文"间切换）
     @State private var expandedIDs: Set<UUID> = []
 
@@ -769,6 +849,31 @@ struct AIHistoryView: View {
                                                 .foregroundColor(.themeAccentDark)
                                         }
                                     }
+                                    // v1.98：历史记录展示 AI 产物图片（账单图等，横滑缩略；单击放大；标注房号）
+                                    let aiPaths = msg.aiImagePaths
+                                    if !aiPaths.isEmpty {
+                                        ScrollView(.horizontal, showsIndicators: false) {
+                                            HStack(spacing: 8) {
+                                                ForEach(Array(aiPaths.enumerated()), id: \.offset) { _, path in
+                                                    if let img = UIImage(contentsOfFile: path) {
+                                                        VStack(alignment: .leading, spacing: 2) {
+                                                            if let room = AIAssistantView.roomNoFromBillPath(path) {
+                                                                Text("房号 \(room)")
+                                                                    .font(.system(size: 10, weight: .semibold))
+                                                                    .foregroundColor(.themeAccentDark)
+                                                            }
+                                                            Image(uiImage: img)
+                                                                .resizable()
+                                                                .scaledToFit()
+                                                                .frame(width: 200)
+                                                                .clipShape(RoundedRectangle(cornerRadius: 10))
+                                                                .onTapGesture { zoomImage = img }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
                                     Text(msg.text)
                                         .font(.system(size: 13))
                                         .foregroundColor(.themeText)
@@ -838,6 +943,15 @@ struct AIHistoryView: View {
             Button("清空", role: .destructive) { manager.clearChat() }
         } message: {
             Text("历史记录将被删除，AI 将不再记得之前的对话内容。")
+        }
+        // v1.98：历史图片单击放大预览
+        .fullScreenCover(isPresented: Binding(
+            get: { zoomImage != nil },
+            set: { if !$0 { zoomImage = nil } }
+        )) {
+            if let img = zoomImage {
+                ZoomImageView(image: img) { zoomImage = nil }
+            }
         }
     }
 
@@ -1152,5 +1266,40 @@ struct AIAssistantSettingsView: View {
         baseURL = UserDefaults.standard.string(forKey: "ai.baseURL") ?? AIRequestService.defaultBaseURL
         template = UserDefaults.standard.string(forKey: "ai.promptTemplate") ?? ""
         keyConfigured = !apiKey.isEmpty
+    }
+}
+
+// MARK: - v1.98 全屏图片预览（AI 产物图片单击放大；黑底全屏，单击任意处关闭）
+
+struct ZoomImageView: View {
+    let image: UIImage
+    let onClose: () -> Void
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+            Image(uiImage: image)
+                .resizable()
+                .scaledToFit()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .contentShape(Rectangle())
+                .onTapGesture { onClose() }
+            VStack {
+                HStack {
+                    Spacer()
+                    Button {
+                        onClose()
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 26))
+                            .foregroundColor(.white.opacity(0.85))
+                    }
+                    .padding(.top, 8)
+                    .padding(.trailing, 8)
+                }
+                Spacer()
+            }
+        }
+        .statusBarHidden()
     }
 }
