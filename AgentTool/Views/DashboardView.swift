@@ -38,7 +38,7 @@ struct DashboardView: View {
     @AppStorage("dashboardRentReminderCollapsed") private var rentReminderCollapsed = false
     @AppStorage("dashboardPayoutReminderCollapsed") private var payoutReminderCollapsed = false
     @AppStorage("dashboardExpiryCollapsed") private var expiryCollapsed = false
-    @State private var quickCollectProperty: Property?
+    @State private var quickCollectReminder: RentReminder?
     /// v1.98：快捷收租保存失败提示（修复"点收保存无效"无任何提示的问题）
     @State private var collectErrorText: String?
     @State private var quickCollectRent = ""
@@ -270,6 +270,8 @@ struct DashboardView: View {
                     roomNumber: prop.roomNumber,
                     landlord: prop.landlord,
                     amount: prop.monthlyRentRecords.first { $0.year == targetYear && $0.month == targetMonth }?.amount ?? (prop.rent + prop.prepayment),
+                    year: targetYear,
+                    month: targetMonth,
                     dueDay: dueDay,
                     daysUntilDue: daysUntilDue,
                     isOverdue: isOverdue,
@@ -375,25 +377,23 @@ struct DashboardView: View {
         }
     }
 
-    // 快捷收租保存（v1.98：修复"点收保存无效"——新建月度记录必须先 insert 进容器再 append，
-    // 否则 SwiftData 保存抛异常被 try? 吞掉、界面无提示；保存失败保留弹窗并明确提示）
-    private func saveQuickCollect(property: Property) -> Bool {
+    // 快捷收租保存（v1.98：修复"点收保存无效"——①新建月度记录必须先 insert 进容器再 append，
+    // 否则 SwiftData 保存抛异常被 try? 吞掉、界面无提示；②跨月根因：提醒列表显示的是"下一应收期"
+    // （1号交租、提前几天就出现 11 月应交），原代码却写当前月（10 月）的记录，10 月已收时被覆盖、
+    // 11 月记录根本没写——现按提醒携带的应收期 year/month 写入）
+    private func saveQuickCollect(property: Property, year: Int, month: Int) -> Bool {
         collectErrorText = nil // 重试时清空上次错误
-        let calendar = Calendar.current
-        let now = Date()
-        let currentMonth = calendar.component(.month, from: now)
-        let currentYear = calendar.component(.year, from: now)
 
-        // 1. 添加月度收租记录
+        // 1. 添加/更新应收期（year/month）的月度收租记录
         let rentAmount = Double(quickCollectRent) ?? property.rent
-        // 检查是否已有本月记录，有则更新，无则新增
-        if let existing = property.monthlyRentRecords.first(where: { $0.year == currentYear && $0.month == currentMonth }) {
+        // 检查该应收期是否已有记录，有则更新，无则新增
+        if let existing = property.monthlyRentRecords.first(where: { $0.year == year && $0.month == month }) {
             existing.amount = rentAmount
             existing.isPaid = true
-            existing.paidDate = now
+            existing.paidDate = Date()
         } else {
-            let record = RentMonthRecord(year: currentYear, month: currentMonth, amount: rentAmount, isPaid: true)
-            record.paidDate = now
+            let record = RentMonthRecord(year: year, month: month, amount: rentAmount, isPaid: true)
+            record.paidDate = Date()
             modelContext.insert(record)
             property.monthlyRentRecords.append(record)
         }
@@ -406,7 +406,7 @@ struct DashboardView: View {
             return false
         }
         refreshDashboard()
-        quickCollectProperty = nil
+        quickCollectReminder = nil
         return true
     }
 
@@ -690,7 +690,7 @@ struct DashboardView: View {
                 .padding(.horizontal)
 
                 DashboardTodoSection(todos: todos, isCollapsed: $todosCollapsed, completingTodo: $completingTodo, editingTodo: $editingTodo, showAllTodos: $showAllTodos, modelContext: modelContext)
-                DashboardRentSection(reminders: rentReminders, isCollapsed: $rentReminderCollapsed, quickCollectProperty: $quickCollectProperty, quickCollectRent: $quickCollectRent, viewingProperty: $viewingProperty)
+                DashboardRentSection(reminders: rentReminders, isCollapsed: $rentReminderCollapsed, quickCollectReminder: $quickCollectReminder, quickCollectRent: $quickCollectRent, viewingProperty: $viewingProperty)
                 DashboardPayoutSection(reminders: payoutReminders, isCollapsed: $payoutReminderCollapsed, quickPayPayout: $quickPayPayout, quickPayAmount: $quickPayAmount, quickPayMonth: $quickPayMonth, quickPayRecordMonth: $quickPayRecordMonth, viewingPayout: $viewingPayout)
                 DashboardExpirySection(properties: stats?.expiringSoon ?? [], isCollapsed: $expiryCollapsed, viewingProperty: $viewingProperty)
 
@@ -813,9 +813,11 @@ struct DashboardView: View {
         } message: {
             Text("完成后将归档到“已办”。")
         }
-        .sheet(item: $quickCollectProperty) { prop in
-            QuickCollectSheet(property: prop, rentText: $quickCollectRent, errorText: $collectErrorText, onSave: {
-                saveQuickCollect(property: prop)
+        .sheet(item: $quickCollectReminder) { reminder in
+            QuickCollectSheet(property: reminder.property,
+                              year: reminder.year, month: reminder.month,
+                              rentText: $quickCollectRent, errorText: $collectErrorText, onSave: {
+                saveQuickCollect(property: reminder.property, year: reminder.year, month: reminder.month)
             })
         }
         // v1.98：快捷收租保存失败提示（失败时弹窗不关闭，修正后可重试）
@@ -953,7 +955,7 @@ private struct DashboardTodoSection: View {
 
 private struct DashboardRentSection: View {
     let reminders: [RentReminder]; @Binding var isCollapsed: Bool
-    @Binding var quickCollectProperty: Property?; @Binding var quickCollectRent: String; @Binding var viewingProperty: Property?
+    @Binding var quickCollectReminder: RentReminder?; @Binding var quickCollectRent: String; @Binding var viewingProperty: Property?
 
     var body: some View {
         DashboardSectionCard(title: "未收租提醒", subtitle: "\(reminders.count)套", isCollapsed: $isCollapsed) {
@@ -967,7 +969,7 @@ private struct DashboardRentSection: View {
                         Text(verbatim: "¥\(Int(reminder.amount))").font(.system(size: 14, weight: .bold))
                         if reminder.needUtility { Text("✅需结算水电").font(.system(size: 11, weight: .semibold)).foregroundColor(.themeAmber) }
                     }
-                    Button("收") { quickCollectProperty = reminder.property; quickCollectRent = String(Int(reminder.amount)) }
+                    Button("收") { quickCollectReminder = reminder; quickCollectRent = String(Int(reminder.amount)) }
                         .font(.system(size: 13, weight: .semibold)).foregroundColor(.white).frame(width: 36, height: 36).background(Circle().fill(Color.themeAccent))
                 }.contentShape(Rectangle()).onTapGesture { viewingProperty = reminder.property }
             }
@@ -1030,6 +1032,10 @@ struct RentReminder: Identifiable {
     let roomNumber: String
     let landlord: String
     let amount: Double
+    /// v1.98：应收期（年/月）——提前交下期租的场景，提醒显示的是"下一应收期"（如 10 月显示 11 月应交），
+    /// 快捷收租必须写这个期而不是当前月，否则跨月收租写错期（老 bug 根因）
+    let year: Int
+    let month: Int
     let dueDay: Int
     let daysUntilDue: Int
     let isOverdue: Bool
@@ -1181,6 +1187,10 @@ struct PayoutReminderRow: View {
 struct QuickCollectSheet: View {
     @Environment(\.dismiss) private var dismiss
     let property: Property
+    /// v1.98：应收期（年/月）——提醒显示的可能不是当前月（如 10 月提醒 11 月应交），弹窗明示应收期，
+    /// 保存按此期写入，杜绝"跨月收租写错期"（老 bug 根因）
+    let year: Int
+    let month: Int
     @Binding var rentText: String
     /// v1.98：保存失败原因回显在弹窗内（红字），无论系统 alert 是否被遮挡都可见
     @Binding var errorText: String?
@@ -1193,6 +1203,7 @@ struct QuickCollectSheet: View {
                 Section("房源信息") {
                     LabeledContent("房号", value: property.roomNumber)
                     LabeledContent("房东", value: property.landlord)
+                    LabeledContent("应收期", value: "\(year)年\(month)月")
                 }
                 Section("收租金额") {
                     TextField("实收租金", text: $rentText)
