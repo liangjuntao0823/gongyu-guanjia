@@ -25,22 +25,33 @@ enum WidgetDataSync {
         let todoReq = FetchDescriptor<TodoItem>(predicate: #Predicate { !$0.isCompleted && !$0.isDeleted })
         let todoCount = (try? modelContext.fetch(todoReq).count) ?? 0
 
-        // 2. 本月未收租：未终止房源，本月该收但未付
+        // 2. 未收租提醒（对齐看板「未收租提醒」口径）：从当前月向后滚动找第一个未收的应收期，
+        //    该期交租日已逾期或 3 天内到期才计数（提前交下期租后提醒自动消失）
         let propReq = FetchDescriptor<Property>(predicate: #Predicate { !$0.isDeleted })
         let props = (try? modelContext.fetch(propReq)) ?? []
         var uncollected = 0
         var expiring = 0
         for p in props where !p.isTerminated {
-            // 未收租：本月没有已付记录
-            let monthPaid = p.monthlyRentRecords.contains { rec in
-                rec.year == year && rec.month == month && rec.isPaid
+            var targetYear = year
+            var targetMonth = month
+            for _ in 0..<12 {
+                let rec = p.monthlyRentRecords.first { $0.year == targetYear && $0.month == targetMonth }
+                if rec == nil || !rec!.isPaid { break }
+                targetMonth += 1
+                if targetMonth > 12 { targetMonth = 1; targetYear += 1 }
             }
-            if !monthPaid { uncollected += 1 }
+            var comps = DateComponents()
+            comps.year = targetYear
+            comps.month = targetMonth
+            comps.day = max(1, min(31, p.rentDueDay))
+            let dueDate = cal.date(from: comps) ?? now
+            let daysDiff = cal.dateComponents([.day], from: now, to: dueDate).day ?? 0
+            if daysDiff <= 3 { uncollected += 1 }   // 逾期（负数）或 3 天内到期
 
-            // 本月到期：leaseEnd 落在本月
-            if let end = parseDate(p.leaseEnd),
-               cal.isDate(end, equalTo: now, toGranularity: .month) {
-                expiring += 1
+            // 本月到期改为：30 天内到期（对齐看板「即将到期」口径）
+            if let end = parseDate(p.leaseEnd) {
+                let days = cal.dateComponents([.day], from: now, to: end).day ?? 0
+                if days >= 0 && days <= 30 { expiring += 1 }
             }
         }
 
@@ -145,7 +156,7 @@ enum WidgetDataSync {
     private static func parseDate(_ s: String) -> Date? {
         let trimmed = s.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return nil }
-        let fmts = ["yyyy-MM-dd", "yyyy/MM/dd", "yyyy.MM.dd", "yyyy年MM月dd日", "yyyy-MM-dd HH:mm:ss"]
+        let fmts = ["yyyy-MM-dd", "yyyy/MM/dd", "yyyy.MM.dd", "yyyy年MM月dd日", "yyyy-MM-dd HH:mm:ss", "yyyy.M.d"]
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
         for fmt in fmts {

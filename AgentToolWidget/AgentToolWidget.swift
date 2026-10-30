@@ -25,23 +25,18 @@ struct WidgetData {
 
     static func load() -> WidgetData {
         let df = UserDefaults(suiteName: appGroupID)
-        if let df = df {
-            return WidgetData(
-                todoCount:   df.object(forKey: "todoCount")      as? Int ?? 0,
-                uncollected: df.object(forKey: "uncollectedCount") as? Int ?? 0,
-                expiring:    df.object(forKey: "expiringCount")   as? Int ?? 0,
-                dealCount:   df.object(forKey: "dealCount")      as? Int ?? 0,
-                netIncome:   df.double(forKey: "netIncome"),
-                payoutRoom:  df.string(forKey: "payoutRoom")     ?? "—",
-                payoutDate:  df.string(forKey: "payoutDate")     ?? "--/--",
-                payoutAmount: df.double(forKey: "payoutAmount"),
-                monthRemain: df.double(forKey: "monthRemainPercent")
-            )
-        }
-        return WidgetData(todoCount: 3, uncollected: 12, expiring: 5,
-                          dealCount: 8, netIncome: 12800,
-                          payoutRoom: "2-1418", payoutDate: "10/25",
-                          payoutAmount: 900, monthRemain: 35)
+        // 兜底一律为 0/占位符：App 从未写入时不显示示例数据，避免误导
+        return WidgetData(
+            todoCount:   df?.object(forKey: "todoCount")      as? Int ?? 0,
+            uncollected: df?.object(forKey: "uncollectedCount") as? Int ?? 0,
+            expiring:    df?.object(forKey: "expiringCount")   as? Int ?? 0,
+            dealCount:   df?.object(forKey: "dealCount")      as? Int ?? 0,
+            netIncome:   df?.double(forKey: "netIncome") ?? 0,
+            payoutRoom:  df?.string(forKey: "payoutRoom")     ?? "—",
+            payoutDate:  df?.string(forKey: "payoutDate")     ?? "--/--",
+            payoutAmount: df?.double(forKey: "payoutAmount") ?? 0,
+            monthRemain: df?.double(forKey: "monthRemainPercent") ?? 0
+        )
     }
 
     static func money(_ n: Double) -> String {

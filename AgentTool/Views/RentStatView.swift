@@ -13,6 +13,8 @@ struct RentStatView: View {
     @State private var selectedMonth: Int
     @State private var selectedIDs: Set<UUID> = []
     @State private var toast: String?
+    @State private var filterLandlord: String?      // nil=全部房东
+    @State private var filterPaid: Int = 0          // 0=全部 1=已收 2=未收
 
     init() {
         let now = Date()
@@ -37,12 +39,34 @@ struct RentStatView: View {
         }
     }
 
+    /// 可选房东列表（按房号排序去重）
+    private var landlordNames: [String] {
+        var names = Set<String>()
+        for p in sortedProperties where !p.landlord.isEmpty { names.insert(p.landlord) }
+        return names.sorted()
+    }
+
+    /// 应用筛选后的列表：房东 + 已收/未收；保持"已收排上、未收排下"的相对顺序
+    private var filteredProperties: [Property] {
+        sortedProperties.filter { p in
+            let okLandlord = filterLandlord == nil || p.landlord == filterLandlord
+            let paid = paidState(p) == true
+            let okPaid: Bool
+            switch filterPaid {
+            case 1: okPaid = paid
+            case 2: okPaid = !paid
+            default: okPaid = true
+            }
+            return okLandlord && okPaid
+        }
+    }
+
     private var selectedProperties: [Property] {
-        sortedProperties.filter { selectedIDs.contains($0.id) }
+        filteredProperties.filter { selectedIDs.contains($0.id) }
     }
 
     private var allSelected: Bool {
-        !sortedProperties.isEmpty && selectedIDs.count == sortedProperties.count
+        !filteredProperties.isEmpty && selectedIDs.count == filteredProperties.count
     }
 
     // MARK: - 判定与文案
@@ -140,32 +164,59 @@ struct RentStatView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                // 年月选择 + 全选
-                HStack(spacing: 12) {
+                // 第一行：年月选择 + 全选（年份按钮固定单行，防止窄屏换行）
+                HStack(spacing: 10) {
                     Picker("", selection: $selectedYear) {
                         ForEach(years, id: \.self) { Text("\($0)年").tag($0) }
                     }
                     .pickerStyle(.menu)
-                    .frame(width: 90)
+                    .font(.system(size: 15))
+                    .frame(width: 106)
+                    .lineLimit(1)
                     Picker("", selection: $selectedMonth) {
                         ForEach(1...12, id: \.self) { Text("\($0)月").tag($0) }
                     }
                     .pickerStyle(.menu)
-                    .frame(width: 80)
+                    .font(.system(size: 15))
+                    .frame(width: 84)
+                    .lineLimit(1)
                     Spacer()
                     Button(allSelected ? "取消全选" : "全选") {
-                        selectedIDs = allSelected ? [] : Set(sortedProperties.map { $0.id })
+                        selectedIDs = allSelected ? [] : Set(filteredProperties.map { $0.id })
                     }
                     .font(.system(size: 13, weight: .medium))
                     .foregroundColor(.themeAccent)
                 }
                 .padding(.horizontal, 16)
-                .padding(.vertical, 10)
+                .padding(.top, 10)
+                // 第二行：筛选（按房东 + 按已收/未收）
+                HStack(spacing: 10) {
+                    Picker("", selection: $filterLandlord) {
+                        Text("全部房东").tag(String?.none)
+                        ForEach(landlordNames, id: \.self) { name in
+                            Text(name).tag(String?.some(name))
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .font(.system(size: 13))
+                    .lineLimit(1)
+                    Picker("", selection: $filterPaid) {
+                        Text("全部").tag(0)
+                        Text("已收").tag(1)
+                        Text("未收").tag(2)
+                    }
+                    .pickerStyle(.menu)
+                    .font(.system(size: 13))
+                    .lineLimit(1)
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 6)
                 Divider()
 
                 // 选房列表：房号 + 房东 + 交租日 + 当月水电结算标记
                 List {
-                    ForEach(sortedProperties) { p in
+                    ForEach(filteredProperties) { p in
                         row(p)
                             .contentShape(Rectangle())
                             .onTapGesture { toggle(p.id) }
