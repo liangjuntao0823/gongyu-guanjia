@@ -78,11 +78,17 @@ enum MeterProviderKind: String, Codable, CaseIterable {
     }
 }
 
+/// 批量刷新结果：成功台数 + 失败户号清单（v2.4：失败户由调用方决定是否重刷/提示）
+struct MeterRefreshOutcome {
+    let okCount: Int
+    let failedUIDs: [String]
+}
+
 /// 电表数据源统一协议：直连与 WebView 兜底共用同一出口
 @MainActor
 protocol MeterQuerying {
     func fetchBindings(store: MeterStore) async throws -> [String]
-    func refreshAll(store: MeterStore, progress: @escaping (Int, Int, String) -> Void) async throws -> Int
+    func refreshAll(store: MeterStore, progress: @escaping (Int, Int, String) -> Void) async throws -> MeterRefreshOutcome
     func query(store: MeterStore, uid: String) async throws -> MeterQueryResult
     func payRecords(store: MeterStore, uid: String) async throws -> [MeterPayRecord]
 }

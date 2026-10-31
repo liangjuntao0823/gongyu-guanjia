@@ -65,9 +65,10 @@ final class MeterStore: ObservableObject {
         startAutoRefreshIfNeeded()
     }
 
-    // MARK: - v1.95 全局电表盯防定时器
+    // MARK: - v1.95 全局电表盯防定时器（v2.4：取消「启动即补刷」）
     // 说明：autoRefreshEnabled 开启时，App 前台运行期间按 autoRefreshMinutes 间隔自动刷新电表并保存；
-    // iOS 系统限制 App 被杀后无法后台执行——App 下次打开时会立即补刷一次，数据不会长期过期。
+    // iOS 系统限制 App 被杀后无法后台执行——App 下次打开不会自动补刷（v2.4 起），
+    // 总刷新仅手动按钮/下拉刷新，或设置页开启定时刷新后按间隔执行。
     // 配合低电量本地通知（lowAlertEnabled）即可实现「AI 盯电表」的完整闭环。
 
     private var refreshTimer: Timer?
@@ -83,10 +84,7 @@ final class MeterStore: ObservableObject {
                 await self.autoRefreshOnce()
             }
         }
-        // 启动即先补刷一次（覆盖 App 被杀期间的缺口）
-        Task { @MainActor in
-            await self.autoRefreshOnce()
-        }
+        // v2.4：不再「启动即先补刷一次」——避免打开 App 就自动全量刷新（用户要求：总刷新仅手动或定时）
     }
 
     func stopAutoRefresh() {
@@ -110,9 +108,9 @@ final class MeterStore: ObservableObject {
         default: provider = MeterQueryService.shared
         }
         do {
-            let ok = try await provider.refreshAll(store: self) { _, _, _ in }
-            if ok > 0 { saveMeters() }
-            return ok
+            let outcome = try await provider.refreshAll(store: self) { _, _, _ in }
+            if outcome.okCount > 0 { saveMeters() }
+            return outcome.okCount
         } catch {
             return 0
         }

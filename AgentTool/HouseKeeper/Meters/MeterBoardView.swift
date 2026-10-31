@@ -26,6 +26,7 @@ struct MeterBoardView: View {
     @State private var refreshTotal = 0
     @State private var refreshLabel = ""
     @State private var errorText: String?
+    @State private var failedAlertText: String?        // v2.4：重刷后仍失败的户号清单弹窗
 
     @State private var showSort = false
     @State private var showFilter = false
@@ -71,7 +72,6 @@ struct MeterBoardView: View {
             }
         }
         .navigationBarHidden(true)
-        .onAppear { autoRefreshOnEnter() }
         .sheet(isPresented: $showSort) { MeterSortSheet(mode: $sortMode) }
         .sheet(isPresented: $showFilter) { MeterFilterSheet(mode: $filterMode, threshold: $threshold) }
         .sheet(isPresented: $showAdd) { MeterAddSheet() }
@@ -89,6 +89,12 @@ struct MeterBoardView: View {
             Button("好", role: .cancel) { errorText = nil }
         } message: {
             Text(errorText ?? "")
+        }
+        // v2.4：重刷后仍失败的户号弹窗（提示手动刷新）
+        .alert("刷新未完成", isPresented: Binding(get: { failedAlertText != nil }, set: { if !$0 { failedAlertText = nil } })) {
+            Button("好", role: .cancel) { failedAlertText = nil }
+        } message: {
+            Text(failedAlertText ?? "")
         }
     }
 
@@ -351,13 +357,6 @@ struct MeterBoardView: View {
 
     // MARK: - 刷新
 
-    private func autoRefreshOnEnter() {
-        // 进入板块自动刷新：首次进入（无数据）或本地无最近成功刷新记录时触发
-        if store.meters.isEmpty || store.meters.allSatisfy({ $0.lastRefresh == nil }) {
-            Task { await refreshAll() }
-        }
-    }
-
     private func refreshAll() async {
         guard !refreshing else { return }
         guard !store.meters.isEmpty else {
@@ -375,13 +374,39 @@ struct MeterBoardView: View {
         refreshTotal = store.meters.count
         defer { refreshing = false }
         do {
-            let ok = try await currentProvider().refreshAll(store: store) { done, total, label in
+            // 第一遍：全部电表（串行限速，单台内部已带一次重试）
+            let outcome = try await currentProvider().refreshAll(store: store) { done, total, label in
                 refreshProgress = done
                 refreshTotal = total
                 refreshLabel = label
             }
-            if ok > 0 {
-                // 刷新完成（静默成功，靠卡片数据变化呈现）
+            // v2.4：跑完后自动把刷新失败的户号再重刷一遍（串行限速）；仍失败则弹窗提示手动刷新
+            var stillFailed: [String] = []
+            let failed = outcome.failedUIDs
+            if !failed.isEmpty {
+                let provider = currentProvider()
+                for (j, uid) in failed.enumerated() {
+                    let display = store.meters.first(where: { $0.uid == uid })?.room ?? uid
+                    refreshProgress = store.meters.count + j + 1
+                    refreshTotal = store.meters.count + failed.count
+                    refreshLabel = "重刷失败户 \(j + 1)/\(failed.count) \(display)"
+                    do {
+                        let result = try await provider.query(store: store, uid: uid)
+                        store.applyQueryResult(uid: uid, result: result)
+                    } catch {
+                        stillFailed.append(uid)
+                    }
+                    if j < failed.count - 1 {
+                        try? await Task.sleep(nanoseconds: UInt64(1.5 * 1_000_000_000))
+                    }
+                }
+            }
+            // 仍失败：弹窗列出房间名提示手动刷新
+            if !stillFailed.isEmpty {
+                let names = stillFailed.map { uid in
+                    store.meters.first(where: { $0.uid == uid })?.room ?? uid
+                }
+                failedAlertText = "以下房间自动重刷后仍刷新失败，请手动刷新：\n" + names.joined(separator: "、")
             }
         } catch {
             errorText = "刷新失败：\(error.localizedDescription)"

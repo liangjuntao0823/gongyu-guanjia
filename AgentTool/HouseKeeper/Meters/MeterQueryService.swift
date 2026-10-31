@@ -145,10 +145,11 @@ final class MeterQueryService: MeterQuerying {
 
     // MARK: - 批量刷新（串行 + 限速 + 进度回调 + 失败重试已含在单表 query 内）
 
-    /// 返回成功刷新的台数
-    func refreshAll(store: MeterStore, progress: @escaping (Int, Int, String) -> Void) async throws -> Int {
+    /// 返回成功台数与失败户号清单（v2.4：失败户由调用方自动重刷/提示）
+    func refreshAll(store: MeterStore, progress: @escaping (Int, Int, String) -> Void) async throws -> MeterRefreshOutcome {
         try await ensureWechatId(store: store)
         var ok = 0
+        var failed: [String] = []
         var lastError: Error?
         for (i, ledger) in store.meters.enumerated() {
             let display = ledger.room.isEmpty ? ledger.uid : ledger.room
@@ -159,6 +160,7 @@ final class MeterQueryService: MeterQuerying {
                 ok += 1
             } catch {
                 lastError = error
+                failed.append(ledger.uid)
                 // 单台失败继续下一台
             }
             if i < store.meters.count - 1 {
@@ -169,6 +171,6 @@ final class MeterQueryService: MeterQuerying {
         if ok == 0, let lastError {
             throw lastError
         }
-        return ok
+        return MeterRefreshOutcome(okCount: ok, failedUIDs: failed)
     }
 }

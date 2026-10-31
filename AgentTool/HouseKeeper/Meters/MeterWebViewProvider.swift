@@ -61,7 +61,7 @@ final class MeterWebViewProvider: NSObject, MeterQuerying, WKNavigationDelegate 
         return list
     }
 
-    func refreshAll(store: MeterStore, progress: @escaping (Int, Int, String) -> Void) async throws -> Int {
+    func refreshAll(store: MeterStore, progress: @escaping (Int, Int, String) -> Void) async throws -> MeterRefreshOutcome {
         guard !store.settings.openId.isEmpty else { throw MeterQueryError.msg("未配置电表查询链接") }
         let uids = store.meters.map { $0.uid }
         guard !uids.isEmpty else { throw MeterQueryError.msg("暂无电表") }
@@ -70,15 +70,18 @@ final class MeterWebViewProvider: NSObject, MeterQuerying, WKNavigationDelegate 
 
         let results = try await runInPage(openId: store.settings.openId, task: .refresh(uids))
         var ok = 0
+        var failed: [String] = []
         for item in results {
             if item.ok, let r = item.result {
                 store.applyQueryResult(uid: item.uid, result: r)
                 ok += 1
+            } else {
+                failed.append(item.uid)
             }
         }
         store.sendLowAlertIfNeeded()
         if ok == 0 { throw MeterQueryError.msg("网页抓取未取到数据，请检查链接或稍后重试") }
-        return ok
+        return MeterRefreshOutcome(okCount: ok, failedUIDs: failed)
     }
 
     /// 单台刷新
