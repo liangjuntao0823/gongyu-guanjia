@@ -34,6 +34,7 @@ enum QuickActionRegistry {
         QuickActionMeta(id: "todo",     label: "新增待办", icon: "checklist",               color: .themeAccentDark),
         QuickActionMeta(id: "meter",    label: "电表管理", icon: "bolt.batteryblock.fill",  color: .themeBlue),
         QuickActionMeta(id: "ajk",      label: "安居客",   icon: "building.2.fill",         color: .themeBlue, imageName: "AjkIcon"),
+        QuickActionMeta(id: "f58",      label: "58找房",   icon: "magnifyingglass",          color: .themeBlue),
         QuickActionMeta(id: "ai",       label: "AI 助手",  icon: "sparkles",               color: .themeAccentDark, imageName: "DoubaoIcon"),
         QuickActionMeta(id: "admin",    label: "后台管理", icon: "gauge",                   color: .themeBlue),
         QuickActionMeta(id: "payout",   label: "新增包租", icon: "arrow.up.circle.fill",    color: Color(hex: "6B3FA0")),
@@ -44,7 +45,7 @@ enum QuickActionRegistry {
 
     /// 默认布局：工作台 7 个动作 + 第 8 位固定「更多」；更多收纳 后台管理/包租/水电结算/新增房源/收租统计（安居客/AI 助手按需由用户排序）
     static let defaultDashboard: [String] = ["deal", "income", "expense", "rent", "todo", "meter", "ajk"]
-    static let defaultMore: [String] = ["ai", "admin", "payout", "utility", "house", "rentStat"]
+    static let defaultMore: [String] = ["ai", "f58", "admin", "payout", "utility", "house", "rentStat"]
 
     static func meta(_ id: String) -> QuickActionMeta? {
         all.first { $0.id == id }

@@ -18,6 +18,7 @@ struct DashboardView: View {
     @State private var showAdmin = false   // v1.36 需求4：管理后台（App 内原生后台）
     @State private var showMeter = false   // v1.84：电表监控板块
     @State private var showAjk = false     // v1.85：安居客经纪人后台数据
+    @State private var showF58 = false     // v1.99 b105：58同城找房（第一页约40条）
     @State private var showAI = false      // v1.85：AI 助手（对话驱动动作）
     @State private var showRentStat = false // v1.99：单月收租统计
     @State private var showMoreActions = false  // v1.84：更多收纳面板
@@ -90,7 +91,7 @@ struct DashboardView: View {
             if valid.isEmpty { return QuickActionRegistry.defaultDashboard }
             // 迁移计算：旧缓存缺安居客/AI 助手 → 补入（先电表后，满 7 个后多出的收进「更多」）
             var more = moreActionIDs
-            for id in ["ajk", "ai"] where !valid.contains(id) {
+            for id in ["ajk", "ai", "f58"] where !valid.contains(id) {
                 if valid.count < 7 {
                     if let idx = valid.firstIndex(of: "meter") { valid.insert(id, at: idx + 1) }
                     else { valid.append(id) }
@@ -121,7 +122,7 @@ struct DashboardView: View {
         if valid.isEmpty { return }
         var migrated = false
         var more = moreActionIDs
-        for id in ["ajk", "ai"] where !valid.contains(id) {
+        for id in ["ajk", "ai", "f58"] where !valid.contains(id) {
             migrated = true
             if valid.count < 7 {
                 if let idx = valid.firstIndex(of: "meter") { valid.insert(id, at: idx + 1) }
@@ -170,6 +171,7 @@ struct DashboardView: View {
         case "todo": action = { showAddTodo = true }
         case "meter": action = { showMeter = true }
         case "ajk": action = { showAjk = true }
+        case "f58": action = { showF58 = true }
         case "ai": action = { showAI = true }
         case "admin": action = { showAdmin = true }
         case "payout": action = { showAddPayout = true }
@@ -769,6 +771,9 @@ struct DashboardView: View {
         }
         .sheet(isPresented: $showAjk) {
             NavigationStack { AjkBoardView() }
+        }
+        .sheet(isPresented: $showF58) {
+            NavigationStack { F58BoardView() }
         }
         .sheet(isPresented: $showAI) {
             NavigationStack { AIAssistantView() }

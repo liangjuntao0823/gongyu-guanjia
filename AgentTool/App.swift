@@ -146,6 +146,7 @@ struct AgentToolApp: App {
                 .environmentObject(tabRouter)
                 .environmentObject(MeterStore.shared)
                 .environmentObject(AjkStore.shared)
+                .environmentObject(F58Store.shared)
                 .environment(\.houseModelContext, houseContainer.mainContext)
                 .alert("存储异常", isPresented: Binding(
                     get: { storageWarning != nil },
