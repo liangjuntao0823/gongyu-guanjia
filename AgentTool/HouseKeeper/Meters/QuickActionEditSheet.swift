@@ -34,7 +34,7 @@ enum QuickActionRegistry {
         QuickActionMeta(id: "todo",     label: "新增待办", icon: "checklist",               color: .themeAccentDark),
         QuickActionMeta(id: "meter",    label: "电表管理", icon: "bolt.batteryblock.fill",  color: .themeBlue),
         QuickActionMeta(id: "ajk",      label: "安居客",   icon: "building.2.fill",         color: .themeBlue, imageName: "AjkIcon"),
-        QuickActionMeta(id: "f58",      label: "58找房",   icon: "magnifyingglass",          color: .themeBlue),
+        QuickActionMeta(id: "f58",      label: "房源排名", icon: "magnifyingglass",          color: .themeBlue),
         QuickActionMeta(id: "ai",       label: "AI 助手",  icon: "sparkles",               color: .themeAccentDark, imageName: "DoubaoIcon"),
         QuickActionMeta(id: "admin",    label: "后台管理", icon: "gauge",                   color: .themeBlue),
         QuickActionMeta(id: "payout",   label: "新增包租", icon: "arrow.up.circle.fill",    color: Color(hex: "6B3FA0")),

@@ -187,14 +187,19 @@ struct HouseCardView: View {
                     Text(house.displayRoomNo)
                         .font(.title3.weight(.bold))
                         .foregroundColor(.primary)
+                        // v2.2（需求①）：房号强制不换行，过长时缩放兜底
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.6)
                         .padding(.horizontal, 9)
                         .padding(.vertical, 3)
                         .background(Color(.systemGray6))
                         .clipShape(Capsule())
-                    Text(house.priceText)
+                    // v2.2（需求①）：租金只显示金额数字（去掉「元/月」）
+                    Text(house.priceAmountText)
                         // v1.72（#3）：租金恢复 headline 加粗 + 主题色（v1.71 #96 曾改 title3，用户要求回退）
                         .font(.headline.weight(.bold))
                         .foregroundColor(AppTheme.accent)
+                        .lineLimit(1)
                         .padding(.horizontal, 9)
                         .padding(.vertical, 3)
                         .background(AppTheme.accent.opacity(0.1))

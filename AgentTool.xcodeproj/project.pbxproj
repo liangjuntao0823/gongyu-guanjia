@@ -80,6 +80,8 @@
 		A10000010000000000000218 /* AIAssistantView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000218 /* AIAssistantView.swift */; };
 		A10000010000000000000219 /* AIRequestService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000219 /* AIRequestService.swift */; };
 		A10000010000000000000220 /* AIToolExecutor.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000220 /* AIToolExecutor.swift */; };
+		A10000010000000000000221 /* AjkPublic.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000221 /* AjkPublic.swift */; };
+		A10000010000000000000222 /* AjkPublicView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000222 /* AjkPublicView.swift */; };
 		A10000010000000000000221 /* AIManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000221 /* AIManager.swift */; };
 		A10000010000000000000222 /* F58Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000222 /* F58Models.swift */; };
 		A10000010000000000000223 /* F58Store.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000223 /* F58Store.swift */; };
@@ -163,6 +165,8 @@
 		B10000010000000000000218 /* AIAssistantView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIAssistantView.swift; sourceTree = "<group>"; };
 		B10000010000000000000219 /* AIRequestService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIRequestService.swift; sourceTree = "<group>"; };
 		B10000010000000000000220 /* AIToolExecutor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIToolExecutor.swift; sourceTree = "<group>"; };
+		B10000010000000000000221 /* AjkPublic.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AjkPublic.swift; sourceTree = "<group>"; };
+		B10000010000000000000222 /* AjkPublicView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AjkPublicView.swift; sourceTree = "<group>"; };
 		B10000010000000000000221 /* AIManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIManager.swift; sourceTree = "<group>"; };
 		B10000010000000000000222 /* F58Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = F58Models.swift; sourceTree = "<group>"; };
 		B10000010000000000000223 /* F58Store.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = F58Store.swift; sourceTree = "<group>"; };
@@ -397,6 +401,8 @@
 				B10000010000000000000218 /* AIAssistantView.swift */,
 				B10000010000000000000219 /* AIRequestService.swift */,
 				B10000010000000000000220 /* AIToolExecutor.swift */,
+				B10000010000000000000221 /* AjkPublic.swift */,
+				B10000010000000000000222 /* AjkPublicView.swift */,
 				B10000010000000000000221 /* AIManager.swift */,
 			);
 			path = Ajk;
@@ -559,6 +565,8 @@
 				A10000010000000000000218 /* AIAssistantView.swift in Sources */,
 				A10000010000000000000219 /* AIRequestService.swift in Sources */,
 				A10000010000000000000220 /* AIToolExecutor.swift in Sources */,
+				A10000010000000000000221 /* AjkPublic.swift in Sources */,
+				A10000010000000000000222 /* AjkPublicView.swift in Sources */,
 				A10000010000000000000221 /* AIManager.swift in Sources */,
 				A10000010000000000000222 /* F58Models.swift in Sources */,
 				A10000010000000000000223 /* F58Store.swift in Sources */,
@@ -625,7 +633,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = AgentTool/AgentTool.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 108;
+				CURRENT_PROJECT_VERSION = 109;
 				DEVELOPMENT_ASSET_PATHS = "\"AgentTool/Preview Content\"";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -646,7 +654,7 @@ INFOPLIST_KEY_NSLocalNetworkUsageDescription = "仅在你点击同步时连接�
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 2.1;
+				MARKETING_VERSION = 2.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.gj.tg;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -661,7 +669,7 @@ INFOPLIST_KEY_NSLocalNetworkUsageDescription = "仅在你点击同步时连接�
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = AgentTool/AgentTool.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 108;
+				CURRENT_PROJECT_VERSION = 109;
 				DEVELOPMENT_ASSET_PATHS = "\"AgentTool/Preview Content\"";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -682,7 +690,7 @@ INFOPLIST_KEY_NSLocalNetworkUsageDescription = "仅在你点击同步时连接�
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 2.1;
+				MARKETING_VERSION = 2.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.gj.tg;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -691,8 +699,8 @@ INFOPLIST_KEY_NSLocalNetworkUsageDescription = "仅在你点击同步时连接�
 			};
 			name = Release;
 		};
-		WD = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGN_ENTITLEMENTS = AgentToolWidget/AgentToolWidget.entitlements; CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 108; INFOPLIST_FILE = AgentToolWidget/Info.plist; IPHONEOS_DEPLOYMENT_TARGET = 17.0; MARKETING_VERSION = 2.1; PRODUCT_BUNDLE_IDENTIFIER = com.gj.tg.widget; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = iphoneos; SKIP_INSTALL = YES; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2"; }; name = Debug; };
-		WR = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGN_ENTITLEMENTS = AgentToolWidget/AgentToolWidget.entitlements; CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 108; INFOPLIST_FILE = AgentToolWidget/Info.plist; IPHONEOS_DEPLOYMENT_TARGET = 17.0; MARKETING_VERSION = 2.1; PRODUCT_BUNDLE_IDENTIFIER = com.gj.tg.widget; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = iphoneos; SKIP_INSTALL = YES; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2"; }; name = Release; };
+		WD = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGN_ENTITLEMENTS = AgentToolWidget/AgentToolWidget.entitlements; CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 109; INFOPLIST_FILE = AgentToolWidget/Info.plist; IPHONEOS_DEPLOYMENT_TARGET = 17.0; MARKETING_VERSION = 2.2; PRODUCT_BUNDLE_IDENTIFIER = com.gj.tg.widget; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = iphoneos; SKIP_INSTALL = YES; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2"; }; name = Debug; };
+		WR = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGN_ENTITLEMENTS = AgentToolWidget/AgentToolWidget.entitlements; CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 109; INFOPLIST_FILE = AgentToolWidget/Info.plist; IPHONEOS_DEPLOYMENT_TARGET = 17.0; MARKETING_VERSION = 2.2; PRODUCT_BUNDLE_IDENTIFIER = com.gj.tg.widget; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = iphoneos; SKIP_INSTALL = YES; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2"; }; name = Release; };
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */

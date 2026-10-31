@@ -18,8 +18,10 @@ struct F58House: Identifiable, Codable, Equatable {
     let price: String       // 租金数字（元/月 由 UI 拼接）
     let room: String        // 户型+面积（如 1室 34.23㎡）
     let loc: String         // 区域 + 小区
-    let agentDp: String     // 经纪公司（如 一米公寓）
-    let agentName: String   // 经纪人姓名（如 颜家康）
+    /// 经纪公司（v2.2：列表页无经纪人，由详情页补抓；如 佛山市用心选房房地产经纪有限公司）
+    var agentDp: String
+    /// 经纪人姓名（v2.2：详情页补抓；如 李文斌）
+    var agentName: String
     let tip: String         // 标签（安选）
     let ad: String          // 广告标（广告）
 
@@ -29,6 +31,13 @@ struct F58House: Identifiable, Codable, Equatable {
         if !agentDp.isEmpty { parts.append(agentDp) }
         if !agentName.isEmpty { parts.append(agentName) }
         return parts.joined(separator: " ")
+    }
+
+    /// 经纪人姓名（详情页补抓失败时回退：agent 内第一个非公司词；空则 "—"）
+    var agentDisplay: String {
+        if !agentName.isEmpty { return agentName }
+        if !agentDp.isEmpty { return agentDp }
+        return "—"
     }
 
     /// 租金数值（用于统计均价/最高/最低；解析失败返回 nil）
@@ -51,9 +60,12 @@ struct F58Settings: Codable, Equatable {
 /// 抓取结果概览（从本次数据现算，不落盘）
 struct F58Overview {
     var count: Int = 0        // 房源套数
-    var agentCount: Int = 0   // 经纪人（公司+人名去重）位数
-    var avgPrice: Int = 0     // 均价（元/月）
-    var minPrice: Int = 0     // 最低
-    var maxPrice: Int = 0     // 最高
-    var adCount: Int = 0      // 广告位套数
+    var agentCount: Int = 0   // 经纪人（按姓名去重）位数
+    /// 按经纪人展示房源数量排名（v2.2：姓名 → 套数，倒序）
+    var agentRank: [(name: String, count: Int)] = []
+    // —— 以下字段 v2.2 起顶栏不再展示（需求：删均价/广告位），保留兼容旧引用 ——
+    var avgPrice: Int = 0
+    var minPrice: Int = 0
+    var maxPrice: Int = 0
+    var adCount: Int = 0
 }

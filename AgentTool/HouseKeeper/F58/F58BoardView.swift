@@ -1,7 +1,8 @@
 //
 //  F58BoardView.swift
-//  公寓管家 · 58同城找房数据看板（v1.99 b105）
-//  功能：读取 58 顺德站租房列表第一页（约 40 条）→ 标题/缩略图/价格/经纪人 → 点卡片跳对应详情页
+//  公寓管家 · 房源排名看板（v2.2 b109）
+//  功能：双 tab——「58找房」读取 58 顺德站租房列表第一页（约 40 条）→ 标题/缩略图/价格/经纪人（详情页补抓）
+//        「安居客」读取安居客前台找房页（fs.zu.anjuke.com 等）；顶栏按经纪人展示房源数量排名
 //  安全：只读展示，不做任何写操作；抓取仅在用户主动点击时执行；只抓第一页
 //
 
@@ -16,6 +17,7 @@ struct F58BoardView: View {
     @EnvironmentObject private var store: F58Store
     @Environment(\.dismiss) private var dismiss
 
+    @State private var tab: F58BoardTab = .f58
     @State private var refreshing = false
     @State private var errorText: String?
     @State private var toastText: String?
@@ -24,21 +26,24 @@ struct F58BoardView: View {
     @State private var onlyWithCover = false
     @State private var selectedHouse: F58House?
 
+    enum F58BoardTab: String, CaseIterable, Identifiable {
+        case f58 = "58找房"
+        case ajk = "安居客"
+        var id: String { rawValue }
+    }
+
     var body: some View {
         ZStack {
             Color.themePanel.ignoresSafeArea()
             VStack(spacing: 0) {
                 navBar
-                if refreshing { progressBar }
-                ScrollView {
-                    VStack(spacing: 0) {
-                        overviewCard
-                        toolRow
-                        houseList
-                    }
-                    .padding(.bottom, 30)
+                tabPicker
+                if tab == .f58 {
+                    f58Body
+                } else {
+                    AjkPublicView()
+                        .environmentObject(AjkPublicStore.shared)
                 }
-                .refreshable { await fetch() }
             }
             if let t = toastText {
                 VStack {
@@ -69,6 +74,34 @@ struct F58BoardView: View {
         }
     }
 
+    private var tabPicker: some View {
+        Picker("", selection: $tab) {
+            ForEach(F58BoardTab.allCases) { t in
+                Text(t.rawValue).tag(t)
+            }
+        }
+        .pickerStyle(.segmented)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .background(Color.themePanel)
+    }
+
+    /// 58 tab 主体（原有列表逻辑）
+    private var f58Body: some View {
+        VStack(spacing: 0) {
+            if refreshing { progressBar }
+            ScrollView {
+                VStack(spacing: 0) {
+                    overviewCard
+                    toolRow
+                    houseList
+                }
+                .padding(.bottom, 30)
+            }
+            .refreshable { await fetch() }
+        }
+    }
+
     // MARK: - 顶部导航
 
     private var navBar: some View {
@@ -87,7 +120,7 @@ struct F58BoardView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 10))
                 }
                 VStack(alignment: .leading, spacing: 0) {
-                    Text("58同城找房")
+                    Text("房源排名")
                         .font(.system(size: 16, weight: .bold))
                         .foregroundColor(.white)
                     Text(subTitle)
@@ -135,22 +168,27 @@ struct F58BoardView: View {
             let f = DateFormatter(); f.dateFormat = "MM-dd HH:mm"
             return "\(kw)｜上次抓取 \(f.string(from: t))｜共 \(store.houses.count) 套"
         }
-        return "\(kw)｜点「读取」抓第一页约 40 套"
+        return "\(kw)｜点「读取」抓取 58 第一页约 40 套"
     }
 
     private var progressBar: some View {
         HStack(spacing: 8) {
             ProgressView()
                 .controlSize(.small)
-            Text("正在读取 58 列表页…")
-                .font(.system(size: 12))
+            if let p = store.detailProgress {
+                Text("正在补抓经纪人 \(p.current)/\(p.total)…")
+                    .font(.system(size: 12))
+            } else {
+                Text("正在读取 58 列表页…")
+                    .font(.system(size: 12))
+            }
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 8)
         .background(Color.themeAccent.opacity(0.08))
     }
 
-    // MARK: - 概览（本次数据现算）
+    // MARK: - 概览（v2.2：删均价/广告位，改按经纪人展示房源数量排名）
 
     private var overviewCard: some View {
         let o = store.overview
@@ -158,12 +196,32 @@ struct F58BoardView: View {
             HStack(spacing: 0) {
                 statItem(value: "\(o.count)", label: "房源(套)")
                 statItem(value: "\(o.agentCount)", label: "经纪人(位)")
-                statItem(value: o.avgPrice > 0 ? "\(o.avgPrice)" : "—", label: "均价(元/月)")
+                statItem(value: "\(o.agentRank.count)", label: "上榜经纪人")
             }
-            HStack(spacing: 0) {
-                statItem(value: o.minPrice > 0 ? "\(o.minPrice)" : "—", label: "最低(元/月)")
-                statItem(value: o.maxPrice > 0 ? "\(o.maxPrice)" : "—", label: "最高(元/月)")
-                statItem(value: "\(o.adCount)", label: "广告位")
+            // 按经纪人展示房源数量排名（Top 5）
+            if !o.agentRank.isEmpty {
+                VStack(spacing: 4) {
+                    ForEach(Array(o.agentRank.prefix(5).enumerated()), id: \.offset) { idx, rank in
+                        HStack(spacing: 8) {
+                            Text("\(idx + 1)")
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundColor(.white)
+                                .frame(width: 20, height: 20)
+                                .background(idx == 0 ? Color.themeAmber : Color.themeAccentDark)
+                                .clipShape(Circle())
+                            Text(rank.name)
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundColor(.themeText)
+                                .lineLimit(1)
+                            Spacer()
+                            Text("\(rank.count)套")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundColor(.themeAccentDark)
+                        }
+                        .padding(.horizontal, 14)
+                    }
+                }
+                .padding(.top, 2)
             }
         }
         .padding(.vertical, 14)
@@ -288,30 +346,19 @@ struct F58BoardView: View {
         return list
     }
 
-    // MARK: - 抓取
+    // MARK: - 抓取（v2.2：走 store，含详情页经纪人补抓进度）
 
     private func fetch() async {
         guard !refreshing else { return }
         refreshing = true
         defer { refreshing = false }
-        do {
-            let result = try await F58WebViewProvider.shared.fetchFirstPage(urlString: store.settings.baseURL)
-            if result.needCaptcha {
-                errorText = "58 弹出了验证码校验。请稍后重试；若反复出现，可到设置里核对列表页链接是否正常。"
-                return
-            }
-            if !result.error.isEmpty {
-                errorText = result.error
-                return
-            }
-            if result.houses.isEmpty {
-                errorText = "没有抓取到房源，请检查列表页链接是否正常，或稍后重试。"
-                return
-            }
-            store.applyFetch(houses: result.houses)
-            showToast("已读取 \(result.houses.count) 套房源")
-        } catch {
-            errorText = error.localizedDescription
+        await store.fetch()
+        if let err = store.lastError {
+            errorText = err
+            return
+        }
+        if !store.houses.isEmpty {
+            showToast("已读取 \(store.houses.count) 套房源")
         }
     }
 
@@ -518,11 +565,13 @@ struct F58SettingsDetailView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var keywordText = ""
     @State private var urlText = ""
+    @State private var ajkURLText = ""
+    @State private var ajkKWText = ""
 
     var body: some View {
         NavigationStack {
             Form {
-                Section("列表页 URL") {
+                Section("58找房 · 列表页 URL") {
                     TextField("58 租房列表页 URL", text: $urlText)
                         .font(.system(size: 13))
                         .autocapitalization(.none)
@@ -531,10 +580,26 @@ struct F58SettingsDetailView: View {
                         .font(.system(size: 11))
                         .foregroundColor(.themeText3)
                 }
-                Section("显示名称") {
+                Section("58找房 · 显示名称") {
                     TextField("关键词（如：利保米兰公馆）", text: $keywordText)
                         .font(.system(size: 13))
                     Text("仅用于页面标题显示，不影响抓取内容")
+                        .font(.system(size: 11))
+                        .foregroundColor(.themeText3)
+                }
+                Section("安居客 · 前台找房页 URL") {
+                    TextField("安居客找房页 URL", text: $ajkURLText)
+                        .font(.system(size: 13))
+                        .autocapitalization(.none)
+                        .keyboardType(.URL)
+                    Text("默认：fs.zu.anjuke.com 精选页（利保米兰公馆）。在 App 内用手机 UA 打开抓取第一页；如页面弹验证码请稍后再试，或到手机上打开该链接确认可访问后更换")
+                        .font(.system(size: 11))
+                        .foregroundColor(.themeText3)
+                }
+                Section("安居客 · 显示名称") {
+                    TextField("关键词（如：利保米兰公馆）", text: $ajkKWText)
+                        .font(.system(size: 13))
+                    Text("仅用于安居客页标题显示")
                         .font(.system(size: 11))
                         .foregroundColor(.themeText3)
                 }
@@ -547,11 +612,14 @@ struct F58SettingsDetailView: View {
                         if !trimmedKW.isEmpty { s.keyword = trimmedKW }
                         store.settings = s
                         store.saveSettings()
+                        AjkPublicStore.shared.settingsURL = ajkURLText.trimmingCharacters(in: .whitespacesAndNewlines)
+                        AjkPublicStore.shared.settingsKeyword = ajkKWText.trimmingCharacters(in: .whitespacesAndNewlines)
+                        AjkPublicStore.shared.saveSettings()
                         dismiss()
                     }
                 }
             }
-            .navigationTitle("58找房设置")
+            .navigationTitle("房源排名设置")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -561,6 +629,8 @@ struct F58SettingsDetailView: View {
             .onAppear {
                 keywordText = store.settings.keyword
                 urlText = store.settings.baseURL
+                ajkURLText = AjkPublicStore.shared.settingsURL
+                ajkKWText = AjkPublicStore.shared.settingsKeyword
             }
         }
     }

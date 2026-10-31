@@ -451,19 +451,8 @@ struct HouseListView: View {
 
     private var statsBar: some View {
         HStack(spacing: 12) {
-            // v1.28：版本号徽章已移除，改到「设置」页最底部显示
-
-            Label {
-                Text("房源统计")
-                    .font(.footnote)
-                    .foregroundColor(.secondary)
-            } icon: {
-                Image(systemName: "building.2.fill")
-                    .font(.footnote)
-                    .foregroundColor(AppTheme.primary)
-            }
-
-            // b106：排序三档（默认=现有逻辑 / 价格升序 / 更新时间降序）
+            // v2.2（需求⑤）：删除「房源统计」标识与右侧数量胶囊，只留排序
+            // 排序三档（默认=现有逻辑 / 价格升序 / 更新时间降序）
             Menu {
                 ForEach(HouseSortMode.allCases, id: \.self) { m in
                     Button {
@@ -489,33 +478,6 @@ struct HouseListView: View {
             .menuStyle(.borderlessButton)
 
             Spacer()
-
-            if towerFilter != nil || !layoutFilters.isEmpty {
-                Text(statsFilteredLabel)
-                    .font(.footnote.weight(.semibold))
-                    .foregroundColor(AppTheme.primary)
-                    .lineLimit(1)
-            } else if let status = statusFilter {
-                Text("\(status.label) \(filteredHouses.count) 套")
-                    .font(.footnote.weight(.semibold))
-                    .foregroundColor(AppTheme.primary)
-                Text("1座 \(filteredHouses.filter { $0.tower == 1 }.count) 套")
-                    .font(.footnote.weight(.semibold))
-                    .foregroundColor(AppTheme.primary)
-                Text("2座 \(filteredHouses.filter { $0.tower == 2 }.count) 套")
-                    .font(.footnote.weight(.semibold))
-                    .foregroundColor(AppTheme.primary)
-            } else {
-                Text("1座 \(tower1Count) 套")
-                    .font(.footnote.weight(.semibold))
-                    .foregroundColor(AppTheme.primary)
-                Text("2座 \(tower2Count) 套")
-                    .font(.footnote.weight(.semibold))
-                    .foregroundColor(AppTheme.primary)
-                Text("待租 \(availableCount) 套")
-                    .font(.footnote.weight(.semibold))
-                    .foregroundColor(AppTheme.primary)
-            }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
@@ -1826,9 +1788,12 @@ final class OffsetProbeView: UIView {
     var onOffset: (CGFloat) -> Void = { _ in }
     private weak var scrollView: UIScrollView?
     private var observer: NSKeyValueObservation?
+    private var attachAttempts = 0
+    private static let maxAttachAttempts = 10
 
     func attachIfNeeded() {
         guard scrollView == nil else { return }
+        attachAttempts += 1
         var v: UIView? = superview
         while let u = v {
             if let sv = u as? UIScrollView {
@@ -1837,7 +1802,18 @@ final class OffsetProbeView: UIView {
             }
             v = u.superview
         }
-        guard let sv = scrollView else { return }
+        guard let sv = scrollView else {
+            // v2.2（需求②修复）：SwiftUI List 在 iOS16+ 由 UICollectionView 承载，
+            // 首帧时列表内部结构可能尚未挂载（superview 链里还没有 UIScrollView）。
+            // 之前这里直接 return，首帧失败后再也不重试 → 折叠头部 b106 实现无效。
+            // 修复：延迟重试，最多 10 次（约 1.5 秒内都能挂上）。
+            if attachAttempts < Self.maxAttachAttempts {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+                    self?.attachIfNeeded()
+                }
+            }
+            return
+        }
         observer = sv.observe(\.contentOffset, options: [.new]) { [weak self] scroll, _ in
             DispatchQueue.main.async {
                 self?.onOffset(scroll.contentOffset.y)

@@ -55,13 +55,26 @@ struct MeterRecordView: View {
                 }
                 .disabled(loading)
             }
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    Task { await exportCSV() }
-                } label: {
-                    Image(systemName: "square.and.arrow.up")
+            if tab == .records {
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        Task { await exportCSV() }
+                    } label: {
+                        Image(systemName: "square.and.arrow.up")
+                    }
+                    .disabled(loading || records.isEmpty)
                 }
-                .disabled(loading || records.isEmpty)
+            }
+            // v2.2（需求④）：刷新记录 tab 可直接导出 CSV（200 条）
+            if tab == .refreshRecords {
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        Task { await exportRefreshLogsCSV() }
+                    } label: {
+                        Image(systemName: "square.and.arrow.up")
+                    }
+                    .disabled(refreshLogs.isEmpty)
+                }
             }
         }
         .onAppear {
@@ -134,9 +147,9 @@ struct MeterRecordView: View {
         }
     }
 
-    /// 刷新记录：最新在上，最多 30 条（与用电趋势同源，均来自每次刷新的 history 记录）
+    /// 刷新记录：最新在上，最多 200 条（v2.2：原 30 条；与用电趋势同源，均来自每次刷新的 history 记录）
     private var refreshLogs: [(t: TimeInterval, s: Double)] {
-        (meter.history ?? []).reversed().prefix(30).map { ($0.t, $0.s) }
+        (meter.history ?? []).reversed().prefix(200).map { ($0.t, $0.s) }
     }
 
     private var refreshRecordsBody: some View {
@@ -149,7 +162,7 @@ struct MeterRecordView: View {
                     Text("暂无刷新记录")
                         .font(.system(size: 14))
                         .foregroundColor(.themeText3)
-                    Text("每次刷新电表后自动记录剩余电量与刷新时间，最多保留最近 30 次")
+                    Text("每次刷新电表后自动记录剩余电量与刷新时间，最多保留最近 200 次")
                         .font(.system(size: 12))
                         .foregroundColor(.themeText3.opacity(0.7))
                         .multilineTextAlignment(.center)
@@ -222,6 +235,32 @@ struct MeterRecordView: View {
             }.joined(separator: "\n")
             let url = FileManager.default.temporaryDirectory
                 .appendingPathComponent("充值记录_\(meter.uid)_\(DateFormatter.exportStamp.string(from: Date())).csv")
+            try Data(("\u{FEFF}" + csv).utf8).write(to: url)
+            sharePath = MeterShareFile(path: url.path)
+        } catch {
+            errorText = error.localizedDescription
+        }
+    }
+
+    /// v2.2（需求④）：刷新记录导出 CSV（最多 200 条）
+    private func exportRefreshLogsCSV() {
+        let logs = refreshLogs
+        guard !logs.isEmpty else { return }
+        let room = meter.room.isEmpty ? meter.uid : meter.room
+        var rows: [[String]] = [["房号", "电表用户号", "第几次刷新", "剩余电量(度)", "刷新时间"]]
+        for (idx, item) in logs.enumerated() {
+            let t = DateFormatter.exportStamp.string(from: Date(timeIntervalSince1970: item.t))
+            rows.append([room, meter.uid, "\(logs.count - idx)", String(format: "%.2f", item.s), t])
+        }
+        let csv = rows.map { row in
+            row.map { cell in
+                let c = cell.replacingOccurrences(of: "\"", with: "\"\"")
+                return c.contains(",") || c.contains("\"") ? "\"\(c)\"" : c
+            }.joined(separator: ",")
+        }.joined(separator: "\n")
+        do {
+            let url = FileManager.default.temporaryDirectory
+                .appendingPathComponent("刷新记录_\(meter.uid)_\(DateFormatter.exportStamp.string(from: Date())).csv")
             try Data(("\u{FEFF}" + csv).utf8).write(to: url)
             sharePath = MeterShareFile(path: url.path)
         } catch {
@@ -355,8 +394,12 @@ private struct TrendLineView: View {
     }
 
     var body: some View {
+        // v2.2（需求③修复）：竖轴刻度固定为 0..max 五档（yTicks 的标签就是 0/25%/50%/75%/100% 绝对刻度），
+        // 曲线映射必须与刻度同一基线——旧代码 minVal = max(实际最小值, 0) 且曲线按 minVal..max 映射，
+        // 与 0..max 的刻度标签错位：数据实际在 40 上下时最低点被压到底部（y=minVal 处）且底部标签是 0，
+        // 视觉上就是「最后一次刷新恒落 0 度」。改为 minVal=0 后 43.40 度落在 43.4/max 的真实高度。
         let maxVal = max(points.map(\.s).max() ?? 0, 1)
-        let minVal = max(points.map(\.s).min() ?? 0, 0)
+        let minVal = 0.0
         let range = max(maxVal - minVal, 1)
         let w = max(size.width - leftPad - rightPad, 1)
         let h = max(size.height - topPad - bottomPad, 1)

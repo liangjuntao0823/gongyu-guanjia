@@ -173,7 +173,7 @@ final class MeterStore: ObservableObject {
         saveMeters()
     }
 
-    /// 用电趋势：每次成功刷新追加一个快照，每户最多保留 80 条（旧数据无 history 字段则初始化）
+    /// 用电趋势：每次成功刷新追加一个快照，每户最多保留 200 条（v2.2：原 80；旧数据无 history 字段则初始化）
     private func appendHistory(uid: String, s: Double, l: Double) {
         guard let idx = meters.firstIndex(where: { $0.uid == uid }) else { return }
         var hist = meters[idx].history ?? []
@@ -183,7 +183,7 @@ final class MeterStore: ObservableObject {
             hist[hist.count - 1] = MeterHistoryPoint(t: now, s: s, l: l)
         } else {
             hist.append(MeterHistoryPoint(t: now, s: s, l: l))
-            if hist.count > 80 { hist.removeFirst(hist.count - 80) }
+            if hist.count > 200 { hist.removeFirst(hist.count - 200) }
         }
         meters[idx].history = hist
     }

@@ -175,6 +175,9 @@ extension House {
 
     var priceText: String { "\(price)元/月" }
 
+    /// 卡片租金展示（v2.2：只显示金额数字，不带「元/月」；分享文本仍用 priceText）
+    var priceAmountText: String { "\(price)" }
+
     var hasPhoto: Bool { mediaItems.contains { $0.kind == "image" } }
     var hasVideo: Bool { mediaItems.contains { $0.kind == "video" } }
     var photos: [MediaItem] { mediaItems.filter { $0.kind == "image" } }

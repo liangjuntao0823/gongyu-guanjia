@@ -54,14 +54,45 @@ final class F58Store: ObservableObject {
         }
     }
 
-    // MARK: - 抓取结果落地
+    // MARK: - 抓取结果落地（v2.2：接详情页经纪人补抓进度）
+
+    /// 详情页经纪人补抓进度（current/total；nil = 未开始）
+    @Published var detailProgress: (current: Int, total: Int)?
 
     func applyFetch(houses: [F58House]) {
         self.houses = houses
         self.lastFetch = Date()
         saveHouses()
         downloadCovers()
+        detailProgress = nil
     }
+
+    func fetch() async {
+        let provider = F58WebViewProvider.shared
+        provider.onDetailProgress = { [weak self] cur, total in
+            self?.detailProgress = (cur, total)
+        }
+        do {
+            let result = try await provider.fetchFirstPage(urlString: settings.baseURL)
+            if result.needCaptcha {
+                detailProgress = nil
+                lastError = "58 弹出验证码校验，请稍后重试（连续出现可在设置里更换关键词或稍后再试）"
+                return
+            }
+            if !result.error.isEmpty {
+                detailProgress = nil
+                lastError = result.error
+                return
+            }
+            applyFetch(houses: result.houses)
+        } catch {
+            detailProgress = nil
+            lastError = error.localizedDescription
+        }
+    }
+
+    /// 最近一次错误（UI 提示用）
+    @Published var lastError: String?
 
     // MARK: - 缩略图（参考安居客封面机制）
 
@@ -111,11 +142,12 @@ final class F58Store: ObservableObject {
         var agents: Set<String> = []
         var prices: [Int] = []
         for h in houses {
-            if !h.agent.isEmpty { agents.insert(h.agent) }
+            agents.insert(h.agentDisplay)
             if let p = h.priceValue { prices.append(p) }
             if !h.ad.isEmpty { o.adCount += 1 }
         }
         o.agentCount = agents.count
+        o.agentRank = agentList
         if !prices.isEmpty {
             o.minPrice = prices.min() ?? 0
             o.maxPrice = prices.max() ?? 0
@@ -124,11 +156,16 @@ final class F58Store: ObservableObject {
         return o
     }
 
-    /// 经纪人去重清单（按出现次数排序）
+    /// 经纪人排名（v2.2：按经纪人姓名计数倒序；姓名全空的极端情况回退按公司名）
     var agentList: [(name: String, count: Int)] {
         var counts: [String: Int] = [:]
-        for h in houses where !h.agent.isEmpty {
-            counts[h.agent, default: 0] += 1
+        for h in houses where !h.agentName.isEmpty {
+            counts[h.agentName, default: 0] += 1
+        }
+        if counts.isEmpty {
+            for h in houses where !h.agentDp.isEmpty {
+                counts[h.agentDp, default: 0] += 1
+            }
         }
         return counts.sorted { $0.value != $1.value ? $0.value > $1.value : $0.key < $1.key }
             .map { ($0.key, $0.value) }

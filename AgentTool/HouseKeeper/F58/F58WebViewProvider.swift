@@ -1,10 +1,12 @@
 //
 //  F58WebViewProvider.swift
-//  公寓管家 · 58同城找房列表抓取（v2.1 b108）
+//  公寓管家 · 58同城找房列表抓取（v2.2 b109）
 //  方案：WKWebView 手机 UA 加载 m 站手机版列表（iPhone UA + m 站 URL，58 对手机浏览器风控宽松，
 //       实测不弹验证码、key 关键词生效；自动剥离 reform=pcfront——它会转 PC 站并丢弃 key 参数）
-//       → 注入 JS 收集第一页房源卡片（标题/缩略图/价格/位置/详情链接）→ Swift 解析入库
-//  安全边界：仅用户主动触发抓取；只读 58 公开租房列表页；绝不做任何写操作；只抓第一页约 40 条
+//       → 注入 JS 收集第一页房源卡片（标题/缩略图/价格/位置/详情链接）
+//       → 再用 iPhone UA 逐个抓详情页补经纪人姓名/公司（m 站详情页实测放行、无验证码；
+//         串行 + 小并发 + 超时降级：失败则该条 agent 为空，不阻塞列表）
+//  安全边界：仅用户主动触发抓取；只读 58 公开租房列表页与详情页；绝不做任何写操作；只抓第一页约 40 条
 //
 
 import Foundation
@@ -20,6 +22,8 @@ final class F58WebViewProvider: NSObject, WKNavigationDelegate {
         var houses: [F58House] = []
         var needCaptcha: Bool = false
         var error: String = ""
+        /// 详情页经纪人补抓进度（当前/总数；nil 表示未进入补抓）
+        var detailProgress: (current: Int, total: Int)?
     }
 
     /// 手机 UA：58 对手机浏览器风控宽松（实测 iPhone UA 加载 m 站手机版不弹验证码、关键词 key 生效）；
@@ -34,6 +38,8 @@ final class F58WebViewProvider: NSObject, WKNavigationDelegate {
     private var retriedCaptcha = false
     /// 本次实际加载的 URL（自动重试时复用）
     private var lastLoadedURL = ""
+    /// 详情页经纪人补抓进度回调（v2.2：current/total，nil 表示未开始）
+    var onDetailProgress: ((Int, Int) -> Void)?
 
     // MARK: - 公开入口：抓取第一页（当前设置 URL）
 
@@ -142,25 +148,43 @@ final class F58WebViewProvider: NSObject, WKNavigationDelegate {
             var money = li.querySelector('.money b') || li.querySelector('.list-item-info-price');
             var addrEl = li.querySelector('.room') || li.querySelector('.list-item-info-addr-text');
             var infor = li.querySelector('.infor');
-            var tip = li.querySelector('.ax-tip') || li.querySelector('.list-item-img-tag');
+            var tip = li.querySelector('.ax-tip') || li.querySelector('.list-item-img-tag') || li.querySelector('.list-item-info-sp-tag');
             var ad = li.querySelector('.ad-icon');
-            // 标题：PC 前端 .des h2 a；手机站 a.list-item 文本首段（去掉「安选/广告」标签）
+            // 标题：PC 前端 .des h2 a；手机站 .list-item-info-title（innerText 即完整标题）
             var title = '';
-            var price = money ? norm(money.innerText).replace(/[^\\d]/g, '') : '';
+            var price = '';
             var room = '', loc = '';
             if (mobile) {
-              var aText = norm(a.innerText || '');
-              var lines = aText.split(' ');
-              title = (lines.length > 1 ? lines[1] : lines[0]) || '';
+              // —— m 站手机版精确结构（实测确认）——
+              // 标题：li.list-item-info-title.strongbox → innerText 完整（如「米兰公馆，诚心出租，随时看房入住」）
+              var titleEl = li.querySelector('.list-item-info-title');
+              title = titleEl ? norm(titleEl.innerText) : '';
+              if (!title) {
+                var aText0 = norm(a.innerText || '');
+                var lines0 = aText0.split(' ');
+                title = (lines0.length > 1 ? lines0[1] : lines0[0]) || '';
+              }
+              // 价格：li.list-item-info-price i.strongbox 为单一数字（HTML <i class="strongbox">750</i>元）
+              var priceEl = li.querySelector('.list-item-info-price i.strongbox');
+              if (priceEl) {
+                price = norm(priceEl.innerText).replace(/[^\\d]/g, '');
+                // 只允许 ≤6 位纯数字：过滤混入日期/点击量等非价格文本（脏数据根因，实测曾取到 6478124/20001019）
+                if (price.length > 6) price = '';
+              }
+              // 位置/户型：.list-item-info-addr-text = 「1室 龙江 -利保米兰公馆」
               var addrText = addrEl ? norm(addrEl.innerText) : '';
               var sp = addrText.indexOf(' ');
               room = sp > 0 ? addrText.slice(0, sp) : addrText;
               loc = sp > 0 ? addrText.slice(sp + 1).trim() : '';
+              var aText = norm(a.innerText || '');
               if (!ad && aText.indexOf('广告') >= 0) ad = aText.indexOf('广告') >= 0 ? { innerText: '广告' } : null;
             } else {
               title = norm(a.innerText);
               room = addrEl ? norm(addrEl.innerText) : '';
               loc = infor ? norm(infor.innerText) : '';
+              // PC 前端价格同样做 ≤6 位过滤
+              var moneyText = money ? norm(money.innerText).replace(/[^\\d]/g, '') : '';
+              if (moneyText.length <= 6) price = moneyText;
             }
             // 姓名清洗：去掉「X日内实拍验真/实拍验真」等徽标杂质
             var name = jjr ? norm(jjr.innerText) : '';
@@ -203,6 +227,85 @@ final class F58WebViewProvider: NSObject, WKNavigationDelegate {
         var result = FetchResult()
         result.error = error
         c.resume(returning: result)
+    }
+
+    // MARK: - 详情页经纪人补抓（v2.2）
+
+    /// 逐个抓详情页补经纪人姓名/公司；并发 3、单请求 6 秒超时、整体可失败降级
+    private func enrichAgents(_ houses: [F58House]) async -> [F58House] {
+        var result = houses
+        let total = result.count
+        guard total > 0 else { return result }
+        let sem = DispatchSemaphore(value: 3)
+        await withTaskGroup(of: (Int, String?, String?).self) { group in
+            for i in 0..<total {
+                sem.wait()
+                group.addTask {
+                    defer { sem.signal() }
+                    let detail = await Self.fetchAgentDetail(href: result[i].href)
+                    return (i, detail.name, detail.dp)
+                }
+            }
+            for await (idx, name, dp) in group {
+                if let name, !name.isEmpty { result[idx].agentName = name }
+                if let dp, !dp.isEmpty { result[idx].agentDp = dp }
+                DispatchQueue.main.async { self.onDetailProgress?(idx + 1, total) }
+            }
+        }
+        return result
+    }
+
+    /// 详情页经纪人信息（m 站详情页实测 iPhone UA 直接放行、无验证码）：
+    /// 姓名 `div.user ul.user-profile li.profile span.name`；身份 `span.tag`（经纪人/个人）；
+    /// 公司 `div.agentCondition .cards.agent-company span`
+    private static func fetchAgentDetail(href: String) async -> (name: String?, dp: String?) {
+        let urlStr: String
+        if href.hasPrefix("http") {
+            urlStr = href
+        } else if href.hasPrefix("/") {
+            urlStr = "https://m.58.com" + href
+        } else {
+            urlStr = href
+        }
+        guard let url = URL(string: urlStr) else { return (nil, nil) }
+        var req = URLRequest(url: url)
+        req.timeoutInterval = 6
+        req.setValue(Self.mobileUA, forHTTPHeaderField: "User-Agent")
+        req.setValue("https://m.58.com/", forHTTPHeaderField: "Referer")
+        do {
+            let (data, resp) = try await URLSession.shared.data(for: req)
+            guard let http = resp as? HTTPURLResponse, http.statusCode == 200,
+                  let html = String(data: data, encoding: .utf8) else { return (nil, nil) }
+            return parseAgentDetail(html)
+        } catch {
+            return (nil, nil)
+        }
+    }
+
+    private static func parseAgentDetail(_ html: String) -> (name: String?, dp: String?) {
+        var name: String?
+        var dp: String?
+        if let m = firstCapture(html, pattern: #"class="name"[^>]*>\s*([^<]+?)\s*<"#) {
+            name = m
+        }
+        if let m = firstCapture(html, pattern: #"agent-company[\s\S]{0,600}?<span[^>]*>\s*([^<]+?)\s*<"#) {
+            dp = m
+        }
+        // 个人房东（无 agentCondition 公司块）也可能在 user-profile 有名字
+        if name == nil {
+            if let m = firstCapture(html, pattern: #"user-profile[\s\S]*?<span[^>]*>\s*([^<]+?)\s*<"#) {
+                name = m
+            }
+        }
+        return (name?.trimmingCharacters(in: .whitespacesAndNewlines), dp?.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+
+    private static func firstCapture(_ s: String, pattern: String) -> String? {
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
+        let ns = s as NSString
+        guard let m = regex.firstMatch(in: s, range: NSRange(location: 0, length: ns.length)),
+              m.numberOfRanges > 1 else { return nil }
+        return ns.substring(with: m.range(at: 1))
     }
 }
 
@@ -279,9 +382,15 @@ extension F58WebViewProvider: WKScriptMessageHandler {
             userContentController.removeScriptMessageHandler(forName: "f58Scrape")
             webView?.stopLoading()
             webView = nil
-            var result = FetchResult()
-            result.houses = pendingHouses
-            c.resume(returning: result)
+            let houses = pendingHouses
+            pendingHouses = []
+            // 详情页补抓经纪人（v2.2）：列表页本身不提供经纪人，须逐个抓详情页；
+            // 并发 3 串行限速 + 超时降级——失败则该条 agent 为空，不阻塞列表
+            Task {
+                var result = FetchResult()
+                result.houses = await self.enrichAgents(houses)
+                c.resume(returning: result)
+            }
         }
     }
 }
