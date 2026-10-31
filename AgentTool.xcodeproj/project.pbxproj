@@ -80,8 +80,8 @@
 		A10000010000000000000218 /* AIAssistantView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000218 /* AIAssistantView.swift */; };
 		A10000010000000000000219 /* AIRequestService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000219 /* AIRequestService.swift */; };
 		A10000010000000000000220 /* AIToolExecutor.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000220 /* AIToolExecutor.swift */; };
-		A10000010000000000000221 /* AjkPublic.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000221 /* AjkPublic.swift */; };
-		A10000010000000000000222 /* AjkPublicView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000222 /* AjkPublicView.swift */; };
+		A10000010000000000000226 /* AjkPublic.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000226 /* AjkPublic.swift */; };
+		A10000010000000000000227 /* AjkPublicView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000227 /* AjkPublicView.swift */; };
 		A10000010000000000000221 /* AIManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000221 /* AIManager.swift */; };
 		A10000010000000000000222 /* F58Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000222 /* F58Models.swift */; };
 		A10000010000000000000223 /* F58Store.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000223 /* F58Store.swift */; };
@@ -165,8 +165,8 @@
 		B10000010000000000000218 /* AIAssistantView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIAssistantView.swift; sourceTree = "<group>"; };
 		B10000010000000000000219 /* AIRequestService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIRequestService.swift; sourceTree = "<group>"; };
 		B10000010000000000000220 /* AIToolExecutor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIToolExecutor.swift; sourceTree = "<group>"; };
-		B10000010000000000000221 /* AjkPublic.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AjkPublic.swift; sourceTree = "<group>"; };
-		B10000010000000000000222 /* AjkPublicView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AjkPublicView.swift; sourceTree = "<group>"; };
+		B10000010000000000000226 /* AjkPublic.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AjkPublic.swift; sourceTree = "<group>"; };
+		B10000010000000000000227 /* AjkPublicView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AjkPublicView.swift; sourceTree = "<group>"; };
 		B10000010000000000000221 /* AIManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIManager.swift; sourceTree = "<group>"; };
 		B10000010000000000000222 /* F58Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = F58Models.swift; sourceTree = "<group>"; };
 		B10000010000000000000223 /* F58Store.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = F58Store.swift; sourceTree = "<group>"; };
@@ -401,8 +401,8 @@
 				B10000010000000000000218 /* AIAssistantView.swift */,
 				B10000010000000000000219 /* AIRequestService.swift */,
 				B10000010000000000000220 /* AIToolExecutor.swift */,
-				B10000010000000000000221 /* AjkPublic.swift */,
-				B10000010000000000000222 /* AjkPublicView.swift */,
+				B10000010000000000000226 /* AjkPublic.swift */,
+				B10000010000000000000227 /* AjkPublicView.swift */,
 				B10000010000000000000221 /* AIManager.swift */,
 			);
 			path = Ajk;
@@ -565,8 +565,8 @@
 				A10000010000000000000218 /* AIAssistantView.swift in Sources */,
 				A10000010000000000000219 /* AIRequestService.swift in Sources */,
 				A10000010000000000000220 /* AIToolExecutor.swift in Sources */,
-				A10000010000000000000221 /* AjkPublic.swift in Sources */,
-				A10000010000000000000222 /* AjkPublicView.swift in Sources */,
+				A10000010000000000000226 /* AjkPublic.swift in Sources */,
+				A10000010000000000000227 /* AjkPublicView.swift in Sources */,
 				A10000010000000000000221 /* AIManager.swift in Sources */,
 				A10000010000000000000222 /* F58Models.swift in Sources */,
 				A10000010000000000000223 /* F58Store.swift in Sources */,
