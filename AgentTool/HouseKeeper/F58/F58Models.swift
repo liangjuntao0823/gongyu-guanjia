@@ -1,8 +1,8 @@
 //
 //  F58Models.swift
-//  公寓管家 · 58同城找房数据模型（v1.99 b105）
-//  来源字段与 58 同城顺德站租房列表页（reform=pcfront PC 前端）卡片一一对应（实测确认）
-//  安全边界：只读 58 公开租房列表页，仅采集标题/缩略图/价格/经纪人四类信息；不做任何写操作
+//  公寓管家 · 58同城找房数据模型（v2.1 b108）
+//  来源字段与 58 同城顺德站租房列表页（m 站手机版，iPhone UA，关键词 key 生效）卡片对应（实测确认）
+//  安全边界：只读 58 公开租房列表页，仅采集标题/缩略图/价格/位置四类信息；不做任何写操作
 //
 
 import Foundation
@@ -39,8 +39,9 @@ struct F58House: Identifiable, Codable, Equatable {
 
 /// 抓取设置（可在 58找房设置页修改，不做死）
 struct F58Settings: Codable, Equatable {
-    /// 完整列表页 URL（默认：利保米兰公馆 · reform=pcfront PC 前端，含经纪人字段）
-    var baseURL: String = "https://m.58.com/sd/zufang/?key=%E5%88%A9%E4%BF%9D%E7%B1%B3%E5%85%B0%E5%85%AC%E9%A6%86&reform=pcfront"
+    /// 完整列表页 URL（默认：利保米兰公馆 · m 站手机版。58 手机站对手机浏览器风控宽松、key 关键词生效；
+    /// 手机版列表不含经纪人字段，详情页可看；URL 里带 reform=pcfront 会被自动剥离）
+    var baseURL: String = "https://m.58.com/sd/zufang/?key=%E5%88%A9%E4%BF%9D%E7%B1%B3%E5%85%B0%E5%85%AC%E9%A6%86"
     /// 关键词（仅用于显示标题）
     var keyword: String = "利保米兰公馆"
 

@@ -245,7 +245,7 @@ struct F58BoardView: View {
                         .foregroundColor(.themeText3)
                     Text("还没有房源数据")
                         .font(.system(size: 14, weight: .medium))
-                    Text("点右上角「读取」抓取 58 列表第一页\n标题/缩略图/价格/经纪人，点卡片看详情")
+                    Text("点右上角「读取」抓取 58 列表第一页\n标题/缩略图/价格/位置，点卡片看详情")
                         .font(.system(size: 12))
                         .foregroundColor(.themeText3)
                         .multilineTextAlignment(.center)
@@ -527,7 +527,7 @@ struct F58SettingsDetailView: View {
                         .font(.system(size: 13))
                         .autocapitalization(.none)
                         .keyboardType(.URL)
-                    Text("默认已带 reform=pcfront（PC 前端，卡片含经纪人字段）。页面改版导致抓不到时可按官方新链接更换")
+                    Text("默认：利保米兰公馆（m 站手机版）。URL 里的 key 参数决定抓取范围；带 reform=pcfront 会自动剥离（会丢关键词）。页面改版导致抓不到时可按官方新链接更换")
                         .font(.system(size: 11))
                         .foregroundColor(.themeText3)
                 }
