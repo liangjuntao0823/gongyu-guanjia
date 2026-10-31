@@ -400,6 +400,8 @@
 				B10000010000000000000221 /* AIManager.swift */,
 			);
 			path = Ajk;
+			sourceTree = "<group>";
+		};
 		D10000010000000000000014 /* F58 */ = {
 			isa = PBXGroup;
 			children = (
@@ -410,7 +412,6 @@
 			);
 			path = F58;
 			sourceTree = "<group>";
-		};
 		};
 /* End PBXGroup section */
 
