@@ -89,7 +89,8 @@ struct F58BoardView: View {
     /// 58 tab 主体（原有列表逻辑）
     private var f58Body: some View {
         VStack(spacing: 0) {
-            if refreshing { progressBar }
+            // v2.3：读取完成后列表先显示，经纪人补抓在后台进行——补抓期间进度条继续展示
+            if refreshing || store.detailProgress != nil { progressBar }
             ScrollView {
                 VStack(spacing: 0) {
                     overviewCard

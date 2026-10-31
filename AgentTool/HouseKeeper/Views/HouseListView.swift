@@ -420,7 +420,7 @@ struct HouseListView: View {
         MediaStore.migrateUnprefixedHouseDirectories(houses: houses)
     }
 
-    // MARK: - 头部折叠（b106：列表往下滚自动收起 统计/搜索/筛选，往上滚自动展开）
+    // MARK: - 头部折叠（v2.3 需求②：自动折叠方案确认无效，改为按钮式——手动收起/展开；不再随滚动自动切换）
 
     private var collapsibleHeader: some View {
         VStack(spacing: 0) {
@@ -428,18 +428,31 @@ struct HouseListView: View {
                 statsBar
                 searchBar
                 filterBar
+            } else {
+                // 收起态：单行提示条，点它展开
+                Button {
+                    withAnimation(.easeInOut(duration: 0.22)) { headerCollapsed = false }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(.secondary)
+                        Text("筛选区已收起，点此展开")
+                            .font(.footnote)
+                            .foregroundColor(.secondary)
+                        Spacer()
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 9)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .background(Color.white)
+                .overlay(RoundedRectangle(cornerRadius: 0).stroke(Color.secondary.opacity(0.12), lineWidth: 0.5))
             }
         }
         .clipped()
         .animation(.easeInOut(duration: 0.22), value: headerCollapsed)
-    }
-
-    private func onListScroll(_ y: CGFloat) {
-        if y > 90 && !headerCollapsed {
-            headerCollapsed = true
-        } else if y < 40 && headerCollapsed {
-            headerCollapsed = false
-        }
     }
 
     // MARK: - 统计（动态跟随当前筛选；v1.31：恢复 v1.29 显示方式 + 修复统计栏下沉）
@@ -451,7 +464,23 @@ struct HouseListView: View {
 
     private var statsBar: some View {
         HStack(spacing: 12) {
-            // v2.2（需求⑤）：删除「房源统计」标识与右侧数量胶囊，只留排序
+            // v2.3（需求⑤修正）：上版误删了整条统计栏——恢复 v1.99/b106 版（排序 + 数量胶囊全部保留），
+            // 只删除原「房源统计」4 字标识（因为它会被折叠收起来，其余全部保留）
+            // 折叠按钮（v2.3 需求②）：手动收起统计/搜索/筛选区
+            Button {
+                withAnimation(.easeInOut(duration: 0.22)) { headerCollapsed = true }
+            } label: {
+                Image(systemName: "chevron.up")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(.secondary)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 5)
+                    .background(Color.secondary.opacity(0.08))
+                    .clipShape(Capsule())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("收起筛选区")
+
             // 排序三档（默认=现有逻辑 / 价格升序 / 更新时间降序）
             Menu {
                 ForEach(HouseSortMode.allCases, id: \.self) { m in
@@ -478,6 +507,33 @@ struct HouseListView: View {
             .menuStyle(.borderlessButton)
 
             Spacer()
+
+            if towerFilter != nil || !layoutFilters.isEmpty {
+                Text(statsFilteredLabel)
+                    .font(.footnote.weight(.semibold))
+                    .foregroundColor(AppTheme.primary)
+                    .lineLimit(1)
+            } else if let status = statusFilter {
+                Text("\(status.label) \(filteredHouses.count) 套")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundColor(AppTheme.primary)
+                Text("1座 \(filteredHouses.filter { $0.tower == 1 }.count) 套")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundColor(AppTheme.primary)
+                Text("2座 \(filteredHouses.filter { $0.tower == 2 }.count) 套")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundColor(AppTheme.primary)
+            } else {
+                Text("1座 \(tower1Count) 套")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundColor(AppTheme.primary)
+                Text("2座 \(tower2Count) 套")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundColor(AppTheme.primary)
+                Text("待租 \(availableCount) 套")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundColor(AppTheme.primary)
+            }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
@@ -668,8 +724,7 @@ struct HouseListView: View {
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)
                 .background(AppTheme.background)
-                // b106：监听列表滚动偏移——往下滚折叠头部，往上滚展开
-                .background(ListScrollOffsetReader { y in onListScroll(y) })
+                // v2.3（需求②）：折叠已改为按钮式手动收起/展开，不再随滚动自动切换（原 b106 自动方案无效）
                 // v1.19：下拉刷新 = 从云端拉取房源（与左上角手动同步同效果）
                 // v1.63：下拉刷新改本地刷新——媒体补全检测（磁盘与记录对账），不再触发云端同步；
                 //        左上角刷新按钮保持云端同步不变

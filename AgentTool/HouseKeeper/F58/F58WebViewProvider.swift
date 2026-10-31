@@ -229,28 +229,38 @@ final class F58WebViewProvider: NSObject, WKNavigationDelegate {
         c.resume(returning: result)
     }
 
-    // MARK: - 详情页经纪人补抓（v2.2）
+    // MARK: - 详情页经纪人补抓（v2.2；v2.3 修复：不再阻塞主线程）
 
-    /// 逐个抓详情页补经纪人姓名/公司；并发 3、单请求 6 秒超时、整体可失败降级
-    private func enrichAgents(_ houses: [F58House]) async -> [F58House] {
+    /// 逐个抓详情页补经纪人姓名/公司；每批 3 个并发、单请求 4 秒超时、整体可失败降级。
+    /// 改 chunked 批处理（async 挂起，不占用主线程）——旧版用 DispatchSemaphore.wait() 在 MainActor 上
+    /// 同步阻塞 + 40 条全超时时主线程被卡约 78 秒，表现为「刷不出来」。现在房源列表先返回，
+    /// 补抓在后台进行，通过 onDetailProgress 汇报进度。
+    func enrichAgents(_ houses: [F58House]) async -> [F58House] {
         var result = houses
         let total = result.count
         guard total > 0 else { return result }
-        let sem = DispatchSemaphore(value: 3)
-        await withTaskGroup(of: (Int, String?, String?).self) { group in
-            for i in 0..<total {
-                sem.wait()
-                group.addTask {
-                    defer { sem.signal() }
-                    let detail = await Self.fetchAgentDetail(href: result[i].href)
-                    return (i, detail.name, detail.dp)
+        let batch = 3
+        var start = 0
+        while start < total {
+            let end = min(start + batch, total)
+            // 先把本批 href 拷成 let（Sendable 值），@Sendable 子任务只读捕获它，避免捕获可变数组
+            let batchHrefs: [(Int, String)] = (start..<end).map { ($0, result[$0].href) }
+            await withTaskGroup(of: (Int, String?, String?).self) { group in
+                for (i, href) in batchHrefs {
+                    group.addTask {
+                        let detail = await Self.fetchAgentDetail(href: href)
+                        return (i, detail.name, detail.dp)
+                    }
+                }
+                for await (idx, name, dp) in group {
+                    if let name, !name.isEmpty { result[idx].agentName = name }
+                    if let dp, !dp.isEmpty { result[idx].agentDp = dp }
+                    Task { @MainActor [weak self] in
+                        self?.onDetailProgress?(idx + 1, total)
+                    }
                 }
             }
-            for await (idx, name, dp) in group {
-                if let name, !name.isEmpty { result[idx].agentName = name }
-                if let dp, !dp.isEmpty { result[idx].agentDp = dp }
-                DispatchQueue.main.async { self.onDetailProgress?(idx + 1, total) }
-            }
+            start = end
         }
         return result
     }
@@ -269,7 +279,7 @@ final class F58WebViewProvider: NSObject, WKNavigationDelegate {
         }
         guard let url = URL(string: urlStr) else { return (nil, nil) }
         var req = URLRequest(url: url)
-        req.timeoutInterval = 6
+        req.timeoutInterval = 4
         req.setValue(Self.mobileUA, forHTTPHeaderField: "User-Agent")
         req.setValue("https://m.58.com/", forHTTPHeaderField: "Referer")
         do {
@@ -384,13 +394,11 @@ extension F58WebViewProvider: WKScriptMessageHandler {
             webView = nil
             let houses = pendingHouses
             pendingHouses = []
-            // 详情页补抓经纪人（v2.2）：列表页本身不提供经纪人，须逐个抓详情页；
-            // 并发 3 串行限速 + 超时降级——失败则该条 agent 为空，不阻塞列表
-            Task {
-                var result = FetchResult()
-                result.houses = await self.enrichAgents(houses)
-                c.resume(returning: result)
-            }
+            // v2.3（刷不出来修复）：列表立即返回展示（标题/价格/位置先可用），
+            // 详情页经纪人补抓由 F58Store.fetch 在后台调用 enrichAgents 执行（进度走 onDetailProgress）
+            var result = FetchResult()
+            result.houses = houses
+            c.resume(returning: result)
         }
     }
 }

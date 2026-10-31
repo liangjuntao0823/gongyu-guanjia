@@ -122,7 +122,7 @@ final class AjkPublicWebViewProvider: NSObject, WKNavigationDelegate {
             }
             self.lastLoadedURL = cleaned
             wv.load(URLRequest(url: url))
-            DispatchQueue.main.asyncAfter(deadline: .now() + 40) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 30) {
                 if let c = self.continuation {
                     self.continuation = nil
                     self.webView?.stopLoading()
@@ -134,48 +134,76 @@ final class AjkPublicWebViewProvider: NSObject, WKNavigationDelegate {
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
             self.runScrape(on: webView)
         }
     }
 
-    // MARK: - JS：收集第一页卡片文本
+    // MARK: - JS：收集第一页卡片文本（v2.3：容器找不到时自动降级为「全文价格锚点」扫描，页面改版也能兜底）
 
     private func runScrape(on webView: WKWebView) {
         let js = """
         (async function(){
           function sleep(ms){ return new Promise(function(r){ setTimeout(r, ms); }); }
           function norm(s){ return (s||'').replace(/\\s+/g,' ').trim(); }
-          // 等待列表卡片渲染（安居客 PC 精选页：.zu-itemmod / .list-item；兜底宽泛选择器；最多 15 秒）
+          // 等待列表卡片渲染（安居客精选页/找房页；兜底宽泛选择器；最多 12 秒）
           var waited = 0;
-          while (waited < 15000) {
+          while (waited < 12000) {
             if (document.querySelector('.zu-itemmod') || document.querySelector('.list-item') ||
-                document.querySelector('[class*="zu-item"]') || document.querySelector('[class*="house-list"] li')) break;
-            await sleep(500); waited += 500;
+                document.querySelector('[class*="zu-item"]') || document.querySelector('[class*="house-list"] li') ||
+                document.querySelector('[class*="list"] li a')) break;
+            await sleep(400); waited += 400;
           }
-          // 验证码/反爬网关检测
+          // 验证码/反爬网关检测（含常见变体文案）
           var bodyText = norm((document.body && (document.body.innerText || document.body.textContent)) || '');
           var titleText = norm(document.title || '');
           var hrefNow = location.href || '';
-          if (bodyText.indexOf('请输入验证码') >= 0 || titleText.indexOf('验证码') >= 0 ||
+          if (bodyText.indexOf('请输入验证码') >= 0 || bodyText.indexOf('安全验证') >= 0 ||
+              bodyText.indexOf('人机验证') >= 0 || bodyText.indexOf('滑动验证') >= 0 ||
+              titleText.indexOf('验证') >= 0 || titleText.indexOf('verify') >= 0 ||
               hrefNow.indexOf('antibot') >= 0 || hrefNow.indexOf('verifycode') >= 0) {
             window.webkit.messageHandlers.ajkPublicScrape.postMessage(JSON.stringify({type:'captcha', text: titleText}));
             return;
           }
-          var containers = document.querySelectorAll('.zu-itemmod, .list-item, li.item, [class*="zu-item"], [class*="list-item"], .house-list li');
           var cards = [];
           var seen = {};
+          function pushCard(text, href){
+            text = norm(text || '');
+            if (text.length < 8 || !href) return;
+            if (seen[href]) return;
+            seen[href] = 1;
+            cards.push({text: text.slice(0, 800), href: href});
+          }
+          // 方案1：已知容器选择器
+          var containers = document.querySelectorAll('.zu-itemmod, .list-item, li.item, [class*="zu-item"], [class*="list-item"], [class*="house-list"] li, [class*="item-list"] li, [class*="content-list"] li');
           for (var i = 0; i < containers.length; i++) {
             var el = containers[i];
             var text = norm(el.innerText || '');
-            if (text.length < 8) continue;
-            var a = el.querySelector('a[href*="zufang"]') || (el.tagName === 'A' ? el : null);
+            if (text.indexOf('元/月') < 0) continue;
+            var a = el.querySelector('a[href*="zufang"], a[href*="fangyuan"]') || (el.tagName === 'A' ? el : null);
             if (!a) continue;
             var href = a.href || a.getAttribute('href') || '';
-            if (href.indexOf('zufang') < 0) continue;
-            if (seen[href]) continue;
-            seen[href] = 1;
-            cards.push({text: text.slice(0, 800), href: href});
+            if (href.indexOf('zufang') < 0 && href.indexOf('fangyuan') < 0) continue;
+            pushCard(text, href);
+          }
+          // 方案2：容器一个都没抓到 → 全文扫描「含 元/月 的链接」（页面改版兜底）
+          if (cards.length === 0) {
+            var allA = document.querySelectorAll('a');
+            for (var j = 0; j < allA.length; j++) {
+              var aa = allA[j];
+              var h2 = aa.href || aa.getAttribute('href') || '';
+              var t2 = norm(aa.innerText || '');
+              if (t2.indexOf('元/月') < 0) continue;
+              if (h2.indexOf('zufang') < 0 && h2.indexOf('fangyuan') < 0 && h2.indexOf('anjuke') < 0) continue;
+              var box = aa;
+              for (var up = 0; up < 3 && box.parentElement; up++) {
+                box = box.parentElement;
+                if (norm(box.innerText || '').length > 30) break;
+              }
+              var fullText = norm(box.innerText || '');
+              pushCard(fullText.length > 10 ? fullText : t2, h2);
+              if (cards.length >= 60) break;
+            }
           }
           window.webkit.messageHandlers.ajkPublicScrape.postMessage(JSON.stringify({type:'page', cards: cards.slice(0, 60)}));
           window.webkit.messageHandlers.ajkPublicScrape.postMessage(JSON.stringify({type:'done', total: cards.length, error:''}));
@@ -224,7 +252,7 @@ extension AjkPublicWebViewProvider: WKScriptMessageHandler {
                 wv2.configuration.userContentController.add(self, name: "ajkPublicScrape")
                 self.webView = wv2
                 wv2.load(URLRequest(url: url))
-                DispatchQueue.main.asyncAfter(deadline: .now() + 40) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 30) {
                     if let cc = self.continuation {
                         self.continuation = nil
                         self.webView?.stopLoading()
@@ -265,6 +293,10 @@ extension AjkPublicWebViewProvider: WKScriptMessageHandler {
             webView = nil
             var result = FetchResult()
             result.houses = pendingHouses
+            // v2.3：解析到 0 条时给出明确提示（可能是页面结构变化/需登录/被重定向），避免静默显示「还没有数据」
+            if pendingHouses.isEmpty {
+                result.error = "页面未解析到房源（可能页面结构变化、需登录或验证）。可在设置里更换链接，或到手机上打开确认可访问后重试"
+            }
             c.resume(returning: result)
         }
     }

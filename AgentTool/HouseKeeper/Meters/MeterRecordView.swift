@@ -174,17 +174,19 @@ struct MeterRecordView: View {
                     Section {
                         ForEach(Array(refreshLogs.enumerated()), id: \.offset) { idx, item in
                             HStack {
-                                Text("第 \(refreshLogs.count - idx) 次刷新")
-                                    .font(.system(size: 13, weight: .medium))
+                                // v2.3（需求④）：左边时间、右边第x次刷新；中间剩余电量不变
+                                Text(formatLogTime(item.t))
+                                    .font(.system(size: 12))
                                     .foregroundColor(.themeText3)
-                                    .frame(width: 86, alignment: .leading)
+                                Spacer()
                                 Text(String(format: "剩余 %.2f 度", item.s))
                                     .font(.system(size: 15, weight: .semibold))
                                     .foregroundColor(.themeAccentDark)
                                 Spacer()
-                                Text(formatLogTime(item.t))
-                                    .font(.system(size: 12))
+                                Text("第 \(refreshLogs.count - idx) 次刷新")
+                                    .font(.system(size: 13, weight: .medium))
                                     .foregroundColor(.themeText3)
+                                    .frame(width: 92, alignment: .trailing)
                             }
                             .padding(.vertical, 2)
                         }
@@ -398,14 +400,20 @@ private struct TrendLineView: View {
         // 曲线映射必须与刻度同一基线——旧代码 minVal = max(实际最小值, 0) 且曲线按 minVal..max 映射，
         // 与 0..max 的刻度标签错位：数据实际在 40 上下时最低点被压到底部（y=minVal 处）且底部标签是 0，
         // 视觉上就是「最后一次刷新恒落 0 度」。改为 minVal=0 后 43.40 度落在 43.4/max 的真实高度。
-        let maxVal = max(points.map(\.s).max() ?? 0, 1)
+        // v2.3（需求③）：Y 轴每 5 度一刻（上限向上取整到 5 的倍数，至少 5）；X 轴每 1 小时一刻；
+        // 横坐标改按实际时间线性映射（原按数据点索引均匀分布，刷新间隔不均时时间刻度会对不上点）
+        let rawMax = max(points.map(\.s).max() ?? 0, 1)
         let minVal = 0.0
-        let range = max(maxVal - minVal, 1)
+        let yMax = max((rawMax / 5).rounded(.up) * 5, 5)
+        let range = max(yMax - minVal, 1)
+        let t0 = points.first?.t ?? 0
+        let tN = points.last?.t ?? (t0 + 1)
+        let tSpan = max(tN - t0, 1)
         let w = max(size.width - leftPad - rightPad, 1)
         let h = max(size.height - topPad - bottomPad, 1)
         let n = points.count
-        let yTicks = yTicks(max: maxVal)
-        let xTicks = xTicks(count: n)
+        let yTicks = yTicks(max: yMax)
+        let xTicks = xTicks(t0: t0, tSpan: tSpan)
 
         ZStack {
             // ---- 竖轴（左侧）+ 水平网格线 + 刻度文字 ----
@@ -455,7 +463,7 @@ private struct TrendLineView: View {
 
             // ---- 每个数据点：浅色虚线连到横轴与竖轴 ----
             ForEach(0..<n, id: \.self) { i in
-                let p = xy(i, padTop: topPad, left: leftPad, w: w, h: h, n: n, minVal: minVal, range: range)
+                let p = xy(i, padTop: topPad, left: leftPad, w: w, h: h, t0: t0, tSpan: tSpan, minVal: minVal, range: range)
                 // 垂直虚线（点到横轴）
                 Path { path in
                     path.move(to: CGPoint(x: p.x, y: p.y))
@@ -472,20 +480,20 @@ private struct TrendLineView: View {
 
             // ---- 折线（原走势不变） ----
             Path { p in
-                p.move(to: xy(0, padTop: topPad, left: leftPad, w: w, h: h, n: n, minVal: minVal, range: range))
+                p.move(to: xy(0, padTop: topPad, left: leftPad, w: w, h: h, t0: t0, tSpan: tSpan, minVal: minVal, range: range))
                 for i in 1..<n {
-                    p.addLine(to: xy(i, padTop: topPad, left: leftPad, w: w, h: h, n: n, minVal: minVal, range: range))
+                    p.addLine(to: xy(i, padTop: topPad, left: leftPad, w: w, h: h, t0: t0, tSpan: tSpan, minVal: minVal, range: range))
                 }
             }
             .stroke(Color.themeAccentDark, style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
             // 渐变填充
             Path { p in
-                p.move(to: xy(0, padTop: topPad, left: leftPad, w: w, h: h, n: n, minVal: minVal, range: range))
+                p.move(to: xy(0, padTop: topPad, left: leftPad, w: w, h: h, t0: t0, tSpan: tSpan, minVal: minVal, range: range))
                 for i in 1..<n {
-                    p.addLine(to: xy(i, padTop: topPad, left: leftPad, w: w, h: h, n: n, minVal: minVal, range: range))
+                    p.addLine(to: xy(i, padTop: topPad, left: leftPad, w: w, h: h, t0: t0, tSpan: tSpan, minVal: minVal, range: range))
                 }
-                p.addLine(to: CGPoint(x: xy(n - 1, padTop: topPad, left: leftPad, w: w, h: h, n: n, minVal: minVal, range: range).x, y: topPad + h))
-                p.addLine(to: CGPoint(x: xy(0, padTop: topPad, left: leftPad, w: w, h: h, n: n, minVal: minVal, range: range).x, y: topPad + h))
+                p.addLine(to: CGPoint(x: xy(n - 1, padTop: topPad, left: leftPad, w: w, h: h, t0: t0, tSpan: tSpan, minVal: minVal, range: range).x, y: topPad + h))
+                p.addLine(to: CGPoint(x: xy(0, padTop: topPad, left: leftPad, w: w, h: h, t0: t0, tSpan: tSpan, minVal: minVal, range: range).x, y: topPad + h))
                 p.closeSubpath()
             }
             .fill(LinearGradient(colors: [Color.themeAccent.opacity(0.22), Color.themeAccent.opacity(0.02)],
@@ -497,55 +505,68 @@ private struct TrendLineView: View {
                         .fill(Color.white)
                         .overlay(Circle().stroke(Color.themeAccentDark, lineWidth: 1.5))
                         .frame(width: 7, height: 7)
-                        .position(xy(i, padTop: topPad, left: leftPad, w: w, h: h, n: n, minVal: minVal, range: range))
+                        .position(xy(i, padTop: topPad, left: leftPad, w: w, h: h, t0: t0, tSpan: tSpan, minVal: minVal, range: range))
                 }
             } else {
                 Circle().fill(Color.white)
                     .overlay(Circle().stroke(Color.themeAccentDark, lineWidth: 1.5))
                     .frame(width: 7, height: 7)
-                    .position(xy(0, padTop: topPad, left: leftPad, w: w, h: h, n: n, minVal: minVal, range: range))
+                    .position(xy(0, padTop: topPad, left: leftPad, w: w, h: h, t0: t0, tSpan: tSpan, minVal: minVal, range: range))
                 Circle().fill(Color.white)
                     .overlay(Circle().stroke(Color.themeAccentDark, lineWidth: 1.5))
                     .frame(width: 7, height: 7)
-                    .position(xy(n - 1, padTop: topPad, left: leftPad, w: w, h: h, n: n, minVal: minVal, range: range))
+                    .position(xy(n - 1, padTop: topPad, left: leftPad, w: w, h: h, t0: t0, tSpan: tSpan, minVal: minVal, range: range))
             }
         }
         .frame(width: size.width, height: size.height)
     }
 
-    /// 竖轴刻度：5 档取整（0 / 25% / 50% / 75% / 100%）
+    /// 竖轴刻度（v2.3 需求③）：每 5 度一刻（0 / 5 / 10 / … / 上限的 5 倍数），字号保持 9
     private func yTicks(max: Double) -> [AxisTick] {
-        let step = max / 4
-        return (0...4).map { i in
+        let step = 5.0
+        let count = Int(max / step)
+        guard count > 0 else {
+            return [AxisTick(label: "0", frac: 0)]
+        }
+        return (0...count).map { i in
             let v = step * CGFloat(i)
-            let label: String
-            if v == v.rounded() {
-                label = "\(Int(v))"
-            } else {
-                label = String(format: "%.1f", v)
-            }
-            return AxisTick(label: label, frac: CGFloat(i) / 4)
+            return AxisTick(label: "\(Int(v))", frac: CGFloat(i) / CGFloat(count))
         }
     }
 
-    /// 横轴刻度：最多 4 档（首 / 1/3 / 2/3 / 末）
-    private func xTicks(count: Int) -> [AxisTick] {
-        guard count > 1 else { return [] }
-        let idxs = [0, count / 3, count * 2 / 3, count - 1]
-        var seen = Set<Int>()
+    /// 横轴刻度（v2.3 需求③）：每 1 小时一刻（从首个整点开始；跨度超 24h 时标签带日期），字号保持 8
+    private func xTicks(t0: Double, tSpan: Double) -> [AxisTick] {
+        guard tSpan > 0 else { return [] }
+        let crossDay = tSpan > 24 * 3600
+        let fmt = DateFormatter()
+        fmt.dateFormat = crossDay ? "MM-dd HH:mm" : "HH:mm"
         var ticks: [AxisTick] = []
-        for i in idxs where !seen.contains(i) {
-            seen.insert(i)
-            let d = Date(timeIntervalSince1970: points[i].t)
-            let f = DateFormatter()
-            f.dateFormat = "MM-dd HH:mm"
-            ticks.append(AxisTick(label: f.string(from: d), frac: CGFloat(i) / CGFloat(count - 1)))
+        // 首点标签（起点不在整点时）
+        let firstHour = (t0 / 3600).rounded(.up) * 3600
+        if firstHour - t0 > 0.05 * tSpan {
+            ticks.append(AxisTick(label: fmt.string(from: Date(timeIntervalSince1970: t0)), frac: 0))
+        }
+        // 整点一刻
+        var tt = firstHour
+        var guardCount = 0
+        while tt <= t0 + tSpan && guardCount < 50 {
+            let frac = CGFloat((tt - t0) / tSpan)
+            ticks.append(AxisTick(label: fmt.string(from: Date(timeIntervalSince1970: tt)), frac: frac))
+            tt += 3600
+            guardCount += 1
+        }
+        // 末点标签（末整点没盖到时）
+        let lastHour = (t0 + tSpan) / 3600 * 3600
+        if t0 + tSpan - lastHour > 0.05 * tSpan {
+            ticks.append(AxisTick(label: fmt.string(from: Date(timeIntervalSince1970: t0 + tSpan)), frac: 1))
         }
         return ticks
     }
 
-    private func xy(_ i: Int, padTop: CGFloat, left: CGFloat, w: CGFloat, h: CGFloat, n: Int, minVal: Double, range: Double) -> CGPoint {
-        let x = left + w * CGFloat(i) / CGFloat(max(n - 1, 1))
+    /// 坐标映射：x 按实际时间线性（t0..t0+tSpan），y 按 [minVal, yMax]（与 5 度刻度同一基线）
+    private func xy(_ i: Int, padTop: CGFloat, left: CGFloat, w: CGFloat, h: CGFloat, t0: Double, tSpan: Double, minVal: Double, range: Double) -> CGPoint {
+        let fx = CGFloat((points[i].t - t0) / tSpan)
+        let x = left + w * min(max(fx, 0), 1)
         let y = padTop + h * (1 - CGFloat((points[i].s - minVal) / range))
         return CGPoint(x: x, y: y)
     }

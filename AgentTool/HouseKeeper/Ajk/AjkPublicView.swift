@@ -16,6 +16,7 @@ struct AjkPublicView: View {
     var body: some View {
         VStack(spacing: 0) {
             header
+            if !store.houses.isEmpty || store.lastFetch != nil { statsRow }
             if store.loading { progressBar }
             ScrollView {
                 VStack(spacing: 10) {
@@ -52,6 +53,33 @@ struct AjkPublicView: View {
                 SafariSheet(url: url)
             }
         }
+    }
+
+    /// v2.3（需求⑤）：顶栏统计——房源套数 / 均价 / 最高租金（与 58 tab 概览卡同风格三列）
+    private var statsRow: some View {
+        let prices = store.houses.compactMap { Double($0.price) }
+        let avg = prices.isEmpty ? nil : Int(prices.reduce(0, +) / Double(prices.count))
+        let maxP = prices.max().map { Int($0) }
+        return HStack(spacing: 0) {
+            statItem(value: "\(store.houses.count)", label: "房源(套)")
+            statItem(value: avg.map(String.init) ?? "—", label: "均价(元/月)")
+            statItem(value: maxP.map(String.init) ?? "—", label: "最高(元/月)")
+        }
+        .padding(.vertical, 10)
+        .background(Color.themePanel)
+        .overlay(RoundedRectangle(cornerRadius: 0).stroke(Color.themeBorder, lineWidth: 0.5))
+    }
+
+    private func statItem(value: String, label: String) -> some View {
+        VStack(spacing: 3) {
+            Text(value)
+                .font(.system(size: 17, weight: .bold))
+                .foregroundColor(.themeAccentDark)
+            Text(label)
+                .font(.system(size: 10.5))
+                .foregroundColor(.themeText3)
+        }
+        .frame(maxWidth: .infinity)
     }
 
     private var header: some View {

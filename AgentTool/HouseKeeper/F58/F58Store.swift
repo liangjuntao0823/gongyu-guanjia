@@ -84,7 +84,16 @@ final class F58Store: ObservableObject {
                 lastError = result.error
                 return
             }
+            // v2.3（刷不出来修复）：列表先展示（标题/价格/位置），经纪人补抓转后台执行，
+            // 通过 detailProgress 汇报进度；补抓失败自动降级（agent 为空），不阻塞列表
             applyFetch(houses: result.houses)
+            if result.houses.isEmpty { return }
+            let base = result.houses
+            Task { @MainActor in
+                let enriched = await provider.enrichAgents(base)
+                self.applyFetch(houses: enriched)
+                self.detailProgress = nil
+            }
         } catch {
             detailProgress = nil
             lastError = error.localizedDescription
