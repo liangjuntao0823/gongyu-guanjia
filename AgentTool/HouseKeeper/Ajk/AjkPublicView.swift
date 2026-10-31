@@ -47,8 +47,10 @@ struct AjkPublicView: View {
         } message: {
             Text(errorText ?? "")
         }
-        .sheet(item: $openURL) { url in
-            SafariSheet(url: url)
+        .sheet(isPresented: Binding(get: { openURL != nil }, set: { if !$0 { openURL = nil } })) {
+            if let url = openURL {
+                SafariSheet(url: url)
+            }
         }
     }
 
