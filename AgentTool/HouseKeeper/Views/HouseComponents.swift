@@ -182,15 +182,23 @@ struct HouseCardView: View {
             .clipShape(RoundedRectangle(cornerRadius: 10))
 
             VStack(alignment: .leading, spacing: 3) {
-                // 第一行：房号 + 价格，最右侧是状态徽章（已租/待租）
-                HStack(alignment: .top, spacing: 8) {
+                // 第一行：房号 + 价格（b106：自适应胶囊，不破坏原布局），最右侧是状态徽章（已租/待租）
+                HStack(alignment: .center, spacing: 6) {
                     Text(house.displayRoomNo)
                         .font(.title3.weight(.bold))
                         .foregroundColor(.primary)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 3)
+                        .background(Color(.systemGray6))
+                        .clipShape(Capsule())
                     Text(house.priceText)
                         // v1.72（#3）：租金恢复 headline 加粗 + 主题色（v1.71 #96 曾改 title3，用户要求回退）
                         .font(.headline.weight(.bold))
                         .foregroundColor(AppTheme.accent)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 3)
+                        .background(AppTheme.accent.opacity(0.1))
+                        .clipShape(Capsule())
                     Spacer(minLength: 0)
                     StatusBadge(status: house.status)
                 }

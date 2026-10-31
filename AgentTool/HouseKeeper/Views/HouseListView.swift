@@ -1,6 +1,14 @@
 import SwiftUI
 import SwiftData
 
+/// b106：房源排序三档——默认（座号/楼层/房号）/ 价格升序 / 更新时间降序
+enum HouseSortMode: String, CaseIterable {
+    case `default` = "默认排序"
+    case priceAsc = "价格升序"
+    case updatedDesc = "更新时间"
+    var label: String { rawValue }
+}
+
 struct HouseListView: View {
     /// 房源板块使用独立 HouseStore 容器的专属 context（由 App 注入）。
     /// 不能用主容器的 modelContext——iOS 17 早期版本多配置容器上查询会崩溃（闪退根因）。
@@ -25,6 +33,10 @@ struct HouseListView: View {
     @State private var layoutFilters: Set<String> = []   // v1.3：户型筛选支持多选，空 = 全部户型
     @State private var showAdd = false
     @State private var showBatchImport = false   // v1.58：批量录入（清单/zip/扫描）
+    // b106：房源排序（默认=现有逻辑 / 价格低→高 / 更新时间降序）
+    @State private var houseSortMode: HouseSortMode = .default
+    // b106：向下滚动自动折叠卡片以上区域（统计/搜索/筛选），向上滚动自动展开
+    @State private var headerCollapsed = false
 
     // 卡片左滑菜单（编辑 / 已租 / 删除）
     @State private var showEditHouse: House?
@@ -111,6 +123,17 @@ struct HouseListView: View {
                 return matchSearch && matchTower && matchStatus && matchLayout
             }
             .sorted { a, b in
+                // b106：排序三档——默认（现有逻辑）/ 价格升序 / 更新时间降序
+                switch houseSortMode {
+                case .priceAsc:
+                    if a.price != b.price { return a.price < b.price }
+                case .updatedDesc:
+                    let at = a.lastUpdatedAt ?? a.updatedAt
+                    let bt = b.lastUpdatedAt ?? b.updatedAt
+                    if at != bt { return at > bt }
+                case .default:
+                    break
+                }
                 if a.tower != b.tower { return a.tower < b.tower }
                 if a.floorNumber != b.floorNumber { return a.floorNumber < b.floorNumber }
                 if a.roomNumber != b.roomNumber { return a.roomNumber < b.roomNumber }
@@ -144,9 +167,7 @@ struct HouseListView: View {
                 VStack(spacing: 0) {
                     syncTaskBanner
                     announcementBanner
-                    statsBar
-                    searchBar
-                    filterBar
+                    collapsibleHeader
                     houseList
                 }
             }
@@ -399,6 +420,28 @@ struct HouseListView: View {
         MediaStore.migrateUnprefixedHouseDirectories(houses: houses)
     }
 
+    // MARK: - 头部折叠（b106：列表往下滚自动收起 统计/搜索/筛选，往上滚自动展开）
+
+    private var collapsibleHeader: some View {
+        VStack(spacing: 0) {
+            if !headerCollapsed {
+                statsBar
+                searchBar
+                filterBar
+            }
+        }
+        .clipped()
+        .animation(.easeInOut(duration: 0.22), value: headerCollapsed)
+    }
+
+    private func onListScroll(_ y: CGFloat) {
+        if y > 90 && !headerCollapsed {
+            headerCollapsed = true
+        } else if y < 40 && headerCollapsed {
+            headerCollapsed = false
+        }
+    }
+
     // MARK: - 统计（动态跟随当前筛选；v1.31：恢复 v1.29 显示方式 + 修复统计栏下沉）
     // 规则：
     //  - 筛选了座号 / 户型 → 显示筛选口径数量（如「1座 X套」「1座 单间上层 X套」，状态为隐含条件不拼入）
@@ -419,6 +462,31 @@ struct HouseListView: View {
                     .font(.footnote)
                     .foregroundColor(AppTheme.primary)
             }
+
+            // b106：排序三档（默认=现有逻辑 / 价格升序 / 更新时间降序）
+            Menu {
+                ForEach(HouseSortMode.allCases, id: \.self) { m in
+                    Button {
+                        houseSortMode = m
+                    } label: {
+                        Label(m.label, systemImage: houseSortMode == m ? "checkmark" : "arrow.up.arrow.down")
+                    }
+                }
+            } label: {
+                HStack(spacing: 3) {
+                    Image(systemName: "arrow.up.arrow.down")
+                        .font(.system(size: 10, weight: .semibold))
+                    Text(houseSortMode.label)
+                        .font(.footnote.weight(.semibold))
+                        .lineLimit(1)
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
+                .background(AppTheme.primary.opacity(0.08))
+                .foregroundColor(AppTheme.primary)
+                .clipShape(Capsule())
+            }
+            .menuStyle(.borderlessButton)
 
             Spacer()
 
@@ -638,6 +706,8 @@ struct HouseListView: View {
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)
                 .background(AppTheme.background)
+                // b106：监听列表滚动偏移——往下滚折叠头部，往上滚展开
+                .background(ListScrollOffsetReader { y in onListScroll(y) })
                 // v1.19：下拉刷新 = 从云端拉取房源（与左上角手动同步同效果）
                 // v1.63：下拉刷新改本地刷新——媒体补全检测（磁盘与记录对账），不再触发云端同步；
                 //        左上角刷新按钮保持云端同步不变
@@ -1731,6 +1801,49 @@ struct HouseListView: View {
 struct ShareStep: Identifiable {
     let id = UUID()
     let url: URL
+}
+
+// MARK: - List 滚动偏移监听（b106：房源列表下滑折叠头部、上滑展开）
+
+/// 挂到 List 的 background 上，通过 KVO 监听底层 UIScrollView 的 contentOffset，
+/// 回调主线程偏移值，供折叠/展开判断。
+struct ListScrollOffsetReader: UIViewRepresentable {
+    var onOffset: (CGFloat) -> Void
+
+    func makeUIView(context: Context) -> OffsetProbeView {
+        let v = OffsetProbeView()
+        v.onOffset = onOffset
+        return v
+    }
+
+    func updateUIView(_ uiView: OffsetProbeView, context: Context) {
+        uiView.onOffset = onOffset
+        uiView.attachIfNeeded()
+    }
+}
+
+final class OffsetProbeView: UIView {
+    var onOffset: (CGFloat) -> Void = { _ in }
+    private weak var scrollView: UIScrollView?
+    private var observer: NSKeyValueObservation?
+
+    func attachIfNeeded() {
+        guard scrollView == nil else { return }
+        var v: UIView? = superview
+        while let u = v {
+            if let sv = u as? UIScrollView {
+                scrollView = sv
+                break
+            }
+            v = u.superview
+        }
+        guard let sv = scrollView else { return }
+        observer = sv.observe(\.contentOffset, options: [.new]) { [weak self] scroll, _ in
+            DispatchQueue.main.async {
+                self?.onOffset(scroll.contentOffset.y)
+            }
+        }
+    }
 }
 
 #Preview {

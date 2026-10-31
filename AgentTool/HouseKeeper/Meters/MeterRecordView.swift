@@ -20,6 +20,7 @@ struct MeterRecordView: View {
     enum MeterRecordTab: String, CaseIterable, Identifiable {
         case records = "充值记录"
         case trend = "用电趋势"
+        case refreshRecords = "刷新记录"
         var id: String { rawValue }
     }
 
@@ -34,10 +35,13 @@ struct MeterRecordView: View {
             .padding(.horizontal, 16)
             .padding(.top, 8)
 
-            if tab == .records {
+            switch tab {
+            case .records:
                 recordsBody
-            } else {
+            case .trend:
                 MeterTrendView(meter: meter)
+            case .refreshRecords:
+                refreshRecordsBody
             }
         }
         .navigationTitle(meter.room.isEmpty ? "\(meter.uid) · 详情" : "\(meter.room) · 详情")
@@ -128,6 +132,61 @@ struct MeterRecordView: View {
                 }
             }
         }
+    }
+
+    /// 刷新记录：最新在上，最多 30 条（与用电趋势同源，均来自每次刷新的 history 记录）
+    private var refreshLogs: [(t: TimeInterval, s: Double)] {
+        (meter.history ?? []).reversed().prefix(30).map { ($0.t, $0.s) }
+    }
+
+    private var refreshRecordsBody: some View {
+        Group {
+            if refreshLogs.isEmpty {
+                VStack(spacing: 10) {
+                    Image(systemName: "arrow.clockwise.circle")
+                        .font(.system(size: 34))
+                        .foregroundColor(.themeText3)
+                    Text("暂无刷新记录")
+                        .font(.system(size: 14))
+                        .foregroundColor(.themeText3)
+                    Text("每次刷新电表后自动记录剩余电量与刷新时间，最多保留最近 30 次")
+                        .font(.system(size: 12))
+                        .foregroundColor(.themeText3.opacity(0.7))
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 40)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                List {
+                    Section {
+                        ForEach(Array(refreshLogs.enumerated()), id: \.offset) { idx, item in
+                            HStack {
+                                Text("第 \(refreshLogs.count - idx) 次刷新")
+                                    .font(.system(size: 13, weight: .medium))
+                                    .foregroundColor(.themeText3)
+                                    .frame(width: 86, alignment: .leading)
+                                Text(String(format: "剩余 %.2f 度", item.s))
+                                    .font(.system(size: 15, weight: .semibold))
+                                    .foregroundColor(.themeAccentDark)
+                                Spacer()
+                                Text(formatLogTime(item.t))
+                                    .font(.system(size: 12))
+                                    .foregroundColor(.themeText3)
+                            }
+                            .padding(.vertical, 2)
+                        }
+                    }
+                }
+                .listStyle(.plain)
+            }
+        }
+    }
+
+    private func formatLogTime(_ t: TimeInterval) -> String {
+        let d = Date(timeIntervalSince1970: t)
+        let f = DateFormatter()
+        f.dateFormat = "MM-dd HH:mm:ss"
+        return f.string(from: d)
     }
 
     private func currentProvider() -> MeterQuerying {
@@ -278,45 +337,112 @@ struct MeterTrendView: View {
 }
 
 /// 折线绘制：x 按时间均匀分布，y 覆盖 [0, max] 并留 12% 上边距
+/// b106：左侧竖轴刻度（剩余电量）+ 底部横轴刻度（时间），每个数据点用浅色虚线垂直/水平连到两条轴
 private struct TrendLineView: View {
     let points: [MeterHistoryPoint]
     let size: CGSize
+
+    // 轴预留空间
+    private let leftPad: CGFloat = 38
+    private let bottomPad: CGFloat = 24
+    private let topPad: CGFloat = 10
+    private let rightPad: CGFloat = 8
+
+    private struct AxisTick: Identifiable {
+        let id = UUID()
+        let label: String
+        let frac: CGFloat   // 0~1 在轴上的位置
+    }
 
     var body: some View {
         let maxVal = max(points.map(\.s).max() ?? 0, 1)
         let minVal = max(points.map(\.s).min() ?? 0, 0)
         let range = max(maxVal - minVal, 1)
-        let pad: CGFloat = 6
-        let w = max(size.width - pad * 2, 1)
-        let h = max(size.height - pad * 2, 1)
+        let w = max(size.width - leftPad - rightPad, 1)
+        let h = max(size.height - topPad - bottomPad, 1)
         let n = points.count
+        let yTicks = yTicks(max: maxVal)
+        let xTicks = xTicks(count: n)
 
         ZStack {
-            // 网格线（3 条水平）
-            ForEach(0..<4, id: \.self) { i in
-                let gy = pad + h * CGFloat(i) / 3
+            // ---- 竖轴（左侧）+ 水平网格线 + 刻度文字 ----
+            ForEach(yTicks) { tick in
+                let gy = topPad + h * (1 - tick.frac)
                 Path { p in
-                    p.move(to: CGPoint(x: pad, y: gy))
-                    p.addLine(to: CGPoint(x: size.width - pad, y: gy))
+                    p.move(to: CGPoint(x: leftPad, y: gy))
+                    p.addLine(to: CGPoint(x: size.width - rightPad, y: gy))
                 }
                 .stroke(Color.themeBorder.opacity(0.4), lineWidth: 0.6)
+                // 左侧刻度值
+                Text(tick.label)
+                    .font(.system(size: 9))
+                    .foregroundColor(.themeText3.opacity(0.85))
+                    .position(x: leftPad - 5, y: gy)
             }
-            // 折线
+            // 竖轴主线
             Path { p in
-                p.move(to: xy(0, pad: pad, w: w, h: h, n: n, minVal: minVal, range: range))
+                p.move(to: CGPoint(x: leftPad, y: topPad))
+                p.addLine(to: CGPoint(x: leftPad, y: topPad + h))
+            }
+            .stroke(Color.themeBorder.opacity(0.7), lineWidth: 0.8)
+            // 竖轴标题
+            Text("电量(度)")
+                .font(.system(size: 9))
+                .foregroundColor(.themeText3.opacity(0.7))
+                .position(x: 8, y: topPad + 8)
+
+            // ---- 横轴（底部）+ 刻度文字 ----
+            Path { p in
+                p.move(to: CGPoint(x: leftPad, y: topPad + h))
+                p.addLine(to: CGPoint(x: size.width - rightPad, y: topPad + h))
+            }
+            .stroke(Color.themeBorder.opacity(0.7), lineWidth: 0.8)
+            ForEach(xTicks) { tick in
+                let gx = leftPad + w * tick.frac
+                Path { p in
+                    p.move(to: CGPoint(x: gx, y: topPad + h))
+                    p.addLine(to: CGPoint(x: gx, y: topPad + h + 3))
+                }
+                .stroke(Color.themeBorder.opacity(0.6), lineWidth: 0.8)
+                Text(tick.label)
+                    .font(.system(size: 8))
+                    .foregroundColor(.themeText3.opacity(0.85))
+                    .position(x: gx, y: topPad + h + 12)
+            }
+
+            // ---- 每个数据点：浅色虚线连到横轴与竖轴 ----
+            ForEach(0..<n, id: \.self) { i in
+                let p = xy(i, padTop: topPad, left: leftPad, w: w, h: h, n: n, minVal: minVal, range: range)
+                // 垂直虚线（点到横轴）
+                Path { path in
+                    path.move(to: CGPoint(x: p.x, y: p.y))
+                    path.addLine(to: CGPoint(x: p.x, y: topPad + h))
+                }
+                .stroke(Color.themeAccent.opacity(0.32), style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
+                // 水平虚线（点到竖轴）
+                Path { path in
+                    path.move(to: CGPoint(x: p.x, y: p.y))
+                    path.addLine(to: CGPoint(x: leftPad, y: p.y))
+                }
+                .stroke(Color.themeAccent.opacity(0.32), style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
+            }
+
+            // ---- 折线（原走势不变） ----
+            Path { p in
+                p.move(to: xy(0, padTop: topPad, left: leftPad, w: w, h: h, n: n, minVal: minVal, range: range))
                 for i in 1..<n {
-                    p.addLine(to: xy(i, pad: pad, w: w, h: h, n: n, minVal: minVal, range: range))
+                    p.addLine(to: xy(i, padTop: topPad, left: leftPad, w: w, h: h, n: n, minVal: minVal, range: range))
                 }
             }
             .stroke(Color.themeAccentDark, style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
             // 渐变填充
             Path { p in
-                p.move(to: xy(0, pad: pad, w: w, h: h, n: n, minVal: minVal, range: range))
+                p.move(to: xy(0, padTop: topPad, left: leftPad, w: w, h: h, n: n, minVal: minVal, range: range))
                 for i in 1..<n {
-                    p.addLine(to: xy(i, pad: pad, w: w, h: h, n: n, minVal: minVal, range: range))
+                    p.addLine(to: xy(i, padTop: topPad, left: leftPad, w: w, h: h, n: n, minVal: minVal, range: range))
                 }
-                p.addLine(to: CGPoint(x: xy(n - 1, pad: pad, w: w, h: h, n: n, minVal: minVal, range: range).x, y: pad + h))
-                p.addLine(to: CGPoint(x: xy(0, pad: pad, w: w, h: h, n: n, minVal: minVal, range: range).x, y: pad + h))
+                p.addLine(to: CGPoint(x: xy(n - 1, padTop: topPad, left: leftPad, w: w, h: h, n: n, minVal: minVal, range: range).x, y: topPad + h))
+                p.addLine(to: CGPoint(x: xy(0, padTop: topPad, left: leftPad, w: w, h: h, n: n, minVal: minVal, range: range).x, y: topPad + h))
                 p.closeSubpath()
             }
             .fill(LinearGradient(colors: [Color.themeAccent.opacity(0.22), Color.themeAccent.opacity(0.02)],
@@ -328,26 +454,56 @@ private struct TrendLineView: View {
                         .fill(Color.white)
                         .overlay(Circle().stroke(Color.themeAccentDark, lineWidth: 1.5))
                         .frame(width: 7, height: 7)
-                        .position(xy(i, pad: pad, w: w, h: h, n: n, minVal: minVal, range: range))
+                        .position(xy(i, padTop: topPad, left: leftPad, w: w, h: h, n: n, minVal: minVal, range: range))
                 }
             } else {
-                // 密集时显示首尾两点
                 Circle().fill(Color.white)
                     .overlay(Circle().stroke(Color.themeAccentDark, lineWidth: 1.5))
                     .frame(width: 7, height: 7)
-                    .position(xy(0, pad: pad, w: w, h: h, n: n, minVal: minVal, range: range))
+                    .position(xy(0, padTop: topPad, left: leftPad, w: w, h: h, n: n, minVal: minVal, range: range))
                 Circle().fill(Color.white)
                     .overlay(Circle().stroke(Color.themeAccentDark, lineWidth: 1.5))
                     .frame(width: 7, height: 7)
-                    .position(xy(n - 1, pad: pad, w: w, h: h, n: n, minVal: minVal, range: range))
+                    .position(xy(n - 1, padTop: topPad, left: leftPad, w: w, h: h, n: n, minVal: minVal, range: range))
             }
         }
         .frame(width: size.width, height: size.height)
     }
 
-    private func xy(_ i: Int, pad: CGFloat, w: CGFloat, h: CGFloat, n: Int, minVal: Double, range: Double) -> CGPoint {
-        let x = pad + w * CGFloat(i) / CGFloat(max(n - 1, 1))
-        let y = pad + h * (1 - CGFloat((points[i].s - minVal) / range))
+    /// 竖轴刻度：5 档取整（0 / 25% / 50% / 75% / 100%）
+    private func yTicks(max: Double) -> [AxisTick] {
+        let step = max / 4
+        return (0...4).map { i in
+            let v = step * CGFloat(i)
+            let label: String
+            if v == v.rounded() {
+                label = "\(Int(v))"
+            } else {
+                label = String(format: "%.1f", v)
+            }
+            return AxisTick(label: label, frac: CGFloat(i) / 4)
+        }
+    }
+
+    /// 横轴刻度：最多 4 档（首 / 1/3 / 2/3 / 末）
+    private func xTicks(count: Int) -> [AxisTick] {
+        guard count > 1 else { return [] }
+        let idxs = [0, count / 3, count * 2 / 3, count - 1]
+        var seen = Set<Int>()
+        var ticks: [AxisTick] = []
+        for i in idxs where !seen.contains(i) {
+            seen.insert(i)
+            let d = Date(timeIntervalSince1970: points[i].t)
+            let f = DateFormatter()
+            f.dateFormat = "MM-dd HH:mm"
+            ticks.append(AxisTick(label: f.string(from: d), frac: CGFloat(i) / CGFloat(count - 1)))
+        }
+        return ticks
+    }
+
+    private func xy(_ i: Int, padTop: CGFloat, left: CGFloat, w: CGFloat, h: CGFloat, n: Int, minVal: Double, range: Double) -> CGPoint {
+        let x = left + w * CGFloat(i) / CGFloat(max(n - 1, 1))
+        let y = padTop + h * (1 - CGFloat((points[i].s - minVal) / range))
         return CGPoint(x: x, y: y)
     }
 }

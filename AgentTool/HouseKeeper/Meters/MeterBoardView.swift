@@ -8,6 +8,11 @@ import SwiftUI
 
 // MARK: - 主界面
 
+/// b106：搜索点击结果 → 跳回主列表定位对应户号卡片并高亮
+extension Notification.Name {
+    static let meterSearchJump = Notification.Name("meterSearchJump")
+}
+
 struct MeterBoardView: View {
     @EnvironmentObject private var store: MeterStore
     @Environment(\.dismiss) private var dismiss
@@ -31,6 +36,7 @@ struct MeterBoardView: View {
     @State private var selectedMeter: MeterLedger?
     @State private var refreshingUID: String?          // 单台刷新中
     @State private var toastText: String?
+    @State private var highlightUID: String?           // b106：搜索跳转后的高亮户号
 
     var body: some View {
         ZStack {
@@ -284,34 +290,49 @@ struct MeterBoardView: View {
     }
 
     private var meterList: some View {
-        LazyVStack(spacing: 8) {
-            if filteredMeters.isEmpty {
-                VStack(spacing: 8) {
-                    Image(systemName: "bolt.slash")
-                        .font(.system(size: 36))
-                        .foregroundColor(.themeText3)
-                    Text("没有符合条件的电表")
-                        .font(.system(size: 14))
-                        .foregroundColor(.themeText3)
-                    Text("可点右上角 + 进入电表管理，或先刷新拉取绑定")
-                        .font(.system(size: 12))
-                        .foregroundColor(.themeText3.opacity(0.8))
-                }
-                .padding(.top, 60)
-            } else {
-                ForEach(filteredMeters) { meter in
-                    MeterCardRow(meter: meter,
-                                 threshold: threshold,
-                                 isRefreshing: refreshingUID == meter.uid) { action in
-                        handleCardAction(action, meter: meter)
+        ScrollViewReader { proxy in
+            LazyVStack(spacing: 8) {
+                if filteredMeters.isEmpty {
+                    VStack(spacing: 8) {
+                        Image(systemName: "bolt.slash")
+                            .font(.system(size: 36))
+                            .foregroundColor(.themeText3)
+                        Text("没有符合条件的电表")
+                            .font(.system(size: 14))
+                            .foregroundColor(.themeText3)
+                        Text("可点右上角 + 进入电表管理，或先刷新拉取绑定")
+                            .font(.system(size: 12))
+                            .foregroundColor(.themeText3.opacity(0.8))
+                    }
+                    .padding(.top, 60)
+                } else {
+                    ForEach(filteredMeters) { meter in
+                        MeterCardRow(meter: meter,
+                                     threshold: threshold,
+                                     isRefreshing: refreshingUID == meter.uid,
+                                     highlight: highlightUID == meter.uid) { action in
+                            handleCardAction(action, meter: meter)
+                        }
+                        .id(meter.uid)
                     }
                 }
             }
+            .padding(.horizontal, 12)
+            .padding(.top, 8)
+            .animation(.easeOut(duration: 0.18), value: sortMode)
+            .animation(.easeOut(duration: 0.18), value: filterMode)
+            // b106：搜索点击结果 → 滚动定位对应卡片 + 高亮 1.6s
+            .onReceive(NotificationCenter.default.publisher(for: .meterSearchJump)) { note in
+                guard let uid = note.userInfo?["uid"] as? String else { return }
+                highlightUID = uid
+                withAnimation(.easeInOut(duration: 0.3)) {
+                    proxy.scrollTo(uid, anchor: .center)
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) {
+                    if highlightUID == uid { highlightUID = nil }
+                }
+            }
         }
-        .padding(.horizontal, 12)
-        .padding(.top, 8)
-        .animation(.easeOut(duration: 0.18), value: sortMode)
-        .animation(.easeOut(duration: 0.18), value: filterMode)
     }
 
     private func handleCardAction(_ action: MeterCardAction, meter: MeterLedger) {
@@ -414,6 +435,7 @@ struct MeterCardRow: View {
     let meter: MeterLedger
     let threshold: Double
     var isRefreshing: Bool = false
+    var highlight: Bool = false
     let onAction: (MeterCardAction) -> Void
 
     private var isLow: Bool { meter.isLow(threshold: threshold) }
@@ -457,8 +479,8 @@ struct MeterCardRow: View {
             HStack(spacing: 8) {
                 HStack(alignment: .firstTextBaseline, spacing: 4) {
                     Text("累计 \(String(format: "%.2f", meter.leiji)) 度 · 抄表 \(fullTime(meter.shijian))")
-                        .font(.system(size: 11))
-                        .foregroundColor(.themeText3)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(.themeText2)
                         .lineLimit(1)
                         .minimumScaleFactor(0.7)
                 }
@@ -492,7 +514,8 @@ struct MeterCardRow: View {
         .padding(10)
         .background(warn ? LinearGradient(colors: [.white, Color.red.opacity(0.05)], startPoint: .top, endPoint: .bottom) : LinearGradient(colors: [.white, .white], startPoint: .top, endPoint: .bottom))
         .clipShape(RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(warn ? Color.red.opacity(0.35) : Color.themeBorder, lineWidth: 1))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(highlight ? Color.themeAccentDark : (warn ? Color.red.opacity(0.35) : Color.themeBorder), lineWidth: highlight ? 2.5 : 1))
+        .shadow(color: highlight ? Color.themeAccent.opacity(0.35) : .clear, radius: 6, x: 0, y: 0)
     }
 
     private var badge: some View {
@@ -536,7 +559,6 @@ struct MeterSearchSheet: View {
     @EnvironmentObject private var store: MeterStore
     @Environment(\.dismiss) private var dismiss
     @State private var keyword = ""
-    @State private var selectedMeter: MeterLedger?
 
     private var matches: [MeterLedger] {
         let k = keyword.trimmingCharacters(in: .whitespaces)
@@ -573,7 +595,9 @@ struct MeterSearchSheet: View {
 
             List(matches) { meter in
                 Button {
-                    selectedMeter = meter
+                    // b106：点击结果 → 跳回主列表定位对应户号卡片，并自动关闭搜索框
+                    NotificationCenter.default.post(name: .meterSearchJump, object: nil, userInfo: ["uid": meter.uid])
+                    dismiss()
                 } label: {
                     HStack(spacing: 10) {
                         VStack(alignment: .leading, spacing: 2) {
@@ -605,9 +629,6 @@ struct MeterSearchSheet: View {
         }
         .navigationTitle("搜索电表")
         .navigationBarTitleDisplayMode(.inline)
-        .sheet(item: $selectedMeter) { meter in
-            NavigationStack { MeterRecordView(meter: meter) }
-        }
     }
 }
 
@@ -805,7 +826,11 @@ struct MeterAddSheet: View {
                         return
                     }
                     store.upsert(MeterLedger(uid: u, room: room.trimmingCharacters(in: .whitespaces)))
-                    dismiss()
+                    // b106：添加成功弹提示，随后自动关闭添加表单
+                    toast = "已添加电表 \(u)"
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                        dismiss()
+                    }
                 }
                 .font(.system(size: 15, weight: .bold))
                 .foregroundColor(.white)

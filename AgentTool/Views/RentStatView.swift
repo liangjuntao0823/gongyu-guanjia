@@ -14,7 +14,8 @@ struct RentStatView: View {
     @State private var selectedIDs: Set<UUID> = []
     @State private var toast: String?
     @State private var filterLandlord: String?      // nil=全部房东
-    @State private var filterPaid: Int = 0          // 0=全部 1=已收 2=未收
+    // b106：第 4 个筛选由「已收/未收」改为「交租日」（nil=全部交租日，值为每月几号交租）
+    @State private var filterDueDay: Int? = nil
     @State private var previewText = ""             // 文案预览缓存（只在选中/筛选/年月变化时重算，避免每次 body 重建 TextEditor）
 
     init() {
@@ -67,19 +68,20 @@ struct RentStatView: View {
         return names.sorted()
     }
 
-    /// 应用筛选后的列表：房东 + 已收/未收；保持"已收排上、未收排下"的相对顺序（rowMeta 只构建一次）
+    /// b106：可选交租日列表（按号数排序去重）
+    private var dueDays: [Int] {
+        var days = Set<Int>()
+        for p in sortedProperties where p.rentDueDay > 0 { days.insert(p.rentDueDay) }
+        return days.sorted()
+    }
+
+    /// 应用筛选后的列表：房东 + 交租日；保持"已收排上、未收排下"的相对顺序（rowMeta 只构建一次）
     private var filteredProperties: [Property] {
         let meta = rowMeta
         let filtered = properties.filter { p in
             let okLandlord = filterLandlord == nil || p.landlord == filterLandlord
-            let paid = meta[p.id]?.paid == true
-            let okPaid: Bool
-            switch filterPaid {
-            case 1: okPaid = paid
-            case 2: okPaid = !paid
-            default: okPaid = true
-            }
-            return okLandlord && okPaid
+            let okDueDay = filterDueDay == nil || p.rentDueDay == filterDueDay
+            return okLandlord && okDueDay
         }
         return filtered.sorted {
             let a = meta[$0.id]?.paid == true
@@ -87,6 +89,24 @@ struct RentStatView: View {
             if a != b { return a }
             return $0.roomNumber < $1.roomNumber
         }
+    }
+
+    /// b106：紧凑筛选胶囊（Menu label），.fixedSize 按内容自适应，一行 4 个不折叠
+    private func pillLabel(_ text: String, active: Bool = false) -> some View {
+        HStack(spacing: 3) {
+            Text(text)
+                .font(.system(size: 13, weight: active ? .bold : .medium))
+                .lineLimit(1)
+            Image(systemName: "chevron.down")
+                .font(.system(size: 9, weight: .semibold))
+        }
+        .foregroundColor(active ? .themeAccent : .themeText)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(active ? Color.themeAccent.opacity(0.1) : Color.white)
+        .clipShape(Capsule())
+        .overlay(Capsule().stroke(active ? Color.themeAccent.opacity(0.5) : Color.themeBorder, lineWidth: 1))
+        .fixedSize()
     }
 
     private var selectedProperties: [Property] {
@@ -188,48 +208,67 @@ struct RentStatView: View {
         let meta = rowMeta   // 一次构建行元数据，供列表/合计/筛选共用
         NavigationStack {
             VStack(spacing: 0) {
-                // 筛选一排：年份/月份/房东/已收未收（紧凑布局防换行）
-                HStack(spacing: 8) {
-                    Picker("", selection: $selectedYear) {
-                        ForEach(years, id: \.self) { Text("\($0)年").tag($0) }
-                    }
-                    .pickerStyle(.menu)
-                    .font(.system(size: 15))
-                    .frame(width: 86)
-                    .lineLimit(1)
-                    Picker("", selection: $selectedMonth) {
-                        ForEach(1...12, id: \.self) { Text("\($0)月").tag($0) }
-                    }
-                    .pickerStyle(.menu)
-                    .font(.system(size: 15))
-                    .frame(width: 66)
-                    .lineLimit(1)
-                    Picker("", selection: $filterLandlord) {
-                        Text("全部房东").tag(String?.none)
-                        ForEach(landlordNames, id: \.self) { name in
-                            Text(name).tag(String?.some(name))
+                // b106：筛选一排（年份/月份/房东/交租日）——全部改为紧凑胶囊 Menu，一行放下不折叠
+                HStack(spacing: 6) {
+                    Menu {
+                        ForEach(years, id: \.self) { y in
+                            Button { selectedYear = y } label: {
+                                Label("\(y)年", systemImage: selectedYear == y ? "checkmark" : "")
+                            }
                         }
+                    } label: {
+                        pillLabel("\(selectedYear)年")
                     }
-                    .pickerStyle(.menu)
-                    .font(.system(size: 13))
-                    .lineLimit(1)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    Picker("", selection: $filterPaid) {
-                        Text("全部").tag(0)
-                        Text("已收").tag(1)
-                        Text("未收").tag(2)
+                    .menuStyle(.borderlessButton)
+
+                    Menu {
+                        ForEach(1...12, id: \.self) { m in
+                            Button { selectedMonth = m } label: {
+                                Label("\(m)月", systemImage: selectedMonth == m ? "checkmark" : "")
+                            }
+                        }
+                    } label: {
+                        pillLabel("\(selectedMonth)月")
                     }
-                    .pickerStyle(.menu)
-                    .font(.system(size: 13))
-                    .lineLimit(1)
-                    .frame(width: 78)
+                    .menuStyle(.borderlessButton)
+
+                    Menu {
+                        Button { filterLandlord = nil } label: {
+                            Label("全部房东", systemImage: filterLandlord == nil ? "checkmark" : "")
+                        }
+                        ForEach(landlordNames, id: \.self) { name in
+                            Button { filterLandlord = name } label: {
+                                Label(name, systemImage: filterLandlord == name ? "checkmark" : "")
+                            }
+                        }
+                    } label: {
+                        pillLabel(filterLandlord ?? "全部房东", active: filterLandlord != nil)
+                    }
+                    .menuStyle(.borderlessButton)
+
+                    // 交租日筛选（替换原「已收未收」）
+                    Menu {
+                        Button { filterDueDay = nil } label: {
+                            Label("全部交租日", systemImage: filterDueDay == nil ? "checkmark" : "")
+                        }
+                        ForEach(dueDays, id: \.self) { d in
+                            Button { filterDueDay = d } label: {
+                                Label("\(d)号交租", systemImage: filterDueDay == d ? "checkmark" : "")
+                            }
+                        }
+                    } label: {
+                        pillLabel(filterDueDay.map { "\($0)号" } ?? "交租日", active: filterDueDay != nil)
+                    }
+                    .menuStyle(.borderlessButton)
+
+                    Spacer(minLength: 0)
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
                 .onChange(of: selectedYear) { _, _ in refreshPreview() }
                 .onChange(of: selectedMonth) { _, _ in refreshPreview() }
                 .onChange(of: filterLandlord) { _, _ in refreshPreview() }
-                .onChange(of: filterPaid) { _, _ in refreshPreview() }
+                .onChange(of: filterDueDay) { _, _ in refreshPreview() }
                 Divider()
 
                 // 选房列表：房号 + 房东 + 交租日 + 当月水电结算标记
