@@ -129,9 +129,15 @@ final class HouseSyncProgress: ObservableObject {
         var text: String { self == .upload ? "上传中" : "同步中" }
     }
 
-    /// 开始/推进：线程安全（内部切主线程）
-    func update(roomKey: String?, direction: Direction, progress: Double, label: String = "") {
+    /// 活跃任务计数：并发上传/同步各自 begin 一次 +1，全部结束（end 归零）才清空显示。
+    /// v2.4 修复：此前「保存上传媒体」与「同步云端账本」两个并发 Task 共用单例，
+    /// 先完成的 Task 调 clear() 会把仍在进行中的媒体上传进度误清 → 卡片底部进度条「不见了」。
+    private var activeTasks = 0
+
+    /// 任务开始：计数 +1 并写入初始值（线程安全，内部切主线程）
+    func begin(roomKey: String?, direction: Direction, progress: Double = 0, label: String = "") {
         Task { @MainActor in
+            activeTasks += 1
             self.roomKey = roomKey
             self.direction = direction
             self.progress = max(0, min(1, progress))
@@ -139,6 +145,29 @@ final class HouseSyncProgress: ObservableObject {
         }
     }
 
+    /// 推进：写入最新进度。若无活跃任务则视为任务开始（自动计数 1），保证旧调用点语义兼容。
+    func update(roomKey: String?, direction: Direction, progress: Double, label: String = "") {
+        Task { @MainActor in
+            if activeTasks == 0 { activeTasks = 1 }
+            self.roomKey = roomKey
+            self.direction = direction
+            self.progress = max(0, min(1, progress))
+            self.label = label
+        }
+    }
+
+    /// 任务结束：计数 -1；仅当全部活跃任务都结束时才真正清空（并发的另一任务进度不被误清）
+    func end() {
+        Task { @MainActor in
+            activeTasks = max(0, activeTasks - 1)
+            if activeTasks == 0 {
+                roomKey = nil
+                label = ""
+            }
+        }
+    }
+
+    /// 直接清空（兼容旧调用；新代码统一用 begin/end）
     func clear() {
         Task { @MainActor in
             roomKey = nil

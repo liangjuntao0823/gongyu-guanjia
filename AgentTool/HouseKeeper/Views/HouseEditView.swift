@@ -565,8 +565,8 @@ struct HouseEditView: View {
             var success = 0, failed = 0
             var lastError = ""
             let total = media.count
-            // v1.42：卡片底部进度条——按文件推进（上传中 x%）
-            HouseSyncProgress.shared.update(roomKey: roomKey, direction: .upload, progress: 0)
+            // v1.42：卡片底部进度条——按文件推进（上传中 x%）；v2.4：begin 计数，避免被账本 Task 的 end 误清
+            HouseSyncProgress.shared.begin(roomKey: roomKey, direction: .upload, progress: 0)
             for (idx, item) in media.enumerated() {
                 let url = MediaStore.url(for: item.fileName, roomKey: roomKey)
                 guard FileManager.default.fileExists(atPath: url.path) else {
@@ -594,7 +594,7 @@ struct HouseEditView: View {
                 }
                 HouseSyncProgress.shared.update(roomKey: roomKey, direction: .upload, progress: Double(idx + 1) / Double(total))
             }
-            HouseSyncProgress.shared.clear()
+            HouseSyncProgress.shared.end()
             if failed > 0 {
                 BackupLogStore.log(category: "房源", action: "上传媒体（本地→云端）", result: "部分失败", detail: "\(house.displayRoomNo)：成功\(success) 失败\(failed)（已入队自动补传）" + (lastError.isEmpty ? "" : "；错误：\(lastError)"), cloud: true)
                 await MainActor.run {
@@ -613,18 +613,19 @@ struct HouseEditView: View {
     private func pushHouseToCloud(_ house: House, action: String) {
         guard let config = CosConfig.load() else { return }
         let record = CloudHouseSync.record(from: house, username: CloudUser.username)
-        HouseSyncProgress.shared.update(roomKey: house.mediaRoomKey, direction: .upload, progress: 0.2, label: "同步账本")
+        // v2.4：账本上传用 begin 计数——与并发中的媒体上传任务并存，完成后 end 不会误清媒体进度
+        HouseSyncProgress.shared.begin(roomKey: house.mediaRoomKey, direction: .upload, progress: 0.2, label: "同步账本")
         Task {
             do {
                 try await CloudHouseSync.upload(record: record, config: config)
-                HouseSyncProgress.shared.clear()
+                HouseSyncProgress.shared.end()
                 await MainActor.run {
                     house.cloudStatus = .both
                     try? modelContext.save()
                 }
                 BackupLogStore.log(category: "房源", action: action, result: "成功", detail: house.displayRoomNo, cloud: true)
             } catch {
-                HouseSyncProgress.shared.clear()
+                HouseSyncProgress.shared.end()
                 BackupLogStore.log(category: "房源", action: action, result: "失败", detail: "\(house.displayRoomNo)：\(error.localizedDescription)", cloud: true)
                 // v1.42：保存成功但账本上传失败 → 提示待网络恢复后刷新同步（此前只写日志，用户无感知）
                 await MainActor.run {

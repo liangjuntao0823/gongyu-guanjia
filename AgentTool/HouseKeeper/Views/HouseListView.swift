@@ -883,18 +883,18 @@ struct HouseListView: View {
         guard let config = CosConfig.load() else { return }
         let record = CloudHouseSync.record(from: house, username: CloudUser.username)
         LocalHouseLedger.save(house)
-        HouseSyncProgress.shared.update(roomKey: house.mediaRoomKey, direction: .upload, progress: 0.2, label: "同步账本")
+        HouseSyncProgress.shared.begin(roomKey: house.mediaRoomKey, direction: .upload, progress: 0.2, label: "同步账本")
         Task {
             do {
                 try await CloudHouseSync.upload(record: record, config: config)
-                HouseSyncProgress.shared.clear()
+                HouseSyncProgress.shared.end()
                 await MainActor.run {
                     house.cloudStatus = .both
                     try? houseModelContext?.save()
                 }
                 BackupLogStore.log(category: "房源", action: action, result: "成功", detail: house.displayRoomNo, cloud: true)
             } catch {
-                HouseSyncProgress.shared.clear()
+                HouseSyncProgress.shared.end()
                 BackupLogStore.log(category: "房源", action: action, result: "失败", detail: "\(house.displayRoomNo)：\(error.localizedDescription)", cloud: true)
             }
         }
@@ -1483,9 +1483,9 @@ struct HouseListView: View {
             // 聚合写 + 成功后统一把补传房源标「双端」，失败保持「仅本地」并提示，可下次重试。
             if !pushedRecords.isEmpty {
                 do {
-                    // v1.72（#8）：补传账本也显示卡片进度条（本地→云端同步动作）
+                    // v1.72（#8）：补传账本也显示卡片进度条（本地→云端同步动作）；v2.4：begin/end 计数
                     if let first = pushedRecords.first {
-                        HouseSyncProgress.shared.update(roomKey: first.roomKey, direction: .upload, progress: 0.1, label: "补传账本")
+                        HouseSyncProgress.shared.begin(roomKey: first.roomKey, direction: .upload, progress: 0.1, label: "补传账本")
                     }
                     var all = recs
                     for rec in pushedRecords {
@@ -1493,7 +1493,7 @@ struct HouseListView: View {
                         all.append(rec)
                     }
                     try await CloudHouseSync.uploadRecords(all, config: config)
-                    HouseSyncProgress.shared.clear()
+                    HouseSyncProgress.shared.end()
                     await MainActor.run {
                         let local = (try? ctx.fetch(FetchDescriptor<House>())) ?? []
                         var snapshots: [PendingMediaHouseSnapshot] = []
@@ -1518,6 +1518,7 @@ struct HouseListView: View {
                     }
                     BackupLogStore.log(category: "同步", action: "补传房源（本地→云端）", result: "成功", detail: pushedRoomNo.joined(separator: "，"), cloud: true)
                 } catch {
+                    HouseSyncProgress.shared.end()   // v2.4：失败也归还计数，避免进度条残留
                     await MainActor.run {
                         showToast(RemoteConfig.tip("backfillFail", "补传云端失败：{error}。本地房源保持「仅本地」，可稍后重新同步补传").replacingOccurrences(of: "{error}", with: error.localizedDescription), isError: true)
                     }
@@ -1590,11 +1591,11 @@ struct HouseListView: View {
             if ledger.written > 0 {
                 BackupLogStore.log(category: "同步", action: "重建本地账本镜像", result: "成功", detail: "\(ledger.written) 套", cloud: true)
             }
-            HouseSyncProgress.shared.clear()
+            HouseSyncProgress.shared.end()
         } catch {
             showToast(RemoteConfig.tip("syncFail", "同步失败：{error}").replacingOccurrences(of: "{error}", with: error.localizedDescription), isError: true)
             BackupLogStore.log(category: "同步", action: "同步房源（云端→本地）", result: "失败", detail: error.localizedDescription, cloud: true)
-            HouseSyncProgress.shared.clear()
+            HouseSyncProgress.shared.end()
         }
     }
 
