@@ -977,18 +977,25 @@ struct HouseListView: View {
     /// 会导致「明明没变化每次同步都判更新」。字段级对比满足「一个标点符号变了都要同步」。
     /// v1.43：媒体清单改用归一化等价比较（去扩展名小写）——视频 .mov/.mp4 视为同一文件，
     ///        不再因两套扩展名互斥而每次同步都误判「更新」。
-    private func cloudRecordDiffers(_ rec: CloudHouseRecord, from house: House) -> Bool {
-        if rec.roomNo != house.roomNo { return true }
-        if rec.tower != house.tower { return true }
-        if rec.landlord != house.landlord { return true }
-        if rec.layout != house.layout { return true }
-        if rec.price != house.price { return true }
-        if rec.password != house.password { return true }
-        if rec.remark != house.remark { return true }
-        if rec.status != house.statusRaw { return true }
+    /// b116：返回差异描述（nil=一致，非nil=具体哪个字段不同），字符串先 trim 防首尾空格死循环。
+    private func cloudRecordDiffers(_ rec: CloudHouseRecord, from house: House) -> String? {
+        let ls = { (s: String) in s.trimmingCharacters(in: .whitespacesAndNewlines) }
+        if rec.roomNo != house.roomNo { return "roomNo「\(rec.roomNo)」vs「\(house.roomNo)」" }
+        if rec.tower != house.tower { return "tower \(rec.tower) vs \(house.tower)" }
+        if ls(rec.landlord) != ls(house.landlord) { return "landlord「\(rec.landlord)」vs「\(house.landlord)」" }
+        if ls(rec.layout) != ls(house.layout) { return "layout「\(rec.layout)」vs「\(house.layout)」" }
+        if rec.price != house.price { return "price \(rec.price) vs \(house.price)" }
+        if ls(rec.password) != ls(house.password) { return "password 不同" }
+        if ls(rec.remark) != ls(house.remark) { return "remark「\(rec.remark)」vs「\(house.remark)」" }
+        if ls(rec.status) != ls(house.statusRaw) { return "status「\(rec.status)」vs「\(house.statusRaw)」" }
         let localMedia = Set(house.mediaItems.map { Self.mediaNormKey($0.fileName) })
-        if localMedia != Set(rec.mediaNames.map { Self.mediaNormKey($0) }) { return true }
-        return false
+        let cloudMedia = Set(rec.mediaNames.map { Self.mediaNormKey($0) })
+        if localMedia != cloudMedia {
+            let onlyLocal = localMedia.subtracting(cloudMedia)
+            let onlyCloud = cloudMedia.subtracting(localMedia)
+            return "media 本地独有[\(onlyLocal.joined(separator: ","))] 云端独有[\(onlyCloud.joined(separator: ","))]"
+        }
+        return nil
     }
 
     /// v1.43：媒体名归一化 key——去扩展名 + 小写。
@@ -1144,7 +1151,7 @@ struct HouseListView: View {
                 let cloudKeys = Set(recs.map { $0.roomKey })
                 for rec in recs {
                     if let h = localByKey[rec.roomKey] {
-                        if cloudRecordDiffers(rec, from: h) {
+                        if cloudRecordDiffers(rec, from: h) != nil {
                             // v1.40 B1：多人冲突提示——云端由他人更新时展示修改者
                             // v1.69：房号一律真实引用带前缀（rec.roomKey），不做去前缀简化
                             updated.append((rec.roomKey, rec.updatedBy))
@@ -1435,7 +1442,10 @@ struct HouseListView: View {
                 let cloudKeys = Set(recs.map { $0.roomKey })
                 for rec in recs {
                     if let h = localByKey[rec.roomKey] {
-                        if cloudRecordDiffers(rec, from: h) {
+                        if let diff = cloudRecordDiffers(rec, from: h) {
+                            // b116：记录具体差异，定位 1-711 这类死循环根因
+                            BackupLogStore.log(category: "同步", action: "云端覆盖本地", result: "成功",
+                                               detail: "\(rec.roomKey) 差异：\(diff)", cloud: false)
                             h.roomNo = rec.roomNo; h.tower = rec.tower; h.landlord = rec.landlord
                             h.layout = rec.layout; h.price = rec.price; h.password = rec.password
                             h.remark = rec.remark; h.statusRaw = rec.status
