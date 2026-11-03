@@ -520,7 +520,7 @@ struct HouseListView: View {
             Button {
                 showOnlyNoMedia.toggle()
             } label: {
-                Image(systemName: showOnlyNoMedia ? "photo.badge.exclamationmark.fill" : "photo.badge.exclamationmark")
+                Image(systemName: showOnlyNoMedia ? "photo.slash.fill" : "photo.slash")
                     .font(.system(size: 11, weight: .semibold))
                     .frame(width: 28, height: 24)
                     .background(showOnlyNoMedia ? AppTheme.primary.opacity(0.22) : Color.secondary.opacity(0.08))
