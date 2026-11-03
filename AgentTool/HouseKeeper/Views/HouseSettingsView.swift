@@ -615,7 +615,7 @@ struct CosConfigView: View {
     /// v1.18：下载云端部署包——从 App 内导出 zip 到「备份」文件夹（内含 deploy.py 脚本 + 图文说明，给房东部署云端后台用）
     /// v1.40 第4点：入口改为图文教程页内按钮；顺带修复路径（此前 DataRoot 已是「备份」，又拼了一层「备份」导致导到 备份/备份/）
     private func downloadDeployPack() {
-        guard let url = Bundle.main.url(forResource: "云端部署包", withExtension: "zip") else {
+        guard let url = Bundle.main.url(forResource: "CloudDeployPackage", withExtension: "zip") else {
             savedTip = "未找到云端部署包资源，请确认安装的是最新版 App"
             return
         }
@@ -889,7 +889,7 @@ struct DeployGuideView: View {
     }
 
     private func downloadPack() {
-        guard let url = Bundle.main.url(forResource: "云端部署包", withExtension: "zip") else {
+        guard let url = Bundle.main.url(forResource: "CloudDeployPackage", withExtension: "zip") else {
             tip = "未找到云端部署包资源，请确认安装的是最新版 App"; showTip = true
             return
         }
