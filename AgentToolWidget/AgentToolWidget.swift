@@ -7,12 +7,20 @@
 
 import WidgetKit
 import SwiftUI
+import Security
 
 // MARK: - App Group 常量
 // 签名服务重签后实际注入的 group 在它描述文件里，与工程配置不同；
-// 这里运行时探测本包 embedded.mobileprovision 中实际生效的 App Group，
-// 无描述文件（巨魔/本地直装）回退 group.com.gj.tg.shared。
+// 这里运行时探测本包实际生效的 App Group（主 App 与小组件同包同描述文件，探测结果必然一致）：
+// 1) 优先用系统 API 读取签名注入的 entitlements（主 App、小组件都能取到）；
+// 2) 取不到时再解析 embedded.mobileprovision（部分签名包只把描述文件放主 App）；
+// 3) 都没有（巨魔/本地直装）回退工程配置的 group.com.gj.tg.shared。
 func resolveAppGroupID() -> String {
+    // 方式一：从进程签名 entitlements 直接取（最可靠，App 与 Widget 均可）
+    if let groups = entitlementAppGroups(), let first = groups.first {
+        return first
+    }
+    // 方式二：解析 embedded.mobileprovision（主 App 通常有，Widget 可能没有）
     guard let provURL = Bundle.main.url(forResource: "embedded", withExtension: "mobileprovision"),
           let data = try? Data(contentsOf: provURL)
     else {
@@ -37,6 +45,13 @@ func resolveAppGroupID() -> String {
         return "group.com.gj.tg.shared"
     }
     return first
+}
+
+/// 读取当前进程签名中实际注入的 App Group（iOS 系统 API，主 App 与 App Extension 均可调用）
+func entitlementAppGroups() -> [String]? {
+    guard let task = SecTaskCreateFromSelf(nil) else { return nil }
+    guard let value = SecTaskCopyValueForEntitlement(task, "com.apple.security.application-groups" as CFString, nil) else { return nil }
+    return value as? [String]
 }
 
 extension Array where Element == UInt8 {
