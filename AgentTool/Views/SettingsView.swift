@@ -68,6 +68,8 @@ struct SettingsView: View {
     @State private var showOrphanCleanConfirm = false
     @State private var orphanCleanResult: String?
     @State private var orphanCleaning = false
+    @State private var orphanList: [HouseListView.OrphanMedia] = []   // b117：扫描到的孤儿清单
+    @State private var showOrphanListConfirm = false                    // b117：列出清单后二次确认
     @AppStorage("autoBackupRetentionDays") private var backupRetentionDays = 7   // 自动备份保留天数（默认7天，可调）
     @State private var autoBackupEnabled = false
     @State private var backupFrequency = "day"
@@ -124,14 +126,32 @@ struct SettingsView: View {
             } label: {
                 Label("云端配置", systemImage: "server.rack")
             }
-            // v2.7（P2⑯）：手动触发桶孤儿媒体清理——同步后会自动后台跑一次，这里是手动入口
+            // v2.7（P2⑯）：手动触发桶孤儿媒体清理——b117：先扫描列清单，用户确认后再删
             Button {
-                showOrphanCleanConfirm = true
+                orphanCleaning = true
+                Task {
+                    do {
+                        guard let config = CosConfig.load() else {
+                            orphanCleanResult = "请先在「云端配置」填写 COS 配置"
+                            return
+                        }
+                        let list = try await HouseListView.scanOrphanMedia(config: config)
+                        if list.isEmpty {
+                            orphanCleanResult = "扫描完成：没有发现孤儿媒体"
+                        } else {
+                            orphanList = list
+                            showOrphanListConfirm = true
+                        }
+                    } catch {
+                        orphanCleanResult = "扫描失败：\(error.localizedDescription)"
+                    }
+                    orphanCleaning = false
+                }
             } label: {
                 Label {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("清理桶孤儿媒体")
-                        Text("删除云端不在任何账本名单里的残留图片/视频（改名/删媒体后残留）")
+                        Text(orphanCleaning ? "正在扫描云端…" : "清理桶孤儿媒体")
+                        Text("先列出孤儿名单+详细路径，确认后再删除；操作日志会记录")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
@@ -140,9 +160,10 @@ struct SettingsView: View {
                 }
             }
             .disabled(orphanCleaning)
-            .alert("确认清理桶孤儿媒体？", isPresented: $showOrphanCleanConfirm) {
-                Button("取消", role: .cancel) {}
-                Button("开始清理", role: .destructive) {
+            // b117：列出孤儿清单的确认弹窗
+            .alert("发现 \(orphanList.count) 个孤儿媒体", isPresented: $showOrphanListConfirm) {
+                Button("取消", role: .cancel) { orphanList = [] }
+                Button("确认删除", role: .destructive) {
                     orphanCleaning = true
                     Task {
                         do {
@@ -150,17 +171,24 @@ struct SettingsView: View {
                                 orphanCleanResult = "请先在「云端配置」填写 COS 配置"
                                 return
                             }
-                            // 复用 HouseListView 的清理逻辑（全量列 h/ 桶）
-                            try await HouseListView.cleanupOrphanMedia(config: config)
-                            orphanCleanResult = "清理完成（详见操作日志）"
+                            let list = orphanList
+                            let deleted = await HouseListView.deleteOrphanMedia(list, config: config)
+                            let paths = list.prefix(20).map { $0.path }.joined(separator: "\n")
+                            let more = list.count > 20 ? "\n…等共 \(list.count) 个" : ""
+                            BackupLogStore.log(category: "同步", action: "桶孤儿清理（手动）", result: deleted == list.count ? "成功" : "部分成功",
+                                               detail: "删除 \(deleted)/\(list.count) 个：\n\(paths)\(more)", cloud: true)
+                            orphanCleanResult = "已删除 \(deleted)/\(list.count) 个孤儿媒体（详见操作日志）"
                         } catch {
                             orphanCleanResult = "清理失败：\(error.localizedDescription)"
                         }
+                        orphanList = []
                         orphanCleaning = false
                     }
                 }
             } message: {
-                Text("将列云端 h/ 整桶，删除不在任何 info.json 账本 mediaNames 里的媒体对象（图片/视频）。只删孤儿文件，不动 info.json 与有效媒体。")
+                let preview = orphanList.prefix(15).map { $0.path }.joined(separator: "\n")
+                let more = orphanList.count > 15 ? "\n…等共 \(orphanList.count) 个" : ""
+                Text("以下文件不在任何房源账本名单里，将被删除：\n\(preview)\(more)")
             }
             .alert("桶孤儿清理", isPresented: Binding(
                 get: { orphanCleanResult != nil },
@@ -1174,7 +1202,7 @@ struct InterconnectionInfoView: View {
 // MARK: - 版本更新介绍
 struct VersionHistoryView: View {
     let versions: [(version: String, date: String, changes: [String])] = [
-        ("v2.7", "2026-11-03", ["新增：【跨账号日志公共区】（b114）——云端操作日志不再按自己用户名过滤，拉取全部用户的公共日志；本机日志区同时记录所有操作。另一个用户在另一台手机上的操作，你在日志查看器云端区能看到", "新增：【同步总进度条】（b114）——点「同步云端房源」确认后，整个同步流程走全局任务中心，房源页顶部显示总进度条，样式与批量导入/补传媒体一致，可最小化到「设置→待补传媒体」查看", "优化：【补传合并写】（b114）——本地补传云端的房源从全量覆盖写改为逐套合并写：写前先读云端 info.json，mediaNames = 云端∪本地−本次删除，revision+1，避免另一用户刚加的同号房媒体被本地空名单覆盖", "新增：【桶孤儿清理】（b114）——同步完成后后台列 h/ 整桶，删除不在任何账本 mediaNames 里的孤儿媒体对象（改名/删媒体后残留的旧文件）", "优化：【户型筛选联动】（b114）——户型筛选选项只显示当前座号+状态+搜索+无媒体筛选后实际存在的户型；点了「未租」+「1座」，户型只列 1座未租 有的", "新增：【房东/户型历史下拉】（b114）——新增/编辑房源时，房东、户型输入框旁加下拉按钮，可快速选择已有值，也可手动输入新值（下拉只做辅助）", "优化：【排序图标化+无媒体筛选】（b114）——顶栏排序按钮去掉文字只留图标；旁边新增「无媒体」筛选按钮，一键只看没有实拍图/视频的房源", "补丁（b115）：设置页云端配置区新增「清理桶孤儿媒体」手动按钮——二次确认后全量列 h/ 桶清理孤儿媒体，同步后仍自动后台跑一次", "补丁（b116）：同步差异诊断——同步覆盖时日志记具体哪个字段不同（如 remark「xxx」vs「yyy」/媒体本地独有vs云端独有），定位「每次同步都有变化」死循环根因；字符串比较前 trim 防首尾空格误判"]),
+        ("v2.7", "2026-11-03", ["新增：【跨账号日志公共区】（b114）——云端操作日志不再按自己用户名过滤，拉取全部用户的公共日志；本机日志区同时记录所有操作。另一个用户在另一台手机上的操作，你在日志查看器云端区能看到", "新增：【同步总进度条】（b114）——点「同步云端房源」确认后，整个同步流程走全局任务中心，房源页顶部显示总进度条，样式与批量导入/补传媒体一致，可最小化到「设置→待补传媒体」查看", "优化：【补传合并写】（b114）——本地补传云端的房源从全量覆盖写改为逐套合并写：写前先读云端 info.json，mediaNames = 云端∪本地−本次删除，revision+1，避免另一用户刚加的同号房媒体被本地空名单覆盖", "新增：【桶孤儿清理】（b114）——同步完成后后台列 h/ 整桶，删除不在任何账本 mediaNames 里的孤儿媒体对象（改名/删媒体后残留的旧文件）", "优化：【户型筛选联动】（b114）——户型筛选选项只显示当前座号+状态+搜索+无媒体筛选后实际存在的户型；点了「未租」+「1座」，户型只列 1座未租 有的", "新增：【房东/户型历史下拉】（b114）——新增/编辑房源时，房东、户型输入框旁加下拉按钮，可快速选择已有值，也可手动输入新值（下拉只做辅助）", "优化：【排序图标化+无媒体筛选】（b114）——顶栏排序按钮去掉文字只留图标；旁边新增「无媒体」筛选按钮，一键只看没有实拍图/视频的房源", "补丁（b115）：设置页云端配置区新增「清理桶孤儿媒体」手动按钮——二次确认后全量列 h/ 桶清理孤儿媒体，同步后仍自动后台跑一次", "补丁（b116）：同步差异诊断——同步覆盖时日志记具体哪个字段不同（如 remark「xxx」vs「yyy」/媒体本地独有vs云端独有），定位「每次同步都有变化」死循环根因；字符串比较前 trim 防首尾空格误判", "补丁（b117）：无媒体筛选按钮图标换成 photo.on.rectangle.slash（修复图标渲染成空白圆点）；清理桶孤儿媒体改为先扫描列出全部孤儿文件+详细路径，确认后才删除，删除结果（含完整路径）写入操作日志"]),
         ("v2.6", "2026-11-03", ["修复：云端同步【本地空名单覆盖云端媒体】（b113，P0）——A 端新增带媒体房源后，B 端未先同步就添加同房号（不带媒体），B 端 mediaNames=[] 直接覆盖云端 info.json 致云端媒体名单变空；任一端同步时本地媒体被跟随删除、桶内媒体成孤儿。现改为合并写：写前先读云端，mediaNames = 云端∪本地−本次显式删除；字段（租金/状态/备注）仍以本地为准", "新增：【修订号 revision】（b113）——CloudHouseRecord 新增可选 revision 字段，每次成功写单调 +1；旧记录无此字段自动兼容", "新增：【房号改名真正迁移】（b113）——编辑房号保存时，除本地媒体目录迁移外，云端旧房号目录（info.json + 所有媒体对象）一并删除；解决录错房号改回后错误目录残留", "优化：操作日志【字段级 diff】（b113）——从「修改租金同步」升级为「修改租金1100→1200/房东业主→康同步」", "优化：【updatedBy 带设备标识】（b113）——署名从「涛」变为「涛(iPhone)」/「涛(iPad)」", "新增：【冲突合并日志】（b113）——写云端时若检测到该房云端已有记录（多设备/多账号并发），自动记一条冲突合并日志", "修复：编辑页【房号前缀丢失】（b113）——再次编辑时房号输入框从「1238上」恢复为「1-1238上」"]),
         ("v2.5", "2026-11-01", ["修复：房源卡片【底部上传进度条消失】（b112）——根因：保存房源时「媒体上传」与「云端账本同步」两个并发任务共用同一个进度发布器，先完成的账本任务把仍在进行中的媒体上传进度误清，导致进度条一闪而过或直接不显示；现改为活跃任务计数（begin/update/end），全部任务结束才清空，并发任务互不误清", "确认：批量上传【顶部进度条】正常——批量媒体补传/批量删除云端房源仍走全局同步任务中心，房源页顶部进度条＋可最小化收起到「设置→待补传媒体」查看，运行路径完整"]),
         ("v2.4", "2026-11-01", ["对比结论：电表【总刷新机制与 b94 一致】——逐行对比 b94（v1.98返修4）与最新版的总刷新代码，核心机制完全相同：串行 1.5 秒/台、单台查询失败重试一次、12 秒超时、失败户静默跳过。「总有几间刷新失败」根因是机制特性：单台只给两次机会，偶发网络抖动/单户接口异常即被放弃，且失败户无任何反馈", "调整：电表【取消打开 App 自动全刷】（b111）——移除「启动即先补刷一次」：打开 App 不再后台跑一遍全量刷新（设置页「定时自动刷新」开启时仍按间隔自动刷新，不受影响）", "调整：电表【取消进入板块自动刷新】（b111）——进入电表板块不再自动刷新（无数据/无最近刷新记录不再自动触发）；首次使用点「刷新」或「+」进电表管理即可拉取绑定", "新增：电表【总刷新失败户自动重刷】（b111）——手动点「刷新全部」跑完第一遍后自动把失败户号再重刷一遍（串行限速）；自动重刷后仍失败的房间弹窗列出房号，提示手动刷新（原机制失败户静默无提示）"]),

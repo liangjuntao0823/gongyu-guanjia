@@ -520,7 +520,7 @@ struct HouseListView: View {
             Button {
                 showOnlyNoMedia.toggle()
             } label: {
-                Image(systemName: showOnlyNoMedia ? "photo.slash.fill" : "photo.slash")
+                Image(systemName: showOnlyNoMedia ? "photo.on.rectangle.slash.fill" : "photo.on.rectangle.slash")
                     .font(.system(size: 11, weight: .semibold))
                     .frame(width: 28, height: 24)
                     .background(showOnlyNoMedia ? AppTheme.primary.opacity(0.22) : Color.secondary.opacity(0.08))
@@ -1659,48 +1659,74 @@ struct HouseListView: View {
     /// 4) 没有 info.json 的房号目录（整目录都是孤儿，如录错房号后残留）→ 整目录媒体对象全删；
     /// 5) 只删媒体对象（.jpg/.jpeg/.png/.heic/.webp/.gif/.mp4/.mov），不动 info.json 与其他系统对象。
     /// 失败静默（不打断用户），下次同步再清。
+    /// b117：孤儿媒体清单项
+    struct OrphanMedia {
+        let roomKey: String   // 房号（如 1-711上 / 2-1418下）
+        let fileName: String  // 孤儿文件名
+        var path: String { "h/\(roomKey)/\(fileName)" }
+    }
+
+    /// b117：干跑扫描——列出桶里所有孤儿媒体对象，不删。
+    static func scanOrphanMedia(config: CosConfig) async throws -> [OrphanMedia] {
+        let objs = try await CosUploader.listObjects(prefix: "h/", config: config)
+        var byRoom: [String: [String]] = [:]
+        for obj in objs {
+            let name = obj.name
+            guard name.hasPrefix("h/") else { continue }
+            let rest = String(name.dropFirst(2))
+            guard let slash = rest.firstIndex(of: "/") else { continue }
+            let roomKey = String(rest[..<slash])
+            guard !roomKey.isEmpty, !roomKey.hasPrefix("_") else { continue }
+            let file = String(rest[rest.index(after: slash)...])
+            guard !file.isEmpty else { continue }
+            byRoom[roomKey, default: []].append(file)
+        }
+        var orphans: [OrphanMedia] = []
+        for (roomKey, files) in byRoom {
+            let ledgerNames: Set<String>
+            if let rec = try? await CloudHouseSync.fetchOne(roomKey: roomKey, config: config) {
+                ledgerNames = Set(rec.mediaNames)
+            } else {
+                ledgerNames = []
+            }
+            for file in files {
+                guard file != "info.json" else { continue }
+                let lower = file.lowercased()
+                let isMedia = [".jpg", ".jpeg", ".png", ".heic", ".webp", ".gif", ".mp4", ".mov"].contains { lower.hasSuffix($0) }
+                guard isMedia else { continue }
+                let fileNorm = (file as NSString).deletingPathExtension.lowercased()
+                let ledgerHas = ledgerNames.contains { ($0 as NSString).deletingPathExtension.lowercased() == fileNorm }
+                if !ledgerHas {
+                    orphans.append(OrphanMedia(roomKey: roomKey, fileName: file))
+                }
+            }
+        }
+        return orphans
+    }
+
+    /// b117：实际删除指定孤儿清单，返回删除成功数。
+    static func deleteOrphanMedia(_ orphans: [OrphanMedia], config: CosConfig) async -> Int {
+        var deleted = 0
+        for o in orphans {
+            do {
+                try await CloudBackupService.deleteRemoteObject(name: o.path, config: config)
+                deleted += 1
+            } catch {
+                // 单个失败跳过
+            }
+        }
+        return deleted
+    }
+
+    /// 同步完成后自动后台清理（b117：用 scan+delete 两步，结果写日志）
     internal static func cleanupOrphanMedia(config: CosConfig, knownRoomKeys: Set<String> = []) async {
         do {
-            let objs = try await CosUploader.listObjects(prefix: "h/", config: config)
-            // 按房号分组
-            var byRoom: [String: [String]] = [:]
-            for obj in objs {
-                let name = obj.name
-                guard name.hasPrefix("h/") else { continue }
-                let rest = String(name.dropFirst(2))
-                guard let slash = rest.firstIndex(of: "/") else { continue }
-                let roomKey = String(rest[..<slash])
-                guard !roomKey.isEmpty, !roomKey.hasPrefix("_") else { continue }
-                let file = String(rest[rest.index(after: slash)...])
-                guard !file.isEmpty else { continue }
-                byRoom[roomKey, default: []].append(file)
-            }
-            var deletedCount = 0
-            for (roomKey, files) in byRoom {
-                // 读账本名单
-                let ledgerNames: Set<String>
-                if let rec = try? await CloudHouseSync.fetchOne(roomKey: roomKey, config: config) {
-                    ledgerNames = Set(rec.mediaNames)
-                } else {
-                    ledgerNames = []   // 无账本 → 整目录孤儿
-                }
-                for file in files {
-                    guard file != "info.json" else { continue }
-                    let lower = file.lowercased()
-                    let isMedia = [".jpg", ".jpeg", ".png", ".heic", ".webp", ".gif", ".mp4", ".mov"].contains { lower.hasSuffix($0) }
-                    guard isMedia else { continue }
-                    // 归一化比较（.mov/.mp4 等价）
-                    let fileNorm = (file as NSString).deletingPathExtension.lowercased()
-                    let ledgerHas = ledgerNames.contains { ($0 as NSString).deletingPathExtension.lowercased() == fileNorm }
-                    if !ledgerHas {
-                        try? await CloudBackupService.deleteRemoteObject(name: "h/\(roomKey)/\(file)", config: config)
-                        deletedCount += 1
-                    }
-                }
-            }
-            if deletedCount > 0 {
+            let orphans = try await scanOrphanMedia(config: config)
+            guard !orphans.isEmpty else { return }
+            let deleted = await deleteOrphanMedia(orphans, config: config)
+            if deleted > 0 {
                 await MainActor.run {
-                    BackupLogStore.log(category: "同步", action: "桶孤儿清理", result: "成功", detail: "清理 \(deletedCount) 个残留媒体对象", cloud: true)
+                    BackupLogStore.log(category: "同步", action: "桶孤儿清理", result: "成功", detail: "自动清理 \(deleted) 个残留媒体对象", cloud: true)
                 }
             }
         } catch {
