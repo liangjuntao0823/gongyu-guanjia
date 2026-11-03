@@ -1649,7 +1649,7 @@ struct HouseListView: View {
     /// 4) 没有 info.json 的房号目录（整目录都是孤儿，如录错房号后残留）→ 整目录媒体对象全删；
     /// 5) 只删媒体对象（.jpg/.jpeg/.png/.heic/.webp/.gif/.mp4/.mov），不动 info.json 与其他系统对象。
     /// 失败静默（不打断用户），下次同步再清。
-    private static func cleanupOrphanMedia(config: CosConfig, knownRoomKeys: Set<String>) async {
+    internal static func cleanupOrphanMedia(config: CosConfig, knownRoomKeys: Set<String> = []) async {
         do {
             let objs = try await CosUploader.listObjects(prefix: "h/", config: config)
             // 按房号分组
