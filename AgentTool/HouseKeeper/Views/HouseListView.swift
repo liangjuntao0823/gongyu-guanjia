@@ -1592,7 +1592,7 @@ struct HouseListView: View {
                     // b118（1-711 死循环收敛）：账本名单里有、桶里没有等价对象的失效媒体引用
                     // （下载永远失败 → 本地永远缺 → 每次同步都判「云端独有」→ 无限循环，实测 1-711-mov-2b237b6b-1）。
                     // 本次同步把这类失效名从云端账本剔除写回，下次同步零差异，循环终止。
-                    let missingLedger = await CosUploader.missingLedgerMedia(roomKey: roomKey, expectedNames: rec.mediaNames, config: config)
+                    let missingLedger = await CloudHouseSync.missingLedgerMedia(roomKey: roomKey, expectedNames: rec.mediaNames, config: config)
                     if !missingLedger.isEmpty {
                         var pruned = rec
                         let dropNorm = Set(missingLedger.map { ($0 as NSString).deletingPathExtension.lowercased() })

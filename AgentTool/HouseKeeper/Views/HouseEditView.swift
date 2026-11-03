@@ -473,7 +473,7 @@ struct HouseEditView: View {
                         }
                         let key = tower == 2 ? "2-\(clean)" : "1-\(clean)"
                         Task {
-                            if let rec = try? await CosUploader.fetchOne(roomKey: key, config: config) {
+                            if let rec = try? await CloudHouseSync.fetchOne(roomKey: key, config: config) {
                                 await MainActor.run {
                                     cloudConflictRec = rec
                                     showCloudConflictAlert = true
