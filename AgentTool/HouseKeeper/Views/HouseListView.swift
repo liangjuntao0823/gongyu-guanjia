@@ -16,6 +16,8 @@ struct HouseListView: View {
     @State private var houses: [House] = []
 
     static let houseStoreChanged = Notification.Name("houseStoreChanged")
+    /// b118（清单12）：打开 App 轻量变更感知——启动/回前台探测云端账本有变化时广播
+    static let cloudLedgerChangedLight = Notification.Name("cloudLedgerChangedLight")
 
     /// v1.67：后台线程安全的媒体对账快照——SwiftData @Model 属性（mediaItems 等）只能在
     /// 主线程/模型上下文访问，跨线程读会崩溃（v1.66 刷新「点击没反应」根因）。
@@ -411,6 +413,11 @@ struct HouseListView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: Self.houseStoreChanged)) { _ in
             reloadHouses()
+        }
+        // b118（清单12：打开 App 轻量变更感知）：App 启动/回前台探测到云端账本有变化 →
+        // 顶部横幅轻提示「云端有更新」，用户下拉刷新即同步（不自动拉取，省流量、不打断当前操作）
+        .onReceive(NotificationCenter.default.publisher(for: Self.cloudLedgerChangedLight)) { _ in
+            showToast("检测到云端房源有更新，下拉刷新即可同步")
         }
     }
 
@@ -1582,6 +1589,20 @@ struct HouseListView: View {
                         HouseSyncProgress.shared.update(roomKey: roomKey, direction: .download, progress: p)
                     })) ?? []
                     HouseSyncProgress.shared.update(roomKey: roomKey, direction: .download, progress: 1)
+                    // b118（1-711 死循环收敛）：账本名单里有、桶里没有等价对象的失效媒体引用
+                    // （下载永远失败 → 本地永远缺 → 每次同步都判「云端独有」→ 无限循环，实测 1-711-mov-2b237b6b-1）。
+                    // 本次同步把这类失效名从云端账本剔除写回，下次同步零差异，循环终止。
+                    let missingLedger = await CosUploader.missingLedgerMedia(roomKey: roomKey, expectedNames: rec.mediaNames, config: config)
+                    if !missingLedger.isEmpty {
+                        var pruned = rec
+                        let dropNorm = Set(missingLedger.map { ($0 as NSString).deletingPathExtension.lowercased() })
+                        pruned.mediaNames = rec.mediaNames.filter { !dropNorm.contains(($0 as NSString).deletingPathExtension.lowercased()) }
+                        if pruned.mediaNames.count != rec.mediaNames.count {
+                            _ = try? await CloudHouseSync.uploadGuarded(record: pruned, removedMedia: Set(missingLedger), config: config)
+                            BackupLogStore.log(category: "同步", action: "清理账本失效媒体引用", result: "成功",
+                                               detail: "\(roomKey)：桶中不存在 \(missingLedger.joined(separator: "，"))，已从云端账本剔除", cloud: true)
+                        }
+                    }
                     mediaSaved += files.count
                     await MainActor.run {
                         let all = (try? ctx.fetch(FetchDescriptor<House>())) ?? []

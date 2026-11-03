@@ -38,11 +38,16 @@ struct HouseEditView: View {
     @State private var showOfflineAlert = false
     // v1.42：保存后云端上传失败 → 提示「已存本机，待网络恢复自动补传」（此前静默入队，用户无感知）
     @State private var pendingUploadTip: String?
+    /// b118（P0③ CAS）：上传被写前校验拦截（云端已被他人更新）→ 独立提示，不覆盖云端数据
+    @State private var conflictUploadTip: String?
 
     /// 用户是否手动改过座号（改过后不再被房号前缀自动覆盖）
     @State private var towerTouched = false
     /// 编辑前原房号目录 key（房号变更时迁移媒体目录）
     @State private var originalRoomKey = ""
+    /// b118（P0① 先探后写）：新增保存前探测到云端已有同房号记录 → 三选一（同步到本地/仍然覆盖/取消）
+    @State private var cloudConflictRec: CloudHouseRecord?
+    @State private var showCloudConflictAlert = false
     /// v1.7：房号实时查重——输入时即提示（变红），与保存时校验同一口径
     @State private var duplicateHint: House?
     @State private var showDuplicateHint = false
@@ -105,6 +110,33 @@ struct HouseEditView: View {
                     Button("好", role: .cancel) {}
                 } message: {
                     Text(pendingUploadTip ?? "")
+                }
+                // b118（P0① 先探后写）：新增时探测到云端已有同房号记录 → 三选一，不再静默覆盖他人数据
+                .alert("云端已存在该房号", isPresented: $showCloudConflictAlert) {
+                    Button("同步到本地", role: .none) {
+                        applyCloudToForm(cloudConflictRec)
+                        cloudConflictRec = nil
+                    }
+                    Button("仍然覆盖", role: .destructive) {
+                        performSave()
+                        cloudConflictRec = nil
+                    }
+                    Button("取消", role: .cancel) { cloudConflictRec = nil }
+                } message: {
+                    if let rec = cloudConflictRec {
+                        Text("云端已有「\(rec.roomKey)」（房东：\(rec.landlord.isEmpty ? "未填" : rec.landlord)、户型：\(rec.layout.isEmpty ? "未填" : rec.layout)、租金：\(rec.price)、更新于 \(rec.updatedAt.formatted(date: .abbreviated, time: .shortened))）。\n该记录可能由其他设备录入，为避免覆盖他人数据请选择操作。")
+                    } else {
+                        Text("云端已有该房号记录。")
+                    }
+                }
+                // b118（P0③ CAS）：上传被写前校验拦截（读-写窗口内云端被他人更新）→ 独立提示
+                .alert("云端数据已更新", isPresented: Binding(
+                    get: { conflictUploadTip != nil },
+                    set: { if !$0 { conflictUploadTip = nil } }
+                )) {
+                    Button("好", role: .cancel) {}
+                } message: {
+                    Text(conflictUploadTip ?? "")
                 }
                 .onAppear(perform: loadFromHouse)
         }
@@ -420,14 +452,99 @@ struct HouseEditView: View {
         // v1.40 第10点：无稳定网络 → 先提示「仅存本机」，用户确认后再保存（避免静默只存本地造成误解）
         // v1.66：改为异步确认（最多等 1.2s），避免 NWPathMonitor 未就绪/路径切换瞬间误报离线——
         // 此前「有网络但保存提示没网络、取消再保存就好了」即瞬态误报
+        // b118（P0① 先探后写 + P0⑤ 房号改名竞态加固）：
+        //   新增 → 保存前先查云端同房号，云端已有他人记录 → 弹三选一（同步到本地/仍然覆盖/取消），不再静默覆盖；
+        //   改名 → 保存前先把云端旧房号目录删干净（await），避免保存后立刻下拉刷新把旧房号拉回本地。
         Task {
             let ok = await NetworkMonitor.shared.awaitReachable()
             if ok {
-                await MainActor.run { performSave() }
+                await MainActor.run {
+                    guard let config = CosConfig.load(), config.isValid else {
+                        performSave()
+                        return
+                    }
+                    // 先探后写：新增时云端已有同房号记录 → 三选一
+                    if house == nil {
+                        let clean = cleanRoomNoText()
+                        guard !clean.isEmpty else {
+                            errorMessage = "请填写房号"
+                            showError = true
+                            return
+                        }
+                        let key = tower == 2 ? "2-\(clean)" : "1-\(clean)"
+                        Task {
+                            if let rec = try? await CosUploader.fetchOne(roomKey: key, config: config) {
+                                await MainActor.run {
+                                    cloudConflictRec = rec
+                                    showCloudConflictAlert = true
+                                }
+                            } else {
+                                await MainActor.run { performSave() }
+                            }
+                        }
+                    } else {
+                        // 房号改名：先 await 清云端旧目录，再落盘（杜绝「保存后刷新拉回旧房号」竞态）
+                        let newKey = computeNewRoomKey()
+                        if newKey != originalRoomKey && !originalRoomKey.isEmpty {
+                            Task {
+                                await purgeOldCloudRoom(oldRoomKey: originalRoomKey, config: config)
+                                await MainActor.run { performSave() }
+                            }
+                        } else {
+                            performSave()
+                        }
+                    }
+                }
             } else {
                 await MainActor.run { showOfflineAlert = true }
             }
         }
+    }
+
+    /// 与 performSave 相同口径：清洗前缀后返回规范房号（去 2-/1- 前缀）
+    private func cleanRoomNoText() -> String {
+        roomNo.trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "2－", with: "2-")
+            .replacingOccurrences(of: "1－", with: "1-")
+            .replacingOccurrences(of: "2-", with: "")
+            .replacingOccurrences(of: "1-", with: "")
+    }
+
+    /// 与 performSave 相同口径：计算本次将写入的云端房号目录 key（与 House.mediaRoomKey 派生规则一致）
+    private func computeNewRoomKey() -> String {
+        let clean = cleanRoomNoText()
+        let towerOfRecord = house?.tower ?? tower
+        let raw = towerOfRecord == 2 ? "2-\(clean)" : "1-\(clean)"
+        let illegal = CharacterSet(charactersIn: "/:\\?%*|\"<>")
+        return raw.components(separatedBy: illegal).joined(separator: "-")
+    }
+
+    /// b118（P0⑤）：保存改名前，把云端旧房号目录（账本 + 全部媒体对象）删干净再落盘，
+    /// 避免旧账本在下次同步被拉回本地（用户实测「1-11238上 残留」的根因）。
+    private func purgeOldCloudRoom(oldRoomKey: String, config: CosConfig) async {
+        try? await CloudHouseSync.delete(roomKey: oldRoomKey, config: config)
+        let objs = (try? await CosUploader.listObjects(prefix: "h/\(oldRoomKey)/", config: config)) ?? []
+        await withTaskGroup(of: Void.self) { group in
+            for obj in objs {
+                group.addTask { _ = try? await CloudBackupService.deleteRemoteObject(name: obj.name, config: config) }
+            }
+        }
+        BackupLogStore.log(category: "房源", action: "房号迁移", result: "成功",
+                           detail: "\(oldRoomKey) → 云端旧目录已清理（账本 + \(objs.count) 个媒体对象）", cloud: true)
+    }
+
+    /// b118（P0① 先探后写）：用户选「同步到本地」——把云端记录填回编辑表单，可继续编辑后再保存
+    private func applyCloudToForm(_ rec: CloudHouseRecord?) {
+        guard let rec else { return }
+        roomNo = rec.roomNo
+        tower = rec.tower
+        landlord = rec.landlord
+        layout = rec.layout
+        priceText = rec.price > 0 ? "\(rec.price)" : ""
+        password = rec.password
+        remark = rec.remark
+        status = HouseStatus(rawValue: rec.status) ?? .available
+        towerTouched = true
     }
 
     private func performSave() {
@@ -560,6 +677,8 @@ struct HouseEditView: View {
         pushHouseMediaToCloud(target, originalNames: roomChanged ? [] : originalMediaNames)
 
         // v2.6：房号改名时删云端旧房号目录（账本+媒体），避免残留导致下次同步提示"补录错误房源"
+        // b118（P0⑤）：正常保存路径的旧目录删除已提前到 save() 内 await（purgeOldCloudRoom），
+        // 这里仅作为无网络「仅存本机」等路径的兜底；目录已删干净时不重复记日志。
         if roomChanged, let config = CosConfig.load(), config.isValid {
             let oldRoomKey = originalRoomKey
             let newRoomKey = target.mediaRoomKey
@@ -568,11 +687,13 @@ struct HouseEditView: View {
                 try? await CloudHouseSync.delete(roomKey: oldRoomKey, config: config)
                 // 删云端旧目录下所有媒体对象
                 let objs = (try? await CosUploader.listObjects(prefix: "h/\(oldRoomKey)/", config: config)) ?? []
-                for obj in objs {
-                    try? await CloudBackupService.deleteRemoteObject(name: obj.name, config: config)
+                if !objs.isEmpty {
+                    for obj in objs {
+                        try? await CloudBackupService.deleteRemoteObject(name: obj.name, config: config)
+                    }
+                    BackupLogStore.log(category: "房源", action: "房号迁移", result: "成功",
+                                       detail: "\(oldRoomKey) → \(newRoomKey)（已清云端旧目录）", cloud: true)
                 }
-                BackupLogStore.log(category: "房源", action: "房号迁移", result: "成功",
-                                   detail: "\(oldRoomKey) → \(newRoomKey)（已清云端旧目录）", cloud: true)
             }
         }
         // v1.54：保存后自动生成/更新该房源的脱敏版 H5（删旧生成新）——
@@ -696,10 +817,17 @@ struct HouseEditView: View {
             } catch {
                 HouseSyncProgress.shared.end()
                 BackupLogStore.log(category: "房源", action: action, result: "失败", detail: "\(house.displayRoomNo)：\(error.localizedDescription)", cloud: true)
-                // v1.42：保存成功但账本上传失败 → 提示待网络恢复后刷新同步（此前只写日志，用户无感知）
-                await MainActor.run {
-                    if pendingUploadTip == nil {
-                        pendingUploadTip = "房源已保存到本机；同步云端失败（网络不通），联网后在房源列表下拉刷新即可补传。"
+                // b118（P0③ CAS）：写前校验发现云端已被他人更新 → 明确提示，未覆盖云端数据
+                if error is CloudSyncConflict {
+                    await MainActor.run {
+                        conflictUploadTip = "「\(house.displayRoomNo)」刚被其他设备更新（\(error.localizedDescription)）。本次修改仅保存在本机，未覆盖云端数据；请刷新同步后再编辑。"
+                    }
+                } else {
+                    // v1.42：保存成功但账本上传失败 → 提示待网络恢复后刷新同步（此前只写日志，用户无感知）
+                    await MainActor.run {
+                        if pendingUploadTip == nil {
+                            pendingUploadTip = "房源已保存到本机；同步云端失败（网络不通），联网后在房源列表下拉刷新即可补传。"
+                        }
                     }
                 }
             }

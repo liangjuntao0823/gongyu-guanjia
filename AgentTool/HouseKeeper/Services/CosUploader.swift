@@ -3187,6 +3187,17 @@ struct CosObjectNotFoundError: Error, LocalizedError {
     var errorDescription: String? { "云端对象不存在: \(path)" }
 }
 
+/// b118（P0③ CAS）：写前校验发现云端记录已被他人更新，放弃覆盖
+enum CloudSyncConflict: Error, LocalizedError {
+    case recordChanged(roomKey: String, by: String)
+    var errorDescription: String? {
+        switch self {
+        case .recordChanged(let roomKey, let by):
+            return "云端「\(roomKey)」刚被 \(by) 更新，已停止覆盖（请刷新后再编辑）"
+        }
+    }
+}
+
 enum CloudHouseSync {
     /// 单套账本对象路径（媒体与账本同目录）
     static func recordPath(roomKey: String) -> String {
@@ -3296,6 +3307,8 @@ enum CloudHouseSync {
     /// v2.6 合并写（防"本地空名单覆盖云端媒体"bug）：
     /// 写前先读云端现有 info.json，把媒体名单合并为「云端 ∪ 本地 − 本次显式删除」，
     /// 字段级（租金/状态/备注等）以本地为准；revision 单调 +1。
+    /// b118（P0③ CAS）：写前二次读取校验——读-写窗口内 revision 已变（另一设备刚写入）→ 抛冲突放弃写，
+    /// 不再无条件覆盖他人数据；调用方捕获后提示用户刷新后重试。
     /// - removedMedia: 本次编辑显式删除的媒体文件名（来自编辑前快照）；新增房源传空集。
     /// - 返回: (mergedRecord, hadExisting: Bool)——hadExisting=YES 表示云端原本已有该房（调用方可记冲突日志）
     static func uploadGuarded(record: CloudHouseRecord, removedMedia: Set<String> = [], config: CosConfig) async throws -> (CloudHouseRecord, Bool) {
@@ -3307,12 +3320,40 @@ enum CloudHouseSync {
             // 合并：云端和本地都保留，本次显式删除的排除
             merged.mediaNames = Array(cloudSet.union(localSet).subtracting(removedMedia))
             merged.revision = (existing.revision ?? 0) + 1
+            // b118 CAS：写前再读一次云端，revision 已变化（他人刚写入）→ 放弃写、抛冲突
+            if let fresh = try? await fetchOne(roomKey: record.roomKey, config: config),
+               (fresh.revision ?? 0) != (existing.revision ?? 0) {
+                throw CloudSyncConflict.recordChanged(roomKey: record.roomKey, by: fresh.updatedBy.isEmpty ? "其他账号" : fresh.updatedBy)
+            }
             // updatedAt 用本地（本地刚保存的最新），updatedBy 已在调用方填好
         } else {
             merged.revision = 1
         }
         try await upload(record: merged, config: config)
         return (merged, existing != nil)
+    }
+
+    /// b118（1-711 死循环收敛）：列出「账本名单里有、但桶 h/<房号>/ 里不存在等价对象」的失效媒体名。
+    /// 这类媒体下载永远失败（downloadHouseMedia 对桶中找不到的会跳过不硬下），本地永远缺，
+    /// 每次同步都判「云端独有」→ 反复触发下载 → 无限循环（实测 1-711-mov-2b237b6b-1）。
+    /// 同步对账收尾时调用，把这些失效引用从云端账本剔除写回，循环即终止。
+    static func missingLedgerMedia(roomKey: String, expectedNames: [String], config: CosConfig) async -> [String] {
+        guard !expectedNames.isEmpty else { return [] }
+        let objs = (try? await CosUploader.listObjects(prefix: "h/\(roomKey)/", config: config)) ?? []
+        var remoteByNormKey: Set<String> = []
+        for obj in objs {
+            let name = (obj.name as NSString).lastPathComponent
+            let lower = name.lowercased()
+            let isMedia = [".jpg", ".jpeg", ".png", ".heic", ".webp", ".gif", ".mp4", ".mov"].contains { lower.hasSuffix($0) }
+            guard isMedia else { continue }
+            remoteByNormKey.insert((name as NSString).deletingPathExtension.lowercased())
+        }
+        var missing: [String] = []
+        for expected in expectedNames {
+            let norm = (expected as NSString).deletingPathExtension.lowercased()
+            if !remoteByNormKey.contains(norm) { missing.append(expected) }
+        }
+        return missing
     }
 
     /// 删除云端某房账本（info.json；整套目录删除由 deleteHouseRemoteFolder 一并处理媒体+账本）

@@ -438,6 +438,8 @@ struct MainTabView: View {
             Task { await CloudBackupService.enforceCloudRetention() }
             // v1.40 第5点：启动时重试房源媒体自动补传队列（分享上传失败后下次启动/回前台自动补传）
             Task { await HouseMediaUploadQueue.retryAll() }
+            // b118（清单12：打开 App 轻量变更感知）：启动时轻量探测云端房源账本是否有变化
+            detectCloudLedgerChange()
             LocalNotificationManager.shared.deliverMissedNotifications()
             LocalNotificationManager.shared.rebuildAll(modelContext: modelContext)
             WidgetDataSync.sync(modelContext: modelContext)
@@ -452,6 +454,8 @@ struct MainTabView: View {
             Task { await CloudBackupService.retryPendingUploads() }
             // v1.40 第5点：回前台重试房源媒体补传队列
             Task { await HouseMediaUploadQueue.retryAll() }
+            // b118（清单12）：回前台同样做轻量变更感知
+            detectCloudLedgerChange()
             WidgetDataSync.sync(modelContext: modelContext)
         }
         .onReceive(automaticBackupTimer) { _ in
@@ -589,6 +593,30 @@ struct MainTabView: View {
                 } message: {
                     Text(importRestoreError ?? "")
                 }
+        }
+    }
+
+    /// b118（清单12：打开 App 轻量变更感知）：启动/回前台时轻量探测云端房源账本是否有变化。
+    /// 只列一次 h/ 桶目录（对象名+大小+修改时间，不下载任何内容），与本地基线对比；
+    /// 有变化 → 更新基线并广播通知，房源列表收到后顶部横幅轻提示「云端有更新」，用户下拉刷新即同步。
+    /// 首次启动（无基线）只静默建基线不提示，避免首装误报。
+    private func detectCloudLedgerChange() {
+        Task {
+            guard let config = CosConfig.load(), config.isValid else { return }
+            let objs = (try? await CosUploader.listObjects(prefix: "h/", config: config)) ?? []
+            var current: [String: String] = [:]
+            for obj in objs {
+                let name = obj.name
+                guard name.hasSuffix("/info.json") else { continue }
+                current[name] = "\(obj.size)-\(Int64(obj.date.timeIntervalSince1970))"
+            }
+            let key = "cloudLedgerBaseline.v1"
+            let baseline = (UserDefaults.standard.dictionary(forKey: key) as? [String: String]) ?? [:]
+            let changed = current != baseline
+            UserDefaults.standard.set(current, forKey: key)
+            if changed && !baseline.isEmpty {
+                NotificationCenter.default.post(name: HouseListView.cloudLedgerChangedLight, object: nil)
+            }
         }
     }
 
