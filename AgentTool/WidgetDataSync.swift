@@ -2,6 +2,22 @@ import Foundation
 import SwiftData
 import WidgetKit
 
+// 在 embedded.mobileprovision 的字节流中查找 XML plist 边界（该文件是 CMS 签名包，XML 是明文段）
+extension Array where Element == UInt8 {
+    func firstPatternIndex(of pattern: [UInt8]) -> Int? {
+        guard !pattern.isEmpty, count >= pattern.count else { return nil }
+        for i in 0...(count - pattern.count) {
+            var match = true
+            for j in 0..<pattern.count where self[i + j] != pattern[j] {
+                match = false
+                break
+            }
+            if match { return i }
+        }
+        return nil
+    }
+}
+
 // 主 App → 小组件数据同步
 // 启动/回前台/数据变化时调用 sync(modelContext:)，把看板指标写进 App Group，再刷新小组件。
 enum WidgetDataSync {
@@ -10,12 +26,21 @@ enum WidgetDataSync {
     /// 无描述文件（巨魔/本地直装）回退工程配置的 group.com.gj.tg.shared。
     static var appGroupID: String {
         guard let provURL = Bundle.main.url(forResource: "embedded", withExtension: "mobileprovision"),
-              let data = try? Data(contentsOf: provURL),
-              let xml = Data("<?xml".utf8),
-              let start = data.range(of: xml),
-              let endTag = Data("</plist>".utf8),
-              let endRange = data.range(of: endTag, options: [], range: start.lowerBound..<data.endIndex),
-              let plist = try? PropertyListSerialization.propertyList(from: data.subdata(in: start.lowerBound..<endRange.upperBound), options: [], format: nil),
+              let data = try? Data(contentsOf: provURL)
+        else {
+            return "group.com.gj.tg.shared"
+        }
+        let bytes = [UInt8](data)
+        let xmlTag: [UInt8] = Array("<?xml".utf8)
+        let plistTag: [UInt8] = Array("</plist>".utf8)
+        guard let start = bytes.firstPatternIndex(of: xmlTag),
+              let end = bytes.firstPatternIndex(of: plistTag),
+              end > start
+        else {
+            return "group.com.gj.tg.shared"
+        }
+        let plistData = Data(bytes[start..<(end + plistTag.count)])
+        guard let plist = try? PropertyListSerialization.propertyList(from: plistData, options: [], format: nil),
               let dict = plist as? [String: Any],
               let ents = dict["Entitlements"] as? [String: Any],
               let groups = ents["com.apple.security.application-groups"] as? [String],
