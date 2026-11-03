@@ -308,7 +308,13 @@ struct HouseEditView: View {
 
     private func loadFromHouse() {
         guard let house else { return }
-        roomNo = house.roomNo
+        // v2.6：编辑时房号显示带座号前缀（如"1-1238上"），与新增输入框一致；保存时 cleanRoomNo 会自动去前缀
+        let rawRoom = house.roomNo
+        if house.tower == 2 {
+            roomNo = rawRoom.hasPrefix("2-") ? rawRoom : "2-\(rawRoom)"
+        } else {
+            roomNo = rawRoom.hasPrefix("1-") ? rawRoom : "1-\(rawRoom)"
+        }
         tower = house.tower
         landlord = house.landlord
         layout = house.layout
@@ -490,14 +496,15 @@ struct HouseEditView: View {
         target.lastUpdatedAt = Date()
 
         // v1.72（#7）：按编辑前后字段差异生成详细同步动作（修改租金同步 / 修改户型同步 …）
+        // v2.6：日志细化到字段值对比——如「租金1100→1200」「房东业主→康」
         var syncAction = "新增房源同步"
         if let before {
             var changed: [String] = []
             if before.roomNo != target.roomNo || before.tower != target.tower { changed.append("房号") }
-            if before.landlord != target.landlord { changed.append("房东") }
-            if before.layout != target.layout { changed.append("户型") }
-            if before.price != target.price { changed.append("租金") }
-            if before.password != target.password { changed.append("密码") }
+            if before.landlord != target.landlord { changed.append("房东\(before.landlord)→\(target.landlord)") }
+            if before.layout != target.layout { changed.append("户型\(before.layout)→\(target.layout)") }
+            if before.price != target.price { changed.append("租金\(before.price)→\(target.price)") }
+            if before.password != target.password { changed.append("密码已改") }
             if before.remark != target.remark { changed.append("备注") }
             if before.status != target.status { changed.append("状态") }
             syncAction = changed.isEmpty ? "修改房源同步" : "修改" + changed.joined(separator: "/") + "同步"
@@ -517,6 +524,23 @@ struct HouseEditView: View {
         // v1.41 语义保持：上传失败自动入队，启动/回前台自动补传
         let roomChanged = isEditing && !originalRoomKey.isEmpty && originalRoomKey != target.mediaRoomKey
         pushHouseMediaToCloud(target, originalNames: roomChanged ? [] : originalMediaNames)
+
+        // v2.6：房号改名时删云端旧房号目录（账本+媒体），避免残留导致下次同步提示"补录错误房源"
+        if roomChanged, let config = CosConfig.load(), config.isValid {
+            let oldRoomKey = originalRoomKey
+            let newRoomKey = target.mediaRoomKey
+            Task {
+                // 删云端旧账本
+                try? await CloudHouseSync.delete(roomKey: oldRoomKey, config: config)
+                // 删云端旧目录下所有媒体对象
+                let objs = (try? await CosUploader.listObjects(prefix: "h/\(oldRoomKey)/", config: config)) ?? []
+                for obj in objs {
+                    try? await CloudBackupService.deleteRemoteObject(name: obj.name, config: config)
+                }
+                BackupLogStore.log(category: "房源", action: "房号迁移", result: "成功",
+                                   detail: "\(oldRoomKey) → \(newRoomKey)（已清云端旧目录）", cloud: true)
+            }
+        }
         // v1.54：保存后自动生成/更新该房源的脱敏版 H5（删旧生成新）——
         //        保证「新增了房源就自动有分享页」，选房链接里点卡片即可打开完整详情；
         //        编辑保存时旧 H5 立即失效、生成新 H5（内容与最新房源信息一致）
@@ -544,7 +568,10 @@ struct HouseEditView: View {
         LocalHouseLedger.save(target)
         // v1.19：新增 / 编辑保存后同步到云端账本（共享房源）
         // v1.72（#7）：日志动作按实际改动命名（修改租金同步等）；（#8）账本上传也驱动卡片进度条
-        pushHouseToCloud(target, action: syncAction)
+        // v2.6：传 removedMedia（编辑前快照 − 当前媒体），让合并写正确排除本次显式删除的媒体
+        let currentMediaNames = Set(target.mediaItems.map { $0.fileName })
+        let removedMedia = originalMediaNames.subtracting(currentMediaNames)
+        pushHouseToCloud(target, action: syncAction, removedMedia: removedMedia)
         NotificationCenter.default.post(name: HouseListView.houseStoreChanged, object: nil)
         dismiss()
     }
@@ -608,20 +635,28 @@ struct HouseEditView: View {
         }
     }
 
-    /// 保存后把房源推到云端账本（读改写，同房号覆盖）。无云存储配置则跳过（仅本地）。
+    /// 保存后把房源推到云端账本（v2.6 合并写）。无云存储配置则跳过（仅本地）。
     /// v1.72（#7）：action 传详细动作名（修改租金同步/新增房源同步…）；（#8）账本上传也驱动卡片底部进度条。
-    private func pushHouseToCloud(_ house: House, action: String) {
+    /// v2.6：改用 uploadGuarded——写前先读云端，媒体名单合并（防本地空名单覆盖云端媒体），
+    ///       云端已有该房时记一条冲突日志（谁、何时、本地字段覆盖）。
+    private func pushHouseToCloud(_ house: House, action: String, removedMedia: Set<String> = []) {
         guard let config = CosConfig.load() else { return }
         let record = CloudHouseSync.record(from: house, username: CloudUser.username)
         // v2.4：账本上传用 begin 计数——与并发中的媒体上传任务并存，完成后 end 不会误清媒体进度
         HouseSyncProgress.shared.begin(roomKey: house.mediaRoomKey, direction: .upload, progress: 0.2, label: "同步账本")
         Task {
             do {
-                try await CloudHouseSync.upload(record: record, config: config)
+                let (merged, hadExisting) = try await CloudHouseSync.uploadGuarded(record: record, removedMedia: removedMedia, config: config)
                 HouseSyncProgress.shared.end()
                 await MainActor.run {
                     house.cloudStatus = .both
                     try? modelContext.save()
+                }
+                // v2.6：云端已有该房时记一条冲突日志（跨账号/多设备可追溯）
+                if hadExisting && merged.mediaNames != record.mediaNames {
+                    BackupLogStore.log(category: "同步", action: "冲突合并", result: "成功",
+                                       detail: "\(house.displayRoomNo)：云端原有媒体 \(record.mediaNames.count)→合并后 \(merged.mediaNames.count) 个",
+                                       cloud: true)
                 }
                 BackupLogStore.log(category: "房源", action: action, result: "成功", detail: house.displayRoomNo, cloud: true)
             } catch {

@@ -3051,6 +3051,15 @@ enum CloudUser {
         get { UserDefaults.standard.string(forKey: key) ?? "" }
         set { UserDefaults.standard.set(newValue, forKey: key) }
     }
+    /// v2.6：设备短标签（区分同账号多设备）——"iPhone"/"iPad"/"其他"
+    static var deviceTag: String {
+        UIDevice.current.userInterfaceIdiom == .pad ? "iPad" : "iPhone"
+    }
+    /// v2.6：带设备标识的署名（用于 updatedBy / 日志）——如 "涛(iPhone)"
+    static var signedUsername: String {
+        let name = username.trimmingCharacters(in: .whitespacesAndNewlines)
+        return name.isEmpty ? "未设置(\(deviceTag))" : "\(name)(\(deviceTag))"
+    }
     static var displayName: String { username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "未设置" : username }
     /// v1.24：多用户数据隔离——用户名不设默认（默认空，不预填「涛」），强制用户自行设置。
     /// 隔离路径里空用户名用「未设置」占位，绝不落到公共前缀（避免不同设备误共用同一目录互相覆盖）。
@@ -3162,6 +3171,8 @@ struct CloudHouseRecord: Codable, Identifiable {
     var updatedAt: Date
     var updatedBy: String
     var mediaNames: [String]
+    /// v2.6：单调递增修订号（每次成功写 +1），旧记录无此字段时为 nil（按 0 处理）
+    var revision: Int64?
 }
 
 /// 云端房源账本读写（v1.71 方案 A）：一房一文件——每套房在 h/<房号>/info.json 存自己的记录，
@@ -3193,8 +3204,9 @@ enum CloudHouseSync {
             remark: house.remark,
             status: house.statusRaw,
             updatedAt: house.lastUpdatedAt ?? house.updatedAt,
-            updatedBy: username,
-            mediaNames: house.mediaItems.map { $0.fileName }
+            updatedBy: CloudUser.signedUsername,   // v2.6：带设备标识（如 "涛(iPhone)"）
+            mediaNames: house.mediaItems.map { $0.fileName },
+            revision: nil
         )
     }
 
@@ -3278,6 +3290,28 @@ enum CloudHouseSync {
     static func upload(record: CloudHouseRecord, config: CosConfig) async throws {
         let data = try JSONEncoder().encode(record)
         try await CosUploader.upload(data: data, to: recordPath(roomKey: record.roomKey), contentType: "application/json", config: config)
+    }
+
+    /// v2.6 合并写（防"本地空名单覆盖云端媒体"bug）：
+    /// 写前先读云端现有 info.json，把媒体名单合并为「云端 ∪ 本地 − 本次显式删除」，
+    /// 字段级（租金/状态/备注等）以本地为准；revision 单调 +1。
+    /// - removedMedia: 本次编辑显式删除的媒体文件名（来自编辑前快照）；新增房源传空集。
+    /// - 返回: (mergedRecord, hadExisting: Bool)——hadExisting=YES 表示云端原本已有该房（调用方可记冲突日志）
+    static func uploadGuarded(record: CloudHouseRecord, removedMedia: Set<String> = [], config: CosConfig) async throws -> (CloudHouseRecord, Bool) {
+        let existing = try? await fetchOne(roomKey: record.roomKey, config: config)
+        var merged = record
+        if let existing {
+            let cloudSet = Set(existing.mediaNames)
+            let localSet = Set(record.mediaNames)
+            // 合并：云端和本地都保留，本次显式删除的排除
+            merged.mediaNames = Array(cloudSet.union(localSet).subtracting(removedMedia))
+            merged.revision = (existing.revision ?? 0) + 1
+            // updatedAt 用本地（本地刚保存的最新），updatedBy 已在调用方填好
+        } else {
+            merged.revision = 1
+        }
+        try await upload(record: merged, config: config)
+        return (merged, existing != nil)
     }
 
     /// 删除云端某房账本（info.json；整套目录删除由 deleteHouseRemoteFolder 一并处理媒体+账本）
