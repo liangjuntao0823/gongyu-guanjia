@@ -3128,10 +3128,11 @@ enum CloudOps {
     }
 
     /// 拉取云端操作记录（日志查看器云端区）
+    /// v2.7（P1⑦ 跨账号日志公共区）：不传 u 参数，拉取所有用户的公共日志——
+    /// 此前按 u=<自己> 过滤，只能看到自己的操作，另一个用户的记录完全看不到。
     static func fetch(completion: @escaping ([CloudOpEntry]) -> Void) {
         guard isConfigured, let base = baseURL else { completion([]); return }
-        let u = CloudUser.username.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
-        guard let url = URL(string: "\(base.absoluteString)?act=ops&k=\(CloudConfig.passwordHash)&u=\(u)") else { completion([]); return }
+        guard let url = URL(string: "\(base.absoluteString)?act=ops&k=\(CloudConfig.passwordHash)") else { completion([]); return }
         URLSession.shared.dataTask(with: url) { data, _, _ in
             guard let data = data, let obj = try? JSONDecoder().decode(CloudOpsResponse.self, from: data), obj.ok else { completion([]); return }
             completion(obj.records)

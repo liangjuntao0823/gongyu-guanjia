@@ -50,6 +50,16 @@ struct HouseEditView: View {
 
     private var isEditing: Bool { house != nil }
 
+    // v2.7（P2⑭）：从全量房源取已知房东/户型去重，做输入辅助下拉（不强制，可手动输入新值）
+    private var knownLandlords: [String] {
+        let all = (try? modelContext.fetch(FetchDescriptor<House>())) ?? []
+        return Array(Set(all.compactMap { $0.landlord.isEmpty ? nil : $0.landlord })).sorted()
+    }
+    private var knownLayouts: [String] {
+        let all = (try? modelContext.fetch(FetchDescriptor<House>())) ?? []
+        return Array(Set(all.compactMap { $0.layout.isEmpty ? nil : $0.layout })).sorted()
+    }
+
     var body: some View {
         NavigationStack {
             formContent
@@ -164,6 +174,18 @@ struct HouseEditView: View {
                             .foregroundColor(.secondary)
                             .frame(width: 64, alignment: .leading)
                         TextField("房东姓名", text: $landlord)
+                        // v2.7（P2⑭）：房东历史下拉辅助选择（不强制，可手动输入新值）
+                        if !knownLandlords.isEmpty {
+                            Menu {
+                                ForEach(knownLandlords, id: \.self) { name in
+                                    Button(name) { landlord = name }
+                                }
+                            } label: {
+                                Image(systemName: "chevron.down.circle")
+                                    .font(.footnote)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
                     }
 
                     HStack {
@@ -171,6 +193,18 @@ struct HouseEditView: View {
                             .foregroundColor(.secondary)
                             .frame(width: 64, alignment: .leading)
                         TextField("如 单间 / 复式", text: $layout)
+                        // v2.7（P2⑭）：户型历史下拉辅助选择（不强制，可手动输入新值）
+                        if !knownLayouts.isEmpty {
+                            Menu {
+                                ForEach(knownLayouts, id: \.self) { name in
+                                    Button(name) { layout = name }
+                                }
+                            } label: {
+                                Image(systemName: "chevron.down.circle")
+                                    .font(.footnote)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
                     }
 
                     HStack {

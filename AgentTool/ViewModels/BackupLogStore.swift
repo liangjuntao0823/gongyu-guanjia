@@ -26,10 +26,11 @@ enum BackupLogStore {
     }
 
     static func log(category: String, action: String, result: String, detail: String = "", checksum: String = "", username: String? = nil, cloud: Bool = false) {
+        // v2.7（P1⑦ 跨账号日志公共区）：云端操作同时写本地日志——
+        // 此前 cloud:true 直接 return 不写本地，导致本机日志区只有 cloud:false 的操作，
+        // 跨账号同步回来的别人操作本机完全看不到。现在本机日志始终完整，云端日志区拉公共区。
         if cloud {
-            // v1.37：本机发起的云端操作 → 记到云端操作记录（桶 h/_ops.json，带用户名），不重复写本地
             CloudOps.log(category: category, action: action, result: result, detail: detail)
-            return
         }
         var list = all()
         let name = username ?? CloudUser.username

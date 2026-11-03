@@ -31,6 +31,7 @@ struct HouseListView: View {
     @State private var towerFilter: Int? = nil      // nil = 全部
     @State private var statusFilter: HouseStatus? = .available   // 首页默认显示待租房源
     @State private var layoutFilters: Set<String> = []   // v1.3：户型筛选支持多选，空 = 全部户型
+    @State private var showOnlyNoMedia = false   // v2.7（P2⑮）：只看无媒体房源
     @State private var showAdd = false
     @State private var showBatchImport = false   // v1.58：批量录入（清单/zip/扫描）
     // b106：房源排序（默认=现有逻辑 / 价格低→高 / 更新时间降序）
@@ -120,7 +121,9 @@ struct HouseListView: View {
                 let matchTower = towerFilter == nil || house.tower == towerFilter
                 let matchStatus = statusFilter == nil || house.status == statusFilter
                 let matchLayout = layoutFilters.isEmpty || layoutFilters.contains(house.layout)
-                return matchSearch && matchTower && matchStatus && matchLayout
+                // v2.7（P2⑮）：无媒体筛选——mediaItems 为空才算无媒体
+                let matchNoMedia = !showOnlyNoMedia || house.mediaItems.isEmpty
+                return matchSearch && matchTower && matchStatus && matchLayout && matchNoMedia
             }
             .sorted { a, b in
                 // b106：排序三档——默认（现有逻辑）/ 价格升序 / 更新时间降序
@@ -142,8 +145,19 @@ struct HouseListView: View {
             }
     }
 
+    // v2.7（P2⑬ 户型筛选联动）：基于「已按座号+状态+搜索+无媒体过滤后」的结果取户型去重，
+    // 不含 layoutFilters 本身——避免选了某户型后该选项消失。
+    // 例：点了「未租」+「1座」，户型筛选只列出 1座未租 房源里实际存在的户型；
+    // 已租才有而未租没有的户型不展示。座号/状态/搜索/无媒体组合筛选同理。
     private var layouts: [String] {
-        Array(Set(houses.compactMap { $0.layout.isEmpty ? nil : $0.layout })).sorted()
+        let base = houses.filter { h in
+            let matchSearch = searchText.isEmpty || h.displayRoomNo.localizedCaseInsensitiveContains(searchText)
+            let matchTower = towerFilter == nil || h.tower == towerFilter
+            let matchStatus = statusFilter == nil || h.status == statusFilter
+            let matchNoMedia = !showOnlyNoMedia || h.mediaItems.isEmpty
+            return matchSearch && matchTower && matchStatus && matchNoMedia
+        }
+        return Array(Set(base.compactMap { $0.layout.isEmpty ? nil : $0.layout })).sorted()
     }
 
     /// v1.16 需求2：分享方式选择弹窗标题（activeDialog 仅用于分享选择）
@@ -482,6 +496,7 @@ struct HouseListView: View {
             .accessibilityLabel("收起筛选区")
 
             // 排序三档（默认=现有逻辑 / 价格升序 / 更新时间降序）
+            // v2.7（P2⑮）：去掉文字只留图标，功能不变
             Menu {
                 ForEach(HouseSortMode.allCases, id: \.self) { m in
                     Button {
@@ -491,20 +506,29 @@ struct HouseListView: View {
                     }
                 }
             } label: {
-                HStack(spacing: 3) {
-                    Image(systemName: "arrow.up.arrow.down")
-                        .font(.system(size: 10, weight: .semibold))
-                    Text(houseSortMode.label)
-                        .font(.footnote.weight(.semibold))
-                        .lineLimit(1)
-                }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 5)
-                .background(AppTheme.primary.opacity(0.08))
-                .foregroundColor(AppTheme.primary)
-                .clipShape(Capsule())
+                Image(systemName: "arrow.up.arrow.down")
+                    .font(.system(size: 11, weight: .semibold))
+                    .frame(width: 28, height: 24)
+                    .background(AppTheme.primary.opacity(0.08))
+                    .foregroundColor(AppTheme.primary)
+                    .clipShape(Capsule())
             }
             .menuStyle(.borderlessButton)
+            .accessibilityLabel("排序：\(houseSortMode.label)")
+
+            // v2.7（P2⑮）：无媒体筛选按钮（只看没有实拍图/视频的房源）
+            Button {
+                showOnlyNoMedia.toggle()
+            } label: {
+                Image(systemName: showOnlyNoMedia ? "photo.badge.exclamationmark.fill" : "photo.badge.exclamationmark")
+                    .font(.system(size: 11, weight: .semibold))
+                    .frame(width: 28, height: 24)
+                    .background(showOnlyNoMedia ? AppTheme.primary.opacity(0.22) : Color.secondary.opacity(0.08))
+                    .foregroundColor(showOnlyNoMedia ? AppTheme.primary : .secondary)
+                    .clipShape(Capsule())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(showOnlyNoMedia ? "仅看无媒体（已开启）" : "仅看无媒体")
 
             Spacer()
 
@@ -1390,6 +1414,9 @@ struct HouseListView: View {
     private func applySyncPreview() async {
         guard let config = CosConfig.load(), let ctx = houseModelContext else { return }
         let recs = pendingSyncRecs
+        // v2.7（P1⑩ 同步总进度条）：整个同步流程走全局任务中心，房源页顶部显示总进度条
+        // （参考批量导入/补传媒体的进度条样式），可最小化到「待补传媒体」页查看。
+        syncCenter.begin(title: "同步云端房源", roomKeys: recs.map { $0.roomKey }, total: max(1, recs.count))
         do {
             var addedCount = 0, updatedCount = 0, deletedCount = 0, pushedCount = 0
             var removedMediaCount = 0
@@ -1487,12 +1514,14 @@ struct HouseListView: View {
                     if let first = pushedRecords.first {
                         HouseSyncProgress.shared.begin(roomKey: first.roomKey, direction: .upload, progress: 0.1, label: "补传账本")
                     }
-                    var all = recs
+                    // v2.7（P1⑪ 补传合并写）：逐套 uploadGuarded 合并写——
+                    // 此前 uploadRecords 全量覆盖写，若另一用户刚在云端加了同号房（带媒体），
+                    // 本地空媒体名单会覆盖云端媒体名单，把云端媒体删掉。
+                    // uploadGuarded 写前先读云端 info.json，合并 mediaNames = 云端∪本地−本次删除，
+                    // revision+1，避免覆盖他人数据。
                     for rec in pushedRecords {
-                        all.removeAll { $0.roomKey == rec.roomKey }
-                        all.append(rec)
+                        _ = try await CloudHouseSync.uploadGuarded(record: rec, config: config)
                     }
-                    try await CloudHouseSync.uploadRecords(all, config: config)
                     HouseSyncProgress.shared.end()
                     await MainActor.run {
                         let local = (try? ctx.fetch(FetchDescriptor<House>())) ?? []
@@ -1527,7 +1556,10 @@ struct HouseListView: View {
             }
             var mediaSaved = 0
             if !mediaRoomKeys.isEmpty {
-                for (roomKey, _) in mediaRoomKeys {
+                for (idx, roomKeyInfo) in mediaRoomKeys.enumerated() {
+                    let (roomKey, _) = roomKeyInfo
+                    // v2.7（P1⑩）：总进度条推进到当前房号
+                    syncCenter.advanceHouse(done: idx, current: roomKey, filesTotal: mediaRoomKeys.count, filesDone: idx)
                     // v1.42：同步下载进度 → 卡片底部进度条（云端 → 本机）
                     HouseSyncProgress.shared.update(roomKey: roomKey, direction: .download, progress: 0)
                     // v1.43：只下载云端账本名单（expectedNames）内的媒体，落盘名与账本一致 →
@@ -1592,10 +1624,77 @@ struct HouseListView: View {
                 BackupLogStore.log(category: "同步", action: "重建本地账本镜像", result: "成功", detail: "\(ledger.written) 套", cloud: true)
             }
             HouseSyncProgress.shared.end()
+            // v2.7（P1⑩）：总进度条完成
+            syncCenter.finish(success: true)
+            Task {
+                try? await Task.sleep(nanoseconds: 1_200_000_000)
+                syncCenter.dismiss()
+                syncTaskMinimized = false
+            }
+            // v2.7（P2⑯ 桶孤儿清理）：同步完成后列桶，删除不在任何账本名单里的孤儿媒体对象
+            Task.detached { await Self.cleanupOrphanMedia(config: config, knownRoomKeys: Set(recs.map { $0.roomKey })) }
         } catch {
             showToast(RemoteConfig.tip("syncFail", "同步失败：{error}").replacingOccurrences(of: "{error}", with: error.localizedDescription), isError: true)
             BackupLogStore.log(category: "同步", action: "同步房源（云端→本地）", result: "失败", detail: error.localizedDescription, cloud: true)
             HouseSyncProgress.shared.end()
+            syncCenter.finish(success: false)
+        }
+    }
+
+    /// v2.7（P2⑯ 桶孤儿清理）：同步完成后后台清理桶里的孤儿媒体对象。
+    /// 规则：
+    /// 1) 列 h/ 整桶对象，按「h/<房号>/」前缀分组；
+    /// 2) 对每个房号目录，读 info.json 账本拿到 mediaNames；
+    /// 3) 删除目录下不在 mediaNames 里的媒体对象（图片/视频）——这些是改名/删媒体后残留的孤儿；
+    /// 4) 没有 info.json 的房号目录（整目录都是孤儿，如录错房号后残留）→ 整目录媒体对象全删；
+    /// 5) 只删媒体对象（.jpg/.jpeg/.png/.heic/.webp/.gif/.mp4/.mov），不动 info.json 与其他系统对象。
+    /// 失败静默（不打断用户），下次同步再清。
+    private static func cleanupOrphanMedia(config: CosConfig, knownRoomKeys: Set<String>) async {
+        do {
+            let objs = try await CosUploader.listObjects(prefix: "h/", config: config)
+            // 按房号分组
+            var byRoom: [String: [String]] = [:]
+            for obj in objs {
+                let name = obj.name
+                guard name.hasPrefix("h/") else { continue }
+                let rest = String(name.dropFirst(2))
+                guard let slash = rest.firstIndex(of: "/") else { continue }
+                let roomKey = String(rest[..<slash])
+                guard !roomKey.isEmpty, !roomKey.hasPrefix("_") else { continue }
+                let file = String(rest[rest.index(after: slash)...])
+                guard !file.isEmpty else { continue }
+                byRoom[roomKey, default: []].append(file)
+            }
+            var deletedCount = 0
+            for (roomKey, files) in byRoom {
+                // 读账本名单
+                let ledgerNames: Set<String>
+                if let rec = try? await CloudHouseSync.fetchOne(roomKey: roomKey, config: config) {
+                    ledgerNames = Set(rec.mediaNames)
+                } else {
+                    ledgerNames = []   // 无账本 → 整目录孤儿
+                }
+                for file in files {
+                    guard file != "info.json" else { continue }
+                    let lower = file.lowercased()
+                    let isMedia = [".jpg", ".jpeg", ".png", ".heic", ".webp", ".gif", ".mp4", ".mov"].contains { lower.hasSuffix($0) }
+                    guard isMedia else { continue }
+                    // 归一化比较（.mov/.mp4 等价）
+                    let fileNorm = (file as NSString).deletingPathExtension.lowercased()
+                    let ledgerHas = ledgerNames.contains { ($0 as NSString).deletingPathExtension.lowercased() == fileNorm }
+                    if !ledgerHas {
+                        try? await CloudBackupService.deleteRemoteObject(name: "h/\(roomKey)/\(file)", config: config)
+                        deletedCount += 1
+                    }
+                }
+            }
+            if deletedCount > 0 {
+                await MainActor.run {
+                    BackupLogStore.log(category: "同步", action: "桶孤儿清理", result: "成功", detail: "清理 \(deletedCount) 个残留媒体对象", cloud: true)
+                }
+            }
+        } catch {
+            // 静默：列桶失败不打断用户
         }
     }
 
