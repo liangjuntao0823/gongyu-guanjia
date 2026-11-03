@@ -9,7 +9,28 @@ import WidgetKit
 import SwiftUI
 
 // MARK: - App Group 常量
-let appGroupID = "group.com.gj.tg.shared"
+// 签名服务重签后实际注入的 group 在它描述文件里，与工程配置不同；
+// 这里运行时探测本包 embedded.mobileprovision 中实际生效的 App Group，
+// 无描述文件（巨魔/本地直装）回退 group.com.gj.tg.shared。
+func resolveAppGroupID() -> String {
+    guard let provURL = Bundle.main.url(forResource: "embedded", withExtension: "mobileprovision"),
+          let data = try? Data(contentsOf: provURL),
+          let xml = Data("<?xml".utf8),
+          let start = data.range(of: xml),
+          let endTag = Data("</plist>".utf8),
+          let endRange = data.range(of: endTag, options: [], range: start.lowerBound..<data.endIndex),
+          let plist = try? PropertyListSerialization.propertyList(from: data.subdata(in: start.lowerBound..<endRange.upperBound), options: [], format: nil),
+          let dict = plist as? [String: Any],
+          let ents = dict["Entitlements"] as? [String: Any],
+          let groups = ents["com.apple.security.application-groups"] as? [String],
+          let first = groups.first
+    else {
+        return "group.com.gj.tg.shared"
+    }
+    return first
+}
+
+let appGroupID = resolveAppGroupID()
 
 // MARK: - 小组件数据模型
 struct WidgetData {

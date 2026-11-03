@@ -5,7 +5,26 @@ import WidgetKit
 // 主 App → 小组件数据同步
 // 启动/回前台/数据变化时调用 sync(modelContext:)，把看板指标写进 App Group，再刷新小组件。
 enum WidgetDataSync {
-    static let appGroupID = "group.com.gj.tg.shared"
+    /// 当前包实际生效的 App Group：
+    /// 签名服务重签后实际注入的是它描述文件里的 group（App 与 Widget 同一描述文件、解析结果一致）；
+    /// 无描述文件（巨魔/本地直装）回退工程配置的 group.com.gj.tg.shared。
+    static var appGroupID: String {
+        guard let provURL = Bundle.main.url(forResource: "embedded", withExtension: "mobileprovision"),
+              let data = try? Data(contentsOf: provURL),
+              let xml = Data("<?xml".utf8),
+              let start = data.range(of: xml),
+              let endTag = Data("</plist>".utf8),
+              let endRange = data.range(of: endTag, options: [], range: start.lowerBound..<data.endIndex),
+              let plist = try? PropertyListSerialization.propertyList(from: data.subdata(in: start.lowerBound..<endRange.upperBound), options: [], format: nil),
+              let dict = plist as? [String: Any],
+              let ents = dict["Entitlements"] as? [String: Any],
+              let groups = ents["com.apple.security.application-groups"] as? [String],
+              let first = groups.first
+        else {
+            return "group.com.gj.tg.shared"
+        }
+        return first
+    }
 
     private static var appGroupDefaults: UserDefaults? {
         UserDefaults(suiteName: appGroupID)
