@@ -1,7 +1,6 @@
 import Foundation
 import SwiftData
 import WidgetKit
-import Security
 
 // 在 embedded.mobileprovision 的字节流中查找 XML plist 边界（该文件是 CMS 签名包，XML 是明文段）
 extension Array where Element == UInt8 {
@@ -22,21 +21,35 @@ extension Array where Element == UInt8 {
 // 主 App → 小组件数据同步
 // 启动/回前台/数据变化时调用 sync(modelContext:)，把看板指标写进 App Group，再刷新小组件。
 enum WidgetDataSync {
-    /// 当前包实际生效的 App Group：
-    /// 签名服务重签后实际注入的是它描述文件里的 group（App 与 Widget 同一描述文件、探测结果必然一致）；
-    /// 1) 优先用系统 API 读取签名注入的 entitlements（主 App、小组件都能取到）；
-    /// 2) 取不到时再解析 embedded.mobileprovision（部分签名包只把描述文件放主 App）；
-    /// 3) 都没有（巨魔/本地直装）回退工程配置的 group.com.gj.tg.shared。
-    static var appGroupID: String {
-        // 方式一：从进程签名 entitlements 直接取（最可靠，App 与 Widget 均可）
-        if let groups = entitlementAppGroups(), let first = groups.first {
-            return first
+    /// 已知签名服务（秋名山）固定注入的 App Group + 工程旧 group，作为无法解析描述文件时的兜底候选。
+    /// 主 App 会把数据写进全部候选，小组件端按同一份候选列表逐个探测，保证两端必能对上。
+    private static let fallbackGroups = [
+        "group.6f5a3ce5f64acb19.1",
+        "group.6f5a3ce5f64acb19.2",
+        "group.6f5a3ce5f64acb19.3",
+        "group.6f5a3ce5f64acb19.4",
+        "group.6f5a3ce5f64acb19.5",
+        "group.com.gj.tg.shared"
+    ]
+
+    /// 候选 App Group（去重保序）：embedded.mobileprovision 解析出的实际注入 group + 已知兜底列表。
+    /// 签名版：描述文件里是签名服务替换后的 group；巨魔/本地直装：无描述文件，仅兜底里的工程旧 group。
+    static var appGroupIDs: [String] {
+        var ids: [String] = []
+        if let groups = provisionAppGroups() {
+            ids.append(contentsOf: groups)
         }
-        // 方式二：解析 embedded.mobileprovision（主 App 通常有，Widget 可能没有）
+        ids.append(contentsOf: fallbackGroups)
+        var seen = Set<String>()
+        return ids.filter { seen.insert($0).inserted }
+    }
+
+    /// 从 embedded.mobileprovision 解析签名服务实际注入的全部 App Group（主 App 通常有这个文件）
+    private static func provisionAppGroups() -> [String]? {
         guard let provURL = Bundle.main.url(forResource: "embedded", withExtension: "mobileprovision"),
               let data = try? Data(contentsOf: provURL)
         else {
-            return "group.com.gj.tg.shared"
+            return nil
         }
         let bytes = [UInt8](data)
         let xmlTag: [UInt8] = Array("<?xml".utf8)
@@ -45,29 +58,17 @@ enum WidgetDataSync {
               let end = bytes.firstPatternIndex(of: plistTag),
               end > start
         else {
-            return "group.com.gj.tg.shared"
+            return nil
         }
         let plistData = Data(bytes[start..<(end + plistTag.count)])
         guard let plist = try? PropertyListSerialization.propertyList(from: plistData, options: [], format: nil),
               let dict = plist as? [String: Any],
               let ents = dict["Entitlements"] as? [String: Any],
-              let groups = ents["com.apple.security.application-groups"] as? [String],
-              let first = groups.first
+              let groups = ents["com.apple.security.application-groups"] as? [String]
         else {
-            return "group.com.gj.tg.shared"
+            return nil
         }
-        return first
-    }
-
-    /// 读取当前进程签名中实际注入的 App Group（iOS 系统 API，主 App 与 App Extension 均可调用）
-    private static func entitlementAppGroups() -> [String]? {
-        guard let task = SecTaskCreateFromSelf(nil) else { return nil }
-        guard let value = SecTaskCopyValueForEntitlement(task, "com.apple.security.application-groups" as CFString, nil) else { return nil }
-        return value as? [String]
-    }
-
-    private static var appGroupDefaults: UserDefaults? {
-        UserDefaults(suiteName: appGroupID)
+        return groups
     }
 
     static func sync(modelContext: ModelContext) {
@@ -195,18 +196,24 @@ enum WidgetDataSync {
         let dayOfMonth = cal.component(.day, from: now)
         let remain = max(0, min(100, Double(daysInMonth - dayOfMonth + 1) / Double(daysInMonth) * 100))
 
-        // 写进 App Group
-        guard let df = appGroupDefaults else { return }
-        df.set(todoCount, forKey: "todoCount")
-        df.set(uncollected, forKey: "uncollectedCount")
-        df.set(expiring, forKey: "expiringCount")
-        df.set(dealCount, forKey: "dealCount")
-        df.set(netIncome, forKey: "netIncome")
-        df.set(payoutRoom, forKey: "payoutRoom")
-        df.set(payoutDate, forKey: "payoutDate")
-        df.set(payoutAmount, forKey: "payoutAmount")
-        df.set(remain, forKey: "monthRemainPercent")
-        df.synchronize()
+        // 写进全部候选 App Group（签名服务替换后的 group + 工程旧 group），
+        // 小组件端按同一份候选列表逐个探测，保证两端必能对上。
+        let values: [String: Any] = [
+            "todoCount": todoCount,
+            "uncollectedCount": uncollected,
+            "expiringCount": expiring,
+            "dealCount": dealCount,
+            "netIncome": netIncome,
+            "payoutRoom": payoutRoom,
+            "payoutDate": payoutDate,
+            "payoutAmount": payoutAmount,
+            "monthRemainPercent": remain
+        ]
+        for groupID in appGroupIDs {
+            guard let df = UserDefaults(suiteName: groupID) else { continue }
+            for (k, v) in values { df.set(v, forKey: k) }
+            df.synchronize()
+        }
 
         WidgetCenter.shared.reloadAllTimelines()
     }

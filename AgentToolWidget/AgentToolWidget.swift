@@ -7,69 +7,32 @@
 
 import WidgetKit
 import SwiftUI
-import Security
 
 // MARK: - App Group 常量
 // 签名服务重签后实际注入的 group 在它描述文件里，与工程配置不同；
-// 这里运行时探测本包实际生效的 App Group（主 App 与小组件同包同描述文件，探测结果必然一致）：
-// 1) 优先用系统 API 读取签名注入的 entitlements（主 App、小组件都能取到）；
-// 2) 取不到时再解析 embedded.mobileprovision（部分签名包只把描述文件放主 App）；
-// 3) 都没有（巨魔/本地直装）回退工程配置的 group.com.gj.tg.shared。
-func resolveAppGroupID() -> String {
-    // 方式一：从进程签名 entitlements 直接取（最可靠，App 与 Widget 均可）
-    if let groups = entitlementAppGroups(), let first = groups.first {
-        return first
-    }
-    // 方式二：解析 embedded.mobileprovision（主 App 通常有，Widget 可能没有）
-    guard let provURL = Bundle.main.url(forResource: "embedded", withExtension: "mobileprovision"),
-          let data = try? Data(contentsOf: provURL)
-    else {
-        return "group.com.gj.tg.shared"
-    }
-    let bytes = [UInt8](data)
-    let xmlTag: [UInt8] = Array("<?xml".utf8)
-    let plistTag: [UInt8] = Array("</plist>".utf8)
-    guard let start = bytes.firstPatternIndex(of: xmlTag),
-          let end = bytes.firstPatternIndex(of: plistTag),
-          end > start
-    else {
-        return "group.com.gj.tg.shared"
-    }
-    let plistData = Data(bytes[start..<(end + plistTag.count)])
-    guard let plist = try? PropertyListSerialization.propertyList(from: plistData, options: [], format: nil),
-          let dict = plist as? [String: Any],
-          let ents = dict["Entitlements"] as? [String: Any],
-          let groups = ents["com.apple.security.application-groups"] as? [String],
-          let first = groups.first
-    else {
-        return "group.com.gj.tg.shared"
-    }
-    return first
-}
-
-/// 读取当前进程签名中实际注入的 App Group（iOS 系统 API，主 App 与 App Extension 均可调用）
-func entitlementAppGroups() -> [String]? {
-    guard let task = SecTaskCreateFromSelf(nil) else { return nil }
-    guard let value = SecTaskCopyValueForEntitlement(task, "com.apple.security.application-groups" as CFString, nil) else { return nil }
-    return value as? [String]
-}
-
-extension Array where Element == UInt8 {
-    func firstPatternIndex(of pattern: [UInt8]) -> Int? {
-        guard !pattern.isEmpty, count >= pattern.count else { return nil }
-        for i in 0...(count - pattern.count) {
-            var match = true
-            for j in 0..<pattern.count where self[i + j] != pattern[j] {
-                match = false
-                break
-            }
-            if match { return i }
-        }
-        return nil
-    }
-}
-
+// 小组件包内没有 embedded.mobileprovision（签名服务只放主 App），且 iOS 无公开 API 直接读自身
+// 签名 entitlements（SecTask 是 macOS 专属）。因此两端共用同一份候选列表：
+// 主 App 把数据写进全部候选 group，这里按序探测，读到数据即命中。
 let appGroupID = resolveAppGroupID()
+
+func resolveAppGroupID() -> String {
+    // 与主 App WidgetDataSync.fallbackGroups 保持一致的候选列表
+    let candidates = [
+        "group.6f5a3ce5f64acb19.1",
+        "group.6f5a3ce5f64acb19.2",
+        "group.6f5a3ce5f64acb19.3",
+        "group.6f5a3ce5f64acb19.4",
+        "group.6f5a3ce5f64acb19.5",
+        "group.com.gj.tg.shared"
+    ]
+    // 逐个探测：哪个 group 里已有主 App 写入的数据（todoCount 键存在）就用哪个
+    for g in candidates {
+        if let df = UserDefaults(suiteName: g), df.object(forKey: "todoCount") != nil {
+            return g
+        }
+    }
+    return "group.com.gj.tg.shared"
+}
 
 // MARK: - 小组件数据模型
 struct WidgetData {
