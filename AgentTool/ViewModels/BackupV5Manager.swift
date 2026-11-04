@@ -485,22 +485,6 @@ final class BackupV5Manager {
         }
     }
 
-        do {
-            let dm = DataBackupManager()
-            let (importOK, _) = await dm.importAllDataAsync(from: data, modelContext: mainContext, scope: scope)
-            guard importOK else { throw BackupV5Error.restoreFailed("旧版备份导入失败") }
-        } catch {
-            // 回滚经营数据
-            if let before = try? Data(contentsOf: preDir.appendingPathComponent("business_before.json")) {
-                let dm = DataBackupManager()
-                _ = await dm.importAllDataAsync(from: before, modelContext: mainContext, scope: .all)
-            }
-            try? FileManager.default.removeItem(at: preDir)
-            throw error
-        }
-        try? FileManager.default.removeItem(at: preDir)
-        return await MainActor.run { computeStats(mainContext: mainContext, houseContext: nil) }
-    }
 
     // MARK: - 清空与导入（主线程执行）
 
