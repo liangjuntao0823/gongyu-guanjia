@@ -277,7 +277,6 @@
 			isa = PBXGroup;
 			children = (
 				B20000010000000000000003 /* MigrationView.swift */,
-				C20000010000000000000002 /* PlanEditors.swift */,
 			);
 			path = Sync;
 			sourceTree = "<group>";
@@ -298,6 +297,7 @@
 				B10000010000000000000099 /* TrashView.swift */,
 				B10000010000000000000015 /* Theme.swift */,
 				B10000010000000000000119 /* RentStatView.swift */,
+				C20000010000000000000002 /* PlanEditors.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
