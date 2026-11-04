@@ -54,6 +54,9 @@ final class AIManager: ObservableObject {
     private var modelContext: ModelContext?
     private var houseModelContext: ModelContext?
 
+    /// b119（清单4）：当前思考/执行任务句柄——「停止」按钮 cancel 用；任务保存在属性上页面关闭不取消
+    private var currentTask: Task<Void, Never>?
+
     private let historyKey = "ai.chatHistory"
     // v1.98：历史不再按条数截断，改按时间保留最近 1 年（见 loadHistory/saveHistory）
 
@@ -239,8 +242,12 @@ final class AIManager: ObservableObject {
                                                imagePath: toolImagePaths.first, imagePaths: toolImagePaths))
                 saveHistory()
             } catch {
-                // 超时/网络错误给中文提示
-                if let ue = error as? URLError, ue.code == .timedOut {
+                // b119（清单4）：用户主动停止——静默结束，不当作错误提示
+                if Task.isCancelled {
+                    // 停止时若正挂起在确认框，由 stopCurrent 负责 resume；这里直接结束
+                } else if let ue = error as? URLError, ue.code == .cancelled {
+                    // 取消导致的 URLError.cancelled，同样静默
+                } else if let ue = error as? URLError, ue.code == .timedOut {
                     errorText = "请求超时：模型响应较慢（工具定义多或生成内容较长），已自动重试可稍后再试；生成账单类任务请用「生成 XX 房 XX 月账单」让 AI 直接调用工具生成，速度更快。"
                 } else if let ue = error as? URLError, ue.code == .notConnectedToInternet {
                     errorText = "网络不可用，请检查网络后重试"
@@ -250,8 +257,8 @@ final class AIManager: ObservableObject {
             }
             sending = false
             toolPhase = nil
-            // 处理排队消息（自动发送下一条）
-            if !queue.isEmpty {
+            // 停止后不再自动发送排队消息（stopCurrent 已清空队列，这里兜底校验）
+            if !queue.isEmpty, !Task.isCancelled {
                 let next = queue.removeFirst()
                 queuedCount = queue.count
                 let text = next.text
@@ -261,7 +268,24 @@ final class AIManager: ObservableObject {
                 }
             }
         }
-        _ = task
+        currentTask = task
+    }
+
+    /// b119（清单4）：停止当前思考/执行任务——取消任务、清空排队、复位状态；
+    /// 若正挂起在「确认操作」框，视为用户取消本次操作（resume(false)，未执行任何更改）。
+    /// 注意：已完成的写操作（已落库/已上传）不可回滚，停止只中止剩余流程。
+    func stopCurrent() {
+        currentTask?.cancel()
+        currentTask = nil
+        queue.removeAll()
+        queuedCount = 0
+        sending = false
+        toolPhase = nil
+        if pendingConfirm, let cont = confirmBox.continuation {
+            confirmBox.continuation = nil
+            pendingConfirm = false
+            cont.resume(returning: false)
+        }
     }
 
     // MARK: - 工具确认与标签

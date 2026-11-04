@@ -600,23 +600,14 @@ struct MainTabView: View {
     /// 只列一次 h/ 桶目录（对象名+大小+修改时间，不下载任何内容），与本地基线对比；
     /// 有变化 → 更新基线并广播通知，房源列表收到后顶部横幅轻提示「云端有更新」，用户下拉刷新即同步。
     /// 首次启动（无基线）只静默建基线不提示，避免首装误报。
+    /// b119（清单1 重做）：检测逻辑抽到 HouseListView.detectCloudLedgerChange()（每次进入房源页也检测）；
+    /// 探测失败（断网/超时）跳过本次不写空基线；变化时写持久化标记 cloudLedgerPendingHint——
+    /// 启动时不在房源页（通知无人接收）也不丢提示，进入房源页 onAppear 补横幅。
     private func detectCloudLedgerChange() {
         Task {
-            guard let config = CosConfig.load(), config.isValid else { return }
-            let objs = (try? await CosUploader.listObjects(prefix: "h/", config: config)) ?? []
-            var current: [String: String] = [:]
-            for obj in objs {
-                let name = obj.name
-                guard name.hasSuffix("/info.json") else { continue }
-                current[name] = "\(obj.size)-\(Int64(obj.date.timeIntervalSince1970))"
-            }
-            let key = "cloudLedgerBaseline.v1"
-            let baseline = (UserDefaults.standard.dictionary(forKey: key) as? [String: String]) ?? [:]
-            let changed = current != baseline
-            UserDefaults.standard.set(current, forKey: key)
-            if changed && !baseline.isEmpty {
-                NotificationCenter.default.post(name: HouseListView.cloudLedgerChangedLight, object: nil)
-            }
+            guard await HouseListView.detectCloudLedgerChange() else { return }
+            UserDefaults.standard.set(true, forKey: "cloudLedgerPendingHint")
+            NotificationCenter.default.post(name: HouseListView.cloudLedgerChangedLight, object: nil)
         }
     }
 

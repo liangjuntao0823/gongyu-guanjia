@@ -1722,9 +1722,12 @@ enum CosUploader {
     }
 
     /// COS LastModified 格式：2026-10-23T01:26:00.000Z（ISO8601）
+    /// b119：补 .withFractionalSeconds——COS 时间戳带毫秒（.000Z），默认 ISO8601 解析失败返回 .distantPast，
+    /// 导致轻量变更感知的基线里时间恒为 distantPast、大小不变时永远检测不到变化（变更感知「没生效」的根因）
     private static func parseCOSDate(_ text: String?) -> Date {
         guard let text = text, !text.isEmpty else { return .distantPast }
         let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return iso.date(from: text) ?? .distantPast
     }
 

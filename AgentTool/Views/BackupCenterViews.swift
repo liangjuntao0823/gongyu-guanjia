@@ -1101,12 +1101,14 @@ private struct BackupLogRow: View {
             Text(entry.detail.isEmpty ? entry.result : entry.detail)
                 .font(.footnote)
                 .foregroundColor(.secondary)
-            HStack(spacing: 8) {
-                if let name = entry.username, !name.isEmpty {
-                    Text("操作者：\(name)").font(.caption2).foregroundColor(.secondary)
-                }
+            // b119（清单6）：操作者移到最右侧显示（校验和靠左，操作者靠右）
+            HStack {
                 if !entry.checksum.isEmpty {
                     Text("校验和：\(entry.checksum.prefix(12))…").font(.caption2).foregroundColor(.secondary)
+                }
+                Spacer()
+                if let name = entry.username, !name.isEmpty {
+                    Text("操作者：\(name)").font(.caption2).foregroundColor(.secondary)
                 }
             }
         }
@@ -1142,12 +1144,14 @@ private struct CloudOpRow: View {
             if !entry.detail.isEmpty {
                 Text(entry.detail).font(.footnote).foregroundColor(.secondary)
             }
-            HStack(spacing: 8) {
-                if !entry.user.isEmpty {
-                    Text("操作者：\(entry.user)").font(.caption2).foregroundColor(.secondary)
-                }
+            // b119（清单6）：操作者移到最右侧显示（房号靠左，操作者靠右）
+            HStack {
                 if !entry.room.isEmpty {
                     Text("房号：\(entry.room)").font(.caption2).foregroundColor(.secondary)
+                }
+                Spacer()
+                if !entry.user.isEmpty {
+                    Text("操作者：\(entry.user)").font(.caption2).foregroundColor(.secondary)
                 }
             }
         }
