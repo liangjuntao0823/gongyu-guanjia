@@ -1220,7 +1220,7 @@ struct HouseListView: View {
                 let cloudKeys = Set(recs.map { $0.roomKey })
                 for rec in recs {
                     if let h = localByKey[rec.roomKey] {
-                        if cloudRecordDiffers(rec, from: h) != nil {
+                        if Self.cloudRecordDiffers(rec, from: h) != nil {
                             // v1.40 B1：多人冲突提示——云端由他人更新时展示修改者
                             // v1.69：房号一律真实引用带前缀（rec.roomKey），不做去前缀简化
                             updated.append((rec.roomKey, rec.updatedBy))
@@ -1511,7 +1511,7 @@ struct HouseListView: View {
                 let cloudKeys = Set(recs.map { $0.roomKey })
                 for rec in recs {
                     if let h = localByKey[rec.roomKey] {
-                        if let diff = cloudRecordDiffers(rec, from: h) {
+                        if let diff = Self.cloudRecordDiffers(rec, from: h) {
                             // b116：记录具体差异，定位 1-711 这类死循环根因
                             BackupLogStore.log(category: "同步", action: "云端覆盖本地", result: "成功",
                                                detail: "\(rec.roomKey) 差异：\(diff)", cloud: false)
