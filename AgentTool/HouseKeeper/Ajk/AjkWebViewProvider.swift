@@ -167,9 +167,9 @@ final class AjkWebViewProvider: NSObject, WKNavigationDelegate {
     }
 
     // MARK: - 注入 JS：收集原始文本（解析放 Swift）
-    // v2.11：脚本只「收集当前页 + 探测下一页 href」，翻页由 Swift 整页导航（load href）驱动。
-    // 原实现是 JS 内循环 next.click()——安居客「下一页」是整页跳转链接，点击后脚本上下文被导航销毁，
-    // 循环中断、done 永不发出，只能靠看门狗 30s 误报「网络超时」；且每次 didFinish 重新注入又从第 1 页重来。
+    // v2.12：恢复 1.98 的翻页实现（JS 内点击「下一页」循环收集，多页在同一个脚本内完成）；
+    // 仅当「下一页」是真实 href 整页跳转时改由 Swift 导航（点击跳转会销毁脚本上下文，这是 v2.11 的问题）。
+    // v2.11 只探测 href、从不点击，导致 SPA 式分页探测不到下一页 → 只读到第 1 页（「能读但没读全」）。
 
     private func runScrape(on webView: WKWebView, page: Int) {
         let js = """
@@ -224,23 +224,39 @@ final class AjkWebViewProvider: NSObject, WKNavigationDelegate {
             return out;
           }
           var seen = new Set();
+          // v2.12：卡片出现后再等 0.8 秒，等列表渲染完整（防只收到前几张）
+          await sleep(800);
           var cards = collectCards(seen);
           window.webkit.messageHandlers.ajkScrape.postMessage(JSON.stringify({type:'page', overview: bodyText, cards: cards, page: \(page)}));
-          // 探测「下一页」链接（不点击）：取第一个文本为「下一页」的 <a href>；disabled/无有效 href = 没有下一页
-          var nextHref = '';
-          var links = document.querySelectorAll('a, span, div, button');
-          for (var i = 0; i < links.length; i++) {
-            var tx = norm(links[i].textContent);
-            if (tx !== '下一页') continue;
-            var cls = links[i].getAttribute('class') || '';
-            if (cls.indexOf('disabled') >= 0 || links[i].getAttribute('aria-disabled') === 'true') break;
-            var h = links[i].getAttribute('href') || '';
-            if (h && h !== '#' && h.indexOf('javascript') < 0) {
-              nextHref = new URL(h, location.href).href;
+          // 翻页（v2.12：恢复 1.98 的 JS 点击翻页为主；仅当「下一页」是整页跳转链接时改由 Swift 导航，
+          // 避免点击后导航销毁脚本上下文。两种分页实现都覆盖：SPA 点击 → 本脚本内连续收集；链接跳转 → Swift load）
+          var maxP = \(pendingMaxPages);
+          for (var p = \(page); p < maxP; p++) {
+            var next = null;
+            var links = document.querySelectorAll('a, span, div, button, li');
+            for (var i = 0; i < links.length; i++) {
+              var tx = norm(links[i].textContent);
+              if (tx === '下一页' || /^下一页[\\s>»→‹]*$/.test(tx)) { next = links[i]; break; }
             }
-            break;
+            if (!next) break;
+            var cls = next.getAttribute('class') || '';
+            if (cls.indexOf('disabled') >= 0 || next.getAttribute('aria-disabled') === 'true') break;
+            var aEl = (next.tagName === 'A') ? next : (next.closest ? next.closest('a') : null);
+            var h = aEl ? (aEl.getAttribute('href') || '') : '';
+            if (h && h !== '#' && h.indexOf('javascript') < 0) {
+              // 整页跳转链接：交 Swift 导航（点击会销毁本脚本上下文）
+              window.webkit.messageHandlers.ajkScrape.postMessage(JSON.stringify({type:'hasNext', href: new URL(h, location.href).href, page: p}));
+              return;
+            }
+            // 无真实链接：按 1.98 原逻辑在本页点击翻页（SPA 分页），继续在同一脚本内收集
+            window.webkit.messageHandlers.ajkScrape.postMessage(JSON.stringify({type:'progress', text:'正在解析第 ' + (p + 1) + ' 页…'}));
+            next.click();
+            await sleep(2500);
+            var cards2 = collectCards(seen);
+            window.webkit.messageHandlers.ajkScrape.postMessage(JSON.stringify({type:'page', overview: bodyText, cards: cards2, page: p + 1}));
+            if (cards2.length === 0) break;
           }
-          window.webkit.messageHandlers.ajkScrape.postMessage(JSON.stringify({type:'hasNext', href: nextHref}));
+          window.webkit.messageHandlers.ajkScrape.postMessage(JSON.stringify({type:'done', total: seen.size, error:''}));
         })();
         void 0;
         """
@@ -334,27 +350,26 @@ extension AjkWebViewProvider: WKScriptMessageHandler {
             let combinedOverview = [pendingOverviewText, overview].compactMap { $0 }.joined(separator: " ")
             let parsed = AjkParser.parse(overview: combinedOverview, cards: cardTexts, covers: covers, page: page)
             if !parsed.houses.isEmpty {
-                // v2.9（新增2）：只保留利保米兰公馆房源（community/title 含「米兰」）；
-                // 若一条都没匹配（用户在设置里改了 URL 抓其他小区）则原样保留，避免整页误删
-                let milan = parsed.houses.filter { $0.community.contains("米兰") || $0.title.contains("米兰") }
-                pendingHouses += (milan.isEmpty ? parsed.houses : milan)
+                // v2.12：按 1.98 原样全量入账——后台读取属于「自己账号的全部房源」，不做小区名过滤，
+                // 避免其他小区/命名不含「米兰」的卡片被丢弃而出现「能读但没读全」
+                pendingHouses += parsed.houses
                 pendingOverview = parsed.overview
             }
             return
         }
 
-        // v2.11：翻页探测结果——有下一页 href 且未达上限 → Swift 整页导航翻页；否则正常结束
+        // v2.12：整页跳转式翻页——脚本报告「当前页索引 + 下一页 href」，Swift 导航到 p+1 页
         if type == "hasNext" {
             let href = (dict["href"] as? String) ?? ""
             if hasHandledNext { return }
             hasHandledNext = true
-            if !href.isEmpty, pendingPage < pendingMaxPages {
-                pendingPage += 1
-                progress("正在打开第 \(pendingPage) 页…")
-                if let url = URL(string: href) {
-                    webView?.load(URLRequest(url: url))
-                    return
-                }
+            let reportedPage = (dict["page"] as? Int) ?? pendingPage
+            let nextPage = reportedPage + 1
+            if !href.isEmpty, nextPage <= pendingMaxPages, let url = URL(string: href) {
+                pendingPage = nextPage
+                progress("正在打开第 \(nextPage) 页…")
+                webView?.load(URLRequest(url: url))
+                return
             }
             finishSuccess()
             return
