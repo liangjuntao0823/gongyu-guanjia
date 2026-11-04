@@ -66,6 +66,7 @@ struct HouseListView: View {
     @State private var showSyncConfirm = false
     // v1.72（#1/#5）：刷新/同步进行中状态——点刷新立即反馈「正在刷新…」，比对完成才收起
     @State private var isSyncing = false
+    @State private var isCheckingCloudChange = false   // b121：自动轻量感知进行中的顶部指示条
     // v1.68：云端媒体对账确认（先干跑列桶 → 弹确认 → 确认后才上传）+ 同步任务进度/最小化
     @State private var showMediaSyncConfirm = false
     @State private var pendingMediaSnaps: [PendingMediaHouseSnapshot] = []
@@ -181,6 +182,7 @@ struct HouseListView: View {
                 AppTheme.background.ignoresSafeArea()
 
                 VStack(spacing: 0) {
+                    cloudChangeCheckBanner
                     syncTaskBanner
                     announcementBanner
                     collapsibleHeader
@@ -415,7 +417,14 @@ struct HouseListView: View {
             // 有变化 → 顶部横幅提示「检测到云端有更新，请同步」，无变化不提示。
             // cloudLedgerPendingHint 为启动/回前台探测变化的兜底（防漏提示），命中即清除。
             Task {
+                isCheckingCloudChange = true
+                let checkStart = Date()
                 let hasChange = await Self.detectCloudLedgerChange(houseContext: houseModelContext)
+                // b121：检测完成条至少停留 0.6s 再收起——轻量检测常不足一秒，一闪而过用户感知不到
+                if Date().timeIntervalSince(checkStart) < 0.6 {
+                    try? await Task.sleep(nanoseconds: 600_000_000)
+                }
+                isCheckingCloudChange = false
                 let pending = UserDefaults.standard.bool(forKey: "cloudLedgerPendingHint")
                 UserDefaults.standard.set(false, forKey: "cloudLedgerPendingHint")
                 if hasChange || pending {
@@ -1414,6 +1423,24 @@ struct HouseListView: View {
 
     /// v1.68：进行中的同步/补传任务进度条（房源页顶部，可「最小化」收起到设置-待补传媒体页查看）
     @ViewBuilder
+    /// b121：自动轻量感知进行中的顶部指示条——每次进入房源页都会自动拉云端账本与本地比对，
+    /// 检测期间显示细进度条 + 「正在检测云端变更…」，比对完成自动收起（有变化再弹「检测到云端有更新，请同步」横幅）。
+    private var cloudChangeCheckBanner: some View {
+        if isCheckingCloudChange {
+            HStack(spacing: 8) {
+                ProgressView().controlSize(.small)
+                Text("正在检测云端变更…")
+                    .font(.footnote.weight(.medium))
+                    .foregroundColor(.secondary)
+                Spacer()
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 6)
+            .background(AppTheme.background)
+            .transition(.move(edge: .top).combined(with: .opacity))
+        }
+    }
+
     private var syncTaskBanner: some View {
         if let t = syncCenter.task, !syncTaskMinimized {
             VStack(spacing: 8) {
