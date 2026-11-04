@@ -15,7 +15,7 @@ struct AjkPublicView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            header
+            // v2.10：页内标题行（关键词/上次抓取/读取按钮）已移除——统一由房源排名页顶栏按当前 tab 显示与刷新
             if !store.houses.isEmpty || store.lastFetch != nil { statsRow }
             if store.loading { progressBar }
             ScrollView {
@@ -82,47 +82,7 @@ struct AjkPublicView: View {
         .frame(maxWidth: .infinity)
     }
 
-    private var header: some View {
-        HStack(spacing: 10) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(store.settingsKeyword.isEmpty ? "安居客找房" : store.settingsKeyword)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(.themeText)
-                Text(subTitle)
-                    .font(.system(size: 11))
-                    .foregroundColor(.themeText3)
-            }
-            Spacer()
-            Button {
-                Task { await fetch() }
-            } label: {
-                HStack(spacing: 4) {
-                    Image(systemName: "arrow.clockwise")
-                        .font(.system(size: 11, weight: .semibold))
-                    Text("读取")
-                        .font(.system(size: 12, weight: .semibold))
-                }
-                .padding(.horizontal, 10)
-                .frame(height: 30)
-                .background(Color.themeAccent.opacity(0.12))
-                .foregroundColor(.themeAccentDark)
-                .clipShape(Capsule())
-            }
-            .disabled(store.loading)
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-        .background(Color.themePanel)
-        .overlay(RoundedRectangle(cornerRadius: 0).stroke(Color.themeBorder, lineWidth: 0.5))
-    }
-
-    private var subTitle: String {
-        if let t = store.lastFetch {
-            let f = DateFormatter(); f.dateFormat = "MM-dd HH:mm"
-            return "上次抓取 \(f.string(from: t))｜共 \(store.houses.count) 套"
-        }
-        return "点「读取」抓第一页约 60 套"
-    }
+    // v2.10：原 header（关键词标题/上次抓取/读取按钮行）已整体移除——统一由房源排名页顶栏管理
 
     private var progressBar: some View {
         HStack(spacing: 8) {
@@ -149,13 +109,6 @@ struct AjkPublicView: View {
                 .multilineTextAlignment(.center)
         }
         .padding(.top, 60)
-    }
-
-    private func fetch() async {
-        await store.fetch()
-        if let err = store.lastError {
-            errorText = err
-        }
     }
 }
 

@@ -25,6 +25,8 @@ struct F58BoardView: View {
     @State private var sortMode: F58SortMode = .defaultOrder
     @State private var onlyWithCover = false
     @State private var selectedHouse: F58House?
+    // v2.10：顶栏按当前 tab 联动——读取/小字都随 tab 切换显示对应平台数据（58 或安居客前台）
+    @ObservedObject private var ajkStore: AjkPublicStore = .shared
     enum F58BoardTab: String, CaseIterable, Identifiable {
         case f58 = "58找房"
         case ajk = "安居客"
@@ -41,7 +43,7 @@ struct F58BoardView: View {
                     f58Body
                 } else {
                     AjkPublicView()
-                        .environmentObject(AjkPublicStore.shared)
+                        .environmentObject(ajkStore)
                 }
             }
             if let t = toastText {
@@ -140,7 +142,12 @@ struct F58BoardView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 10))
                 }
                 Button {
-                    Task { await fetch() }
+                    // v2.10：顶栏读取按当前 tab 联动——58 tab 刷 58 列表，安居客 tab 刷安居客找房
+                    if tab == .ajk {
+                        Task { await ajkStore.fetch() }
+                    } else {
+                        Task { await fetch() }
+                    }
                 } label: {
                     HStack(spacing: 4) {
                         Image(systemName: "arrow.clockwise")
@@ -155,7 +162,7 @@ struct F58BoardView: View {
                     .background(Color.white.opacity(0.18))
                     .clipShape(Capsule())
                 }
-                .disabled(refreshing)
+                .disabled(tab == .ajk ? ajkStore.loading : refreshing)
             }
             .padding(.horizontal, 12)
         }
@@ -163,6 +170,15 @@ struct F58BoardView: View {
     }
 
     private var subTitle: String {
+        // v2.10：顶栏小字按当前 tab 显示对应平台数据（关键词｜上次抓取｜共 N 套）
+        if tab == .ajk {
+            let kw = ajkStore.settingsKeyword.isEmpty ? "关键词" : ajkStore.settingsKeyword
+            if let t = ajkStore.lastFetch {
+                let f = DateFormatter(); f.dateFormat = "MM-dd HH:mm"
+                return "\(kw)｜上次抓取 \(f.string(from: t))｜共 \(ajkStore.houses.count) 套"
+            }
+            return "\(kw)｜点「读取」抓取第一页"
+        }
         let kw = store.settings.keyword.isEmpty ? "关键词" : store.settings.keyword
         if let t = store.lastFetch {
             let f = DateFormatter(); f.dateFormat = "MM-dd HH:mm"

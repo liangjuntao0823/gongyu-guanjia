@@ -22,6 +22,8 @@ struct AjkBoardView: View {
     @State private var showSettings = false
     @State private var sortMode: AjkSortMode = .todayClick
     @State private var filterNeedInspect = false
+    // v2.10：读取进度逐步文案（打开后台→读概览→读列表→翻页解析），不再全程一个静态「正在读取页面数据…」
+    @State private var progressText = "正在读取页面数据…"
 
     var body: some View {
         ZStack {
@@ -143,8 +145,9 @@ struct AjkBoardView: View {
         HStack(spacing: 8) {
             ProgressView()
                 .controlSize(.small)
-            Text("正在读取页面数据…")
+            Text(progressText)
                 .font(.system(size: 12))
+                .lineLimit(1)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 8)
@@ -384,9 +387,15 @@ struct AjkBoardView: View {
     private func fetch() async {
         guard !refreshing else { return }
         refreshing = true
+        progressText = "正在读取页面数据…"
         defer { refreshing = false }
         do {
-            let result = try await AjkWebViewProvider.shared.fetchAll(maxPages: store.settings.maxPages)
+            // v2.10：传入进度回调——后台读取过程逐步显示（打开后台/读概览/读列表/翻页解析）
+            let result = try await AjkWebViewProvider.shared.fetchAll(maxPages: store.settings.maxPages) { text in
+                Task { @MainActor in
+                    self.progressText = text
+                }
+            }
             if result.needLogin {
                 errorText = "未能读取到房源数据。请先点「登录后台」完成一次登录，再回来点「读取」。"
                 return

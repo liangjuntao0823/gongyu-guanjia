@@ -26,8 +26,9 @@ struct AjkPublicHouse: Identifiable, Codable, Equatable {
 
 /// 安居客前台找房设置（UserDefaults 持久化，可在设置页修改）
 struct AjkPublicSettings: Codable, Equatable {
-    /// 默认：利保米兰公馆精选页（用户提供）
-    var url: String = "https://fs.zu.anjuke.com/?t=1&from=0&comm_exist=on&kw=%E5%88%A9%E4%BF%9D%E7%B1%B3%E5%85%B0%E5%85%AC%E9%A6%86"
+    /// 默认：利保米兰公馆指定小区链接（v2.10：带 facet_comm_id 锁定小区，页面只含该小区房源；
+    /// 旧默认链接无此参数，页面会混入其他小区房源，如「万科京都荟 950 元」重复多条）
+    var url: String = "https://fs.zu.anjuke.com/?kw=%E5%88%A9%E4%BF%9D%E7%B1%B3%E5%85%B0%E5%85%AC%E9%A6%86&comm_exist=on&from=list_ac&facet_comm_id=102286650"
     var keyword: String = "利保米兰公馆"
     static let `default` = AjkPublicSettings()
 }
@@ -48,8 +49,23 @@ final class AjkPublicStore: ObservableObject {
     private let defaults = UserDefaults.standard
 
     private init() {
-        settingsURL = defaults.string(forKey: "ajk.public.url") ?? AjkPublicSettings.default.url
+        // v2.10：旧默认链接（无 facet_comm_id，页面混入其他小区房源）自动迁移到「利保米兰公馆」指定小区链接
+        let oldDefault = "https://fs.zu.anjuke.com/?t=1&from=0&comm_exist=on&kw=%E5%88%A9%E4%BF%9D%E7%B1%B3%E5%85%B0%E5%85%AC%E9%A6%86"
+        var savedURL = defaults.string(forKey: "ajk.public.url")
+        if savedURL == oldDefault {
+            savedURL = AjkPublicSettings.default.url
+            defaults.set(savedURL, forKey: "ajk.public.url")
+        }
+        settingsURL = savedURL ?? AjkPublicSettings.default.url
         settingsKeyword = defaults.string(forKey: "ajk.public.keyword") ?? AjkPublicSettings.default.keyword
+    }
+
+    /// v2.10：抓取关键词过滤 token——关键词含「米兰」时用「米兰」（利保米兰公馆/米兰公馆都命中），
+    /// 否则用完整关键词；空 = 不过滤
+    var filterToken: String {
+        let kw = settingsKeyword.trimmingCharacters(in: .whitespacesAndNewlines)
+        if kw.isEmpty { return "" }
+        return kw.contains("米兰") ? "米兰" : kw
     }
 
     func saveSettings() {
@@ -274,10 +290,14 @@ extension AjkPublicWebViewProvider: WKScriptMessageHandler {
 
         if type == "page" {
             guard let arr = dict["cards"] as? [[String: Any]] else { return }
+            // v2.10：只保留目标小区（默认利保米兰公馆）卡片——关键词过滤在原始文本上做，
+            // 混入的其他小区房源（如「万科京都荟 950 元」同套重复多条）直接丢弃
+            let token = AjkPublicStore.shared.filterToken
             for obj in arr {
                 guard let text = obj["text"] as? String,
-                      let href = obj["href"] as? String,
-                      let house = AjkPublicParser.parse(text, href: href) else { continue }
+                      let href = obj["href"] as? String else { continue }
+                if !token.isEmpty && !text.contains(token) { continue }
+                guard let house = AjkPublicParser.parse(text, href: href) else { continue }
                 if !pendingHouses.contains(where: { $0.href == house.href }) {
                     pendingHouses.append(house)
                 }
@@ -293,9 +313,11 @@ extension AjkPublicWebViewProvider: WKScriptMessageHandler {
             webView = nil
             var result = FetchResult()
             result.houses = pendingHouses
-            // v2.3：解析到 0 条时给出明确提示（可能是页面结构变化/需登录/被重定向），避免静默显示「还没有数据」
+            // v2.3：解析到 0 条时给出明确提示（可能是页面结构变化/需登录/被重定向），避免静默显示「还没有数据」；
+            // v2.10：文案带出关键词过滤信息，方便定位是「页面没按小区过滤」还是「页面结构变化」
             if pendingHouses.isEmpty {
-                result.error = "页面未解析到房源（可能页面结构变化、需登录或验证）。可在设置里更换链接，或到手机上打开确认可访问后重试"
+                let kw = AjkPublicStore.shared.settingsKeyword
+                result.error = "未解析到「\(kw)」房源（页面未按小区过滤、结构变化、需登录或验证等）。可在设置里更换链接，或到手机上打开确认可访问后重试"
             }
             c.resume(returning: result)
         }
