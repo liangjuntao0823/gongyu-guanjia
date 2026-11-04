@@ -223,10 +223,20 @@ final class AjkWebViewProvider: NSObject, WKNavigationDelegate {
             }
             return out;
           }
+          // v2.12：稳定收集——每 300ms 收一次，直到连续 1.2 秒没有新卡片为止（容错于列表分批渲染/换页变慢）
+          async function collectStable(seenSet, maxWait) {
+            var acc = [];
+            var waited = 0, idle = 0;
+            while (waited < maxWait) {
+              var c = collectCards(seenSet);
+              if (c.length > 0) { acc = acc.concat(c); idle = 0; }
+              else if (acc.length > 0) { idle += 300; if (idle >= 1200) break; }
+              await sleep(300); waited += 300;
+            }
+            return acc;
+          }
           var seen = new Set();
-          // v2.12：卡片出现后再等 0.8 秒，等列表渲染完整（防只收到前几张）
-          await sleep(800);
-          var cards = collectCards(seen);
+          var cards = await collectStable(seen, 6000);
           window.webkit.messageHandlers.ajkScrape.postMessage(JSON.stringify({type:'page', overview: bodyText, cards: cards, page: \(page)}));
           // 翻页（v2.12：恢复 1.98 的 JS 点击翻页为主；仅当「下一页」是整页跳转链接时改由 Swift 导航，
           // 避免点击后导航销毁脚本上下文。两种分页实现都覆盖：SPA 点击 → 本脚本内连续收集；链接跳转 → Swift load）
@@ -251,8 +261,8 @@ final class AjkWebViewProvider: NSObject, WKNavigationDelegate {
             // 无真实链接：按 1.98 原逻辑在本页点击翻页（SPA 分页），继续在同一脚本内收集
             window.webkit.messageHandlers.ajkScrape.postMessage(JSON.stringify({type:'progress', text:'正在解析第 ' + (p + 1) + ' 页…'}));
             next.click();
-            await sleep(2500);
-            var cards2 = collectCards(seen);
+            // 1.98 原逻辑是固定等 2.5 秒；这里改为等到新卡片收完且稳定为止（最多 10 秒）
+            var cards2 = await collectStable(seen, 10000);
             window.webkit.messageHandlers.ajkScrape.postMessage(JSON.stringify({type:'page', overview: bodyText, cards: cards2, page: p + 1}));
             if (cards2.length === 0) break;
           }
