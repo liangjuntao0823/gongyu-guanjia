@@ -372,8 +372,12 @@ extension AjkWebViewProvider: WKScriptMessageHandler {
         guard let c = continuation else { return }
         continuation = nil
         cancelWatchdog()
-        userContentController.removeScriptMessageHandler(forName: "ajkScrape")
-        webView?.stopLoading()
+        // 注意：此处不在 didReceive 参数作用域内，userContentController 是方法名而非对象，
+        // 必须经 webView.configuration 取真正的脚本控制器
+        if let wv = webView {
+            wv.configuration.userContentController.removeScriptMessageHandler(forName: "ajkScrape")
+            wv.stopLoading()
+        }
         webView = nil
         onProgress = nil
         var result = FetchResult()
