@@ -677,7 +677,7 @@ struct MainTabView: View {
         autoBackupTimerCancellable = nil
         guard autoBackupEnabled() else { return }
         autoBackupTimerCancellable = Timer.publish(every: 120, on: .main, in: .common).autoconnect()
-            .sink { [weak self] _ in self?.checkAutoBackup() }
+            .sink { _ in checkAutoBackup() }
     }
 
     private func autoBackupEnabled() -> Bool {
