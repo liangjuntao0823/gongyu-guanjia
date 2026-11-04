@@ -1421,10 +1421,9 @@ struct HouseListView: View {
         return lines.joined(separator: "\n")
     }
 
-    /// v1.68：进行中的同步/补传任务进度条（房源页顶部，可「最小化」收起到设置-待补传媒体页查看）
-    @ViewBuilder
     /// b121：自动轻量感知进行中的顶部指示条——每次进入房源页都会自动拉云端账本与本地比对，
     /// 检测期间显示细进度条 + 「正在检测云端变更…」，比对完成自动收起（有变化再弹「检测到云端有更新，请同步」横幅）。
+    @ViewBuilder
     private var cloudChangeCheckBanner: some View {
         if isCheckingCloudChange {
             HStack(spacing: 8) {
@@ -1441,6 +1440,8 @@ struct HouseListView: View {
         }
     }
 
+    /// v1.68：进行中的同步/补传任务进度条（房源页顶部，可「最小化」收起到设置-待补传媒体页查看）
+    @ViewBuilder
     private var syncTaskBanner: some View {
         if let t = syncCenter.task, !syncTaskMinimized {
             VStack(spacing: 8) {
