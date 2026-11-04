@@ -598,14 +598,15 @@ struct MainTabView: View {
 
     /// b118（清单12：打开 App 轻量变更感知）：启动/回前台时轻量探测云端房源账本是否有变化。
     /// 只列一次 h/ 桶目录（对象名+大小+修改时间，不下载任何内容），与本地基线对比；
-    /// 有变化 → 更新基线并广播通知，房源列表收到后顶部横幅轻提示「云端有更新」，用户下拉刷新即同步。
-    /// 首次启动（无基线）只静默建基线不提示，避免首装误报。
-    /// b119（清单1 重做）：检测逻辑抽到 HouseListView.detectCloudLedgerChange()（每次进入房源页也检测）；
-    /// 探测失败（断网/超时）跳过本次不写空基线；变化时写持久化标记 cloudLedgerPendingHint——
-    /// 启动时不在房源页（通知无人接收）也不丢提示，进入房源页 onAppear 补横幅。
+    /// 变更感知（清单1）：App 启动/回前台检测「本地 vs 云端」两端是否有差异——
+    /// 判定机制与「同步云端房源」按钮完全一致（云端账本 fetchAll + 字段级对比 + 房号集合差），
+    /// 有变化 → 写持久化标记 cloudLedgerPendingHint + 广播通知（房源页收到后顶部横幅提示「检测到云端有更新，请同步」），
+    /// 无变化不提示；启动时不在房源页（通知无人接收）也不丢提示，进入房源页 onAppear 兜底消费标记。
+    /// b120：检测签名增加本地容器参数（App 侧传 houseModelContext），与列表页 onAppear 同口径双端对比，
+    ///        弃用云端快照基线（cloudLedgerBaseline.v1）——解决上一版「云端基线已最新 → 此后永远不提示」的失效。
     private func detectCloudLedgerChange() {
         Task {
-            guard await HouseListView.detectCloudLedgerChange() else { return }
+            guard await HouseListView.detectCloudLedgerChange(houseContext: houseModelContext) else { return }
             UserDefaults.standard.set(true, forKey: "cloudLedgerPendingHint")
             NotificationCenter.default.post(name: HouseListView.cloudLedgerChangedLight, object: nil)
         }

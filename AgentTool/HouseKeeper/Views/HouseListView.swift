@@ -410,16 +410,16 @@ struct HouseListView: View {
         }
         .onAppear {
             reloadHouses()
-            // b119（清单1 重做）：每次进入房源页都检测一次云端变化——
-            // 有变化 → 顶部横幅提示「检测到云端有更新，请同步」，无变化不提示；
-            // 持久化标记兜底：启动/回前台时不在本页（通知无人接收）也不丢提示
+            // b119/b120（清单1 重做）：每次进入房源页都实时检测「本地 vs 云端」两端差异——
+            // 检测机制与「同步云端房源」按钮完全一致（云端账本 fetchAll + 字段级对比 + 房号集合差）；
+            // 有变化 → 顶部横幅提示「检测到云端有更新，请同步」，无变化不提示。
+            // cloudLedgerPendingHint 为启动/回前台探测变化的兜底（防漏提示），命中即清除。
             Task {
-                if UserDefaults.standard.bool(forKey: "cloudLedgerPendingHint") {
-                    UserDefaults.standard.set(false, forKey: "cloudLedgerPendingHint")
-                    showToast("检测到云端有更新，请同步")
-                }
-                if await Self.detectCloudLedgerChange() {
-                    showToast("检测到云端有更新，请同步")
+                let hasChange = await Self.detectCloudLedgerChange(houseContext: houseModelContext)
+                let pending = UserDefaults.standard.bool(forKey: "cloudLedgerPendingHint")
+                UserDefaults.standard.set(false, forKey: "cloudLedgerPendingHint")
+                if hasChange || pending {
+                    showCloudChangeHint()
                 }
             }
         }
@@ -429,29 +429,55 @@ struct HouseListView: View {
         // b118（清单12：打开 App 轻量变更感知）：App 启动/回前台探测到云端账本有变化 →
         // 顶部横幅轻提示「云端有更新」，用户下拉刷新即同步（不自动拉取，省流量、不打断当前操作）
         // b119（清单1 重做）：文案改为「检测到云端有更新，请同步」；本页收到通知直接提示
+        // b120：通知到达也走统一提示入口（showCloudChangeHint 防抖），并消费 pendingHint
         .onReceive(NotificationCenter.default.publisher(for: Self.cloudLedgerChangedLight)) { _ in
-            showToast("检测到云端有更新，请同步")
+            UserDefaults.standard.set(false, forKey: "cloudLedgerPendingHint")
+            showCloudChangeHint()
         }
     }
 
-    /// b118/b119（清单1）：打开 App 轻量变更感知核心——列一次 h/ 桶目录（对象名+大小+修改时间，
-    /// 不下载任何内容），与本地基线对比。有变化 → 更新基线并返回 true；无变化返回 false。
-    /// 首次启动（无基线）只静默建基线不提示，避免首装误报；探测失败（断网/超时）跳过本次不写空基线、不误报。
-    /// App 启动/回前台（App.swift）与每次进入房源页（onAppear）都会调用；基线 key 沿用 cloudLedgerBaseline.v1。
-    static func detectCloudLedgerChange() async -> Bool {
+    /// b120（清单1）：统一「云端有更新」横幅提示入口——5 秒防抖，避免启动/回前台通知
+    /// 与 onAppear 实时检测并发时重复提示；有变化才提示、无变化静默。
+    private func showCloudChangeHint() {
+        let now = Date().timeIntervalSince1970
+        let last = UserDefaults.standard.double(forKey: "cloudLedgerHintShownAt")
+        if now - last < 5 { return }
+        UserDefaults.standard.set(now, forKey: "cloudLedgerHintShownAt")
+        showToast("检测到云端有更新，请同步")
+    }
+
+    /// b118/b119/b120（清单1）：打开 App 轻量变更感知——检测「本地与云端两端是否有差异」。
+    /// 判定口径与左上角「同步云端房源」按钮完全一致（用户明确要求：检测机制 = 同步按钮机制，只是自动跑、只提示不执行）：
+    ///  - 云端账本 fetchAll（只拉 info.json 轻量账本文本，不下载媒体内容）
+    ///  - 本地房号集合（排除回收站）
+    ///  - ① 云端有、本地没有 → 云端新增（要下拉）
+    ///  - ② 同房号字段/媒体清单不一致（cloudRecordDiffers）→ 云端有更新（要覆盖/补媒体）
+    ///  - ③ 本地有、云端没有 → 本地待上传/待删除（v1.71：云端账本为空时一律视为本地→云端补传）
+    /// 任一差异 → 返回 true（提示「检测到云端有更新，请同步」）；完全一致 → false（不提示）。
+    /// 不再依赖历史快照基线（cloudLedgerBaseline.v1 弃用）——解决上一版「云端快照基线已最新 → 此后永远不提示」的失效根因。
+    /// 探测失败（断网/超时/未配置云）返回 false 不误报。
+    /// b120：改签名接收本地容器（static 方法不能访问实例 @Environment；App 侧传 houseContainer.mainContext、
+    ///        列表页 onAppear 传 self.houseModelContext）。
+    static func detectCloudLedgerChange(houseContext: ModelContext?) async -> Bool {
         guard let config = CosConfig.load(), config.isValid else { return false }
-        guard let objs = try? await CosUploader.listObjects(prefix: "h/", config: config) else { return false }
-        var current: [String: String] = [:]
-        for obj in objs {
-            let name = obj.name
-            guard name.hasSuffix("/info.json") else { continue }
-            current[name] = "\(obj.size)-\(Int64(obj.date.timeIntervalSince1970))"
+        guard let recs = try? await CloudHouseSync.fetchAll(config: config) else { return false }
+        guard let ctx = houseContext else { return false }
+        // 本地房号集合（排除回收站；v1.9：可选 Bool 不能进 #Predicate，全量拉取内存过滤）
+        let local = (try? ctx.fetch(FetchDescriptor<House>())) ?? []
+        var localByKey: [String: House] = [:]
+        for h in local where !h.isTrashed { localByKey[h.mediaRoomKey] = h }
+        // ① 云端有、本地没有 → 新增
+        // ② 同房号字段/媒体差异 → 更新
+        for rec in recs {
+            guard let h = localByKey[rec.roomKey] else { return true }
+            if Self.cloudRecordDiffers(rec, from: h) != nil { return true }
         }
-        let key = "cloudLedgerBaseline.v1"
-        let baseline = (UserDefaults.standard.dictionary(forKey: key) as? [String: String]) ?? [:]
-        let changed = current != baseline
-        UserDefaults.standard.set(current, forKey: key)
-        return changed && !baseline.isEmpty
+        // ③ 本地有、云端没有 → 待补传/待删除（两端不一致即提示同步）
+        let cloudKeys = Set(recs.map { $0.roomKey })
+        for (key, _) in localByKey where !cloudKeys.contains(key) {
+            return true
+        }
+        return false
     }
 
     /// 从独立 HouseStore 配置拉取房源（按创建时间倒序，与原来 @Query 一致；v1.7：排除已进回收站的软删除房源）
@@ -1015,12 +1041,20 @@ struct HouseListView: View {
     }
 
     /// v1.41：云端账本与本地房源的字段级对比——任一字段（含媒体清单）不同即视为有变化。
+    /// v1.43：媒体名归一化 key——去扩展名 + 小写。
+    /// 视频 .mov/.mp4 同源（上传云端统一转 mp4、本地按原样或账本名保存），按此视为同一文件；
+    /// 首帧图「xxx.mp4.vthumb.jpg」归一化为「xxx.mp4.vthumb」，与视频「xxx」天然区分，不会被误配。
+    private static func mediaNormKey(_ name: String) -> String {
+        (name as NSString).deletingPathExtension.lowercased()
+    }
+
     /// 替代旧的时间戳比较：时间戳只有秒级精度且恢复备份后 lastUpdatedAt 为空，
     /// 会导致「明明没变化每次同步都判更新」。字段级对比满足「一个标点符号变了都要同步」。
     /// v1.43：媒体清单改用归一化等价比较（去扩展名小写）——视频 .mov/.mp4 视为同一文件，
     ///        不再因两套扩展名互斥而每次同步都误判「更新」。
     /// b116：返回差异描述（nil=一致，非nil=具体哪个字段不同），字符串先 trim 防首尾空格死循环。
-    private func cloudRecordDiffers(_ rec: CloudHouseRecord, from house: House) -> String? {
+    /// b120：改为 static——轻量变更感知（detectCloudLedgerChange）与同步按钮共用同一判定口径。
+    private static func cloudRecordDiffers(_ rec: CloudHouseRecord, from house: House) -> String? {
         let ls = { (s: String) in s.trimmingCharacters(in: .whitespacesAndNewlines) }
         if rec.roomNo != house.roomNo { return "roomNo「\(rec.roomNo)」vs「\(house.roomNo)」" }
         if rec.tower != house.tower { return "tower \(rec.tower) vs \(house.tower)" }
@@ -1038,13 +1072,6 @@ struct HouseListView: View {
             return "media 本地独有[\(onlyLocal.joined(separator: ","))] 云端独有[\(onlyCloud.joined(separator: ","))]"
         }
         return nil
-    }
-
-    /// v1.43：媒体名归一化 key——去扩展名 + 小写。
-    /// 视频 .mov/.mp4 同源（上传云端统一转 mp4、本地按原样或账本名保存），按此视为同一文件；
-    /// 首帧图「xxx.mp4.vthumb.jpg」归一化为「xxx.mp4.vthumb」，与视频「xxx」天然区分，不会被误配。
-    private static func mediaNormKey(_ name: String) -> String {
-        (name as NSString).deletingPathExtension.lowercased()
     }
 
     /// 从云端拉取房源账本并同步到本地（下拉刷新 / 左上角手动同步同效果）。
