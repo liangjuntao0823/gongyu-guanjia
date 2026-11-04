@@ -1,6 +1,6 @@
 //
 //  AjkWebViewProvider.swift
-//  公寓管家 · 安居客经纪人后台数据抓取（v1.85）
+//  公寓管家 · 安居客经纪人后台数据抓取（v2.12：抓取逻辑恢复 1.98 原实现，仅保留逐步进度显示）
 //  方案：WKWebView 持久登录态（cookie 保存，登录一次免登）→ 注入 JS 收集页面房源卡片文本与概览 → Swift 解析入库
 //  安全边界：仅用户主动触发抓取；只读取用户自己账号页面；绝不做任何写操作（发布/编辑/推广）
 //
@@ -25,33 +25,25 @@ final class AjkWebViewProvider: NSObject, WKNavigationDelegate {
     private var continuation: CheckedContinuation<FetchResult, Error>?
     private var pendingMaxPages = 5
     private var pageLoadCount = 0
-    /// v2.11：当前正在抓取的页码（跨注入保留；翻页由 Swift 驱动整页导航，页码不再由 JS 硬编码）
-    private var pendingPage = 1
-    /// v2.11：防重入——本页 hasNext 已处理过就不再重复翻页（避免 didFinish 重复注入导致翻过头）
-    private var hasHandledNext = false
     /// 跨 page 消息累积（每次抓取前清空；@MainActor 单例，无并发问题）
     private var pendingHouses: [AjkHouse] = []
     private var pendingOverview: AjkOverview = .empty
     /// v1.91：两步抓取——先工作台首页（神奇分/房产币）再房源列表页
     private var phase = 0                 // 0=工作台概览 1=房源列表
     private var pendingOverviewText: String? = nil
-    private static let overviewURL = "https://vip.anjuke.com/user/brokerhomeV2"
-    // v2.10：逐步进度回调（每次抓取前设置，完成/失败时清空）
+    /// 逐步进度回调（每次抓取前设置，完成/失败时清空）
     private var onProgress: ((String) -> Void)?
-    // v2.10：活动看门狗——30s 无任何进展才判超时；原来固定 75s 且缺 didFail 回调，网络失败只能干等
-    private var watchdog: DispatchWorkItem?
+    private static let overviewURL = "https://vip.anjuke.com/user/brokerhomeV2"
 
     // MARK: - 公开入口：抓取全部房源（当前登录态）
 
     func fetchAll(maxPages: Int, onProgress: ((String) -> Void)? = nil) async throws -> FetchResult {
+        self.onProgress = onProgress
         pendingMaxPages = maxPages
         pendingHouses = []
         pendingOverview = .empty
         pendingOverviewText = nil
         phase = 0
-        pendingPage = 1
-        hasHandledNext = false
-        self.onProgress = onProgress
         return try await withCheckedThrowingContinuation { (cont: CheckedContinuation<FetchResult, Error>) in
             self.continuation = cont
             let config = WKWebViewConfiguration()
@@ -66,66 +58,35 @@ final class AjkWebViewProvider: NSObject, WKNavigationDelegate {
             let url = URL(string: Self.overviewURL)!
             wv.load(URLRequest(url: url))
             self.progress("正在打开安居客后台…")
-            // v2.10：活动看门狗——30s 无任何进展（未加载完成/未回传数据）才判超时，
-            // 网络失败/页面卡死不再干等固定 75s；每有进展重新计时
-            self.armWatchdog(seconds: 30)
+            // 兜底超时（页面卡死/网络异常时恢复，避免无限等待；两步加载放宽到 75s）
+            DispatchQueue.main.asyncAfter(deadline: .now() + 75) {
+                if let c = self.continuation {
+                    self.continuation = nil
+                    c.resume(throwing: AjkError.msg("页面加载超时，请检查网络后重试"))
+                }
+            }
         }
     }
 
-    // MARK: - 进度与看门狗（v2.10）
+    // MARK: - 逐步进度
 
     private func progress(_ text: String) {
         onProgress?(text)
-    }
-
-    /// 取消旧看门狗并重新计时（每次有进展都调用）
-    private func armWatchdog(seconds: Double) {
-        watchdog?.cancel()
-        let work = DispatchWorkItem { [weak self] in
-            guard let self else { return }
-            Task { @MainActor in
-                self.finish(error: "页面加载超时，请检查网络后重试")
-            }
-        }
-        watchdog = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + seconds, execute: work)
-    }
-
-    private func cancelWatchdog() {
-        watchdog?.cancel()
-        watchdog = nil
     }
 
     // MARK: - 导航回调
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         pageLoadCount += 1
-        // v2.10：页面已加载完成，但脚本等待/回传可能较久，看门狗放宽到 45s
-        armWatchdog(seconds: 45)
+        progress(phase == 0 ? "正在读取工作台概览（神奇分/房产币）…" : "正在读取房源列表…")
         // SPA 异步渲染 + 登录判定后注入抓取脚本；phase 0=工作台概览，1=房源列表
-        // v2.11：列表页每次整页导航完成后按当前 pendingPage 注入「只收集本页」的脚本，
-        // 翻页由 Swift 用 hasNext 返回的 href 驱动 load，不再由 JS click（click 会销毁脚本上下文导致中断/超时）
         DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
             if self.phase == 0 {
-                self.progress("正在读取工作台概览（神奇分/房产币）…")
                 self.runOverviewScrape(on: webView)
             } else {
-                self.progress("正在解析第 \(self.pendingPage) 页…")
-                self.runScrape(on: webView, page: self.pendingPage)
+                self.runScrape(on: webView)
             }
         }
-    }
-
-    // MARK: - 导航失败立即报错（v2.10：原来缺这两个回调，页面加载失败时 didFinish 永不触发，只能干等超时）
-
-    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
-        guard continuation != nil else { return }
-        finish(error: "页面加载失败：\(error.localizedDescription)")
-    }
-
-    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
-        guard continuation != nil else { return }
-        finish(error: "页面加载失败（网络异常或平台拦截）：\(error.localizedDescription)")
     }
 
     // MARK: - 注入 JS：收集工作台概览文本（神奇分/房产币）
@@ -135,16 +96,6 @@ final class AjkWebViewProvider: NSObject, WKNavigationDelegate {
         (async function(){
           function sleep(ms){ return new Promise(function(r){ setTimeout(r, ms); }); }
           function norm(s){ return (s||'').replace(/\\s+/g,' ').trim(); }
-          // v2.10：登录页快速识别——URL 进 passport/登录，或标题含「登录」且正文含登录引导词；
-          // 命中立即回传 needLogin，不再走完整两步流程后才提示（原来要干等很久）
-          var hrefNow = location.href || '';
-          var titleNow = norm(document.title || '');
-          var bodyNow = norm((document.body && (document.body.innerText || document.body.textContent)) || '');
-          if (hrefNow.indexOf('passport') >= 0 || hrefNow.indexOf('/login') >= 0 ||
-              (titleNow.indexOf('登录') >= 0 && (bodyNow.indexOf('请登录') >= 0 || bodyNow.indexOf('扫码登录') >= 0 || bodyNow.indexOf('账号密码登录') >= 0))) {
-            window.webkit.messageHandlers.ajkScrape.postMessage(JSON.stringify({type:'needLogin'}));
-            return;
-          }
           // 等待 SPA 渲染出神奇分/房产币（最多 12 秒）
           var waited = 0;
           while (waited < 12000) {
@@ -167,24 +118,13 @@ final class AjkWebViewProvider: NSObject, WKNavigationDelegate {
     }
 
     // MARK: - 注入 JS：收集原始文本（解析放 Swift）
-    // v2.12：恢复 1.98 的翻页实现（JS 内点击「下一页」循环收集，多页在同一个脚本内完成）；
-    // 仅当「下一页」是真实 href 整页跳转时改由 Swift 导航（点击跳转会销毁脚本上下文，这是 v2.11 的问题）。
-    // v2.11 只探测 href、从不点击，导致 SPA 式分页探测不到下一页 → 只读到第 1 页（「能读但没读全」）。
 
-    private func runScrape(on webView: WKWebView, page: Int) {
+    private func runScrape(on webView: WKWebView) {
+        let maxPages = pendingMaxPages
         let js = """
         (async function(){
           function sleep(ms){ return new Promise(function(r){ setTimeout(r, ms); }); }
           function norm(s){ return (s||'').replace(/\\s+/g,' ').trim(); }
-          // 登录页快速识别（翻页后可能被登出/跳登录）
-          var hrefNow = location.href || '';
-          var titleNow = norm(document.title || '');
-          var bodyNow = norm((document.body && (document.body.innerText || document.body.textContent)) || '');
-          if (hrefNow.indexOf('passport') >= 0 || hrefNow.indexOf('/login') >= 0 ||
-              (titleNow.indexOf('登录') >= 0 && (bodyNow.indexOf('请登录') >= 0 || bodyNow.indexOf('扫码登录') >= 0 || bodyNow.indexOf('账号密码登录') >= 0))) {
-            window.webkit.messageHandlers.ajkScrape.postMessage(JSON.stringify({type:'needLogin'}));
-            return;
-          }
           // 等待 SPA 渲染出房源卡片（最多 15 秒，防抓空）
           var waited = 0;
           while (waited < 15000) {
@@ -195,7 +135,6 @@ final class AjkWebViewProvider: NSObject, WKNavigationDelegate {
           var bodyText = norm(document.body.innerText || document.body.textContent);
           // 收集房源卡片：找到含"编号:"的文本节点，向上定位到含"预约管理"的容器；
           // v1.90：同时抓取卡片内第一张封面图 URL（缩略图，作为房源封面）
-          // v2.11：JS 内 seen 只防「本页内」文本节点重复；跨页重复由 Swift 按编号去重
           function collectCards(seenSet) {
             var out = [];
             var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
@@ -223,47 +162,30 @@ final class AjkWebViewProvider: NSObject, WKNavigationDelegate {
             }
             return out;
           }
-          // v2.12：稳定收集——每 300ms 收一次，直到连续 1.2 秒没有新卡片为止（容错于列表分批渲染/换页变慢）
-          async function collectStable(seenSet, maxWait) {
-            var acc = [];
-            var waited = 0, idle = 0;
-            while (waited < maxWait) {
-              var c = collectCards(seenSet);
-              if (c.length > 0) { acc = acc.concat(c); idle = 0; }
-              else if (acc.length > 0) { idle += 300; if (idle >= 1200) break; }
-              await sleep(300); waited += 300;
-            }
-            return acc;
-          }
           var seen = new Set();
-          var cards = await collectStable(seen, 6000);
-          window.webkit.messageHandlers.ajkScrape.postMessage(JSON.stringify({type:'page', overview: bodyText, cards: cards, page: \(page)}));
-          // 翻页（v2.12：恢复 1.98 的 JS 点击翻页为主；仅当「下一页」是整页跳转链接时改由 Swift 导航，
-          // 避免点击后导航销毁脚本上下文。两种分页实现都覆盖：SPA 点击 → 本脚本内连续收集；链接跳转 → Swift load）
-          var maxP = \(pendingMaxPages);
-          for (var p = \(page); p < maxP; p++) {
+          var cards = collectCards(seen);
+          var out = {type:'page', overview: bodyText, cards: cards, page: 1};
+          window.webkit.messageHandlers.ajkScrape.postMessage(JSON.stringify(out));
+          // 自动翻页：点"下一页"直到没有或达到上限
+          var page = 1;
+          var maxP = \(maxPages);
+          for (var p = 1; p < maxP; p++) {
             var next = null;
-            var links = document.querySelectorAll('a, span, div, button, li');
+            var links = document.querySelectorAll('a, span, div, button');
             for (var i = 0; i < links.length; i++) {
               var tx = norm(links[i].textContent);
-              if (tx === '下一页' || /^下一页[\\s>»→‹]*$/.test(tx)) { next = links[i]; break; }
+              if (tx === '下一页') { next = links[i]; break; }
             }
             if (!next) break;
-            var cls = next.getAttribute('class') || '';
-            if (cls.indexOf('disabled') >= 0 || next.getAttribute('aria-disabled') === 'true') break;
-            var aEl = (next.tagName === 'A') ? next : (next.closest ? next.closest('a') : null);
-            var h = aEl ? (aEl.getAttribute('href') || '') : '';
-            if (h && h !== '#' && h.indexOf('javascript') < 0) {
-              // 整页跳转链接：交 Swift 导航（点击会销毁本脚本上下文）
-              window.webkit.messageHandlers.ajkScrape.postMessage(JSON.stringify({type:'hasNext', href: new URL(h, location.href).href, page: p}));
-              return;
-            }
-            // 无真实链接：按 1.98 原逻辑在本页点击翻页（SPA 分页），继续在同一脚本内收集
+            var disabled = next.getAttribute('class') || '';
+            if (disabled.indexOf('disabled') >= 0 || next.getAttribute('aria-disabled') === 'true') break;
             window.webkit.messageHandlers.ajkScrape.postMessage(JSON.stringify({type:'progress', text:'正在解析第 ' + (p + 1) + ' 页…'}));
             next.click();
-            // 1.98 原逻辑是固定等 2.5 秒；这里改为等到新卡片收完且稳定为止（最多 10 秒）
-            var cards2 = await collectStable(seen, 10000);
-            window.webkit.messageHandlers.ajkScrape.postMessage(JSON.stringify({type:'page', overview: bodyText, cards: cards2, page: p + 1}));
+            await sleep(2500);
+            // 收集新一页
+            var cards2 = collectCards(seen);
+            page = p + 1;
+            window.webkit.messageHandlers.ajkScrape.postMessage(JSON.stringify({type:'page', overview: bodyText, cards: cards2, page: page}));
             if (cards2.length === 0) break;
           }
           window.webkit.messageHandlers.ajkScrape.postMessage(JSON.stringify({type:'done', total: seen.size, error:''}));
@@ -283,7 +205,6 @@ final class AjkWebViewProvider: NSObject, WKNavigationDelegate {
     private func finish(error: String) {
         guard let c = continuation else { return }
         continuation = nil
-        cancelWatchdog()
         webView?.stopLoading()
         webView = nil
         onProgress = nil
@@ -300,26 +221,8 @@ extension AjkWebViewProvider: WKScriptMessageHandler {
               let dict = try? JSONSerialization.jsonObject(with: Data(body.utf8)) as? [String: Any],
               let type = dict["type"] as? String else { return }
 
-        // v2.10：逐步进度——每收到一条消息都视为有进展，看门狗重新计时
-        armWatchdog(seconds: 30)
-
         if type == "progress" {
             if let text = dict["text"] as? String { progress(text) }
-            return
-        }
-
-        if type == "needLogin" {
-            // v2.10：打开页面即被跳转/显示登录页 → 立即提示先登录，不再走完整两步流程后才报
-            guard let c = continuation else { return }
-            continuation = nil
-            cancelWatchdog()
-            userContentController.removeScriptMessageHandler(forName: "ajkScrape")
-            webView?.stopLoading()
-            webView = nil
-            onProgress = nil
-            var result = FetchResult()
-            result.needLogin = true
-            c.resume(returning: result)
             return
         }
 
@@ -327,8 +230,8 @@ extension AjkWebViewProvider: WKScriptMessageHandler {
             // 工作台首页文本（神奇分/房产币）已拿到 → 切到房源列表页继续
             pendingOverviewText = (dict["text"] as? String) ?? ""
             phase = 1
-            let url = URL(string: AjkStore.shared.settings.baseURL) ?? URL(string: "https://vip.anjuke.com/zufang/main/zufang/subpages/allHouse")!
             progress("正在打开房源列表页…")
+            let url = URL(string: AjkStore.shared.settings.baseURL) ?? URL(string: "https://vip.anjuke.com/zufang/main/zufang/subpages/allHouse")!
             webView?.load(URLRequest(url: url))
             return
         }
@@ -337,8 +240,6 @@ extension AjkWebViewProvider: WKScriptMessageHandler {
             let overview = (dict["overview"] as? String) ?? ""
             let page = (dict["page"] as? Int) ?? 1
             progress("正在解析第 \(page) 页…")
-            // v2.11：本页已收集完成，允许新一轮翻页（防 didFinish 重复注入导致翻过头）
-            hasHandledNext = false
             // v1.90：卡片元素为 {t, cover} 对象；兼容旧版纯文本数组
             var cardTexts: [String] = []
             var covers: [String: String] = [:]   // number -> coverURL
@@ -360,65 +261,28 @@ extension AjkWebViewProvider: WKScriptMessageHandler {
             let combinedOverview = [pendingOverviewText, overview].compactMap { $0 }.joined(separator: " ")
             let parsed = AjkParser.parse(overview: combinedOverview, cards: cardTexts, covers: covers, page: page)
             if !parsed.houses.isEmpty {
-                // v2.12：按 1.98 原样全量入账——后台读取属于「自己账号的全部房源」，不做小区名过滤，
-                // 避免其他小区/命名不含「米兰」的卡片被丢弃而出现「能读但没读全」
                 pendingHouses += parsed.houses
                 pendingOverview = parsed.overview
             }
             return
         }
 
-        // v2.12：整页跳转式翻页——脚本报告「当前页索引 + 下一页 href」，Swift 导航到 p+1 页
-        if type == "hasNext" {
-            let href = (dict["href"] as? String) ?? ""
-            if hasHandledNext { return }
-            hasHandledNext = true
-            let reportedPage = (dict["page"] as? Int) ?? pendingPage
-            let nextPage = reportedPage + 1
-            if !href.isEmpty, nextPage <= pendingMaxPages, let url = URL(string: href) {
-                pendingPage = nextPage
-                progress("正在打开第 \(nextPage) 页…")
-                webView?.load(URLRequest(url: url))
-                return
-            }
-            finishSuccess()
-            return
-        }
-
         if type == "done" {
-            finishSuccess()
-            return
+            guard let c = continuation else { return }
+            continuation = nil
+            userContentController.removeScriptMessageHandler(forName: "ajkScrape")
+            webView?.stopLoading()
+            webView = nil
+            onProgress = nil
+            var result = FetchResult()
+            result.houses = pendingHouses
+            result.overview = pendingOverview
+            // 登录态判定：一张卡片都没抓到且概览不含房源特征 → 可能未登录
+            if result.houses.isEmpty && result.overview == .empty {
+                result.needLogin = true
+            }
+            c.resume(returning: result)
         }
-    }
-
-    // MARK: - 正常收尾（v2.11：done 与 hasNext 无下一页共用）
-
-    private func finishSuccess() {
-        guard let c = continuation else { return }
-        continuation = nil
-        cancelWatchdog()
-        // 注意：此处不在 didReceive 参数作用域内，userContentController 是方法名而非对象，
-        // 必须经 webView.configuration 取真正的脚本控制器
-        if let wv = webView {
-            wv.configuration.userContentController.removeScriptMessageHandler(forName: "ajkScrape")
-            wv.stopLoading()
-        }
-        webView = nil
-        onProgress = nil
-        var result = FetchResult()
-        // v2.9（新增2）：跨页全局去重——同一套房源编号只保留首个，消除「同套重复」展示
-        var seen = Set<String>()
-        var deduped: [AjkHouse] = []
-        for h in pendingHouses where seen.insert(h.number).inserted {
-            deduped.append(h)
-        }
-        result.houses = deduped
-        result.overview = pendingOverview
-        // 登录态判定：一张卡片都没抓到且概览不含房源特征 → 可能未登录
-        if result.houses.isEmpty && result.overview == .empty {
-            result.needLogin = true
-        }
-        c.resume(returning: result)
     }
 }
 
