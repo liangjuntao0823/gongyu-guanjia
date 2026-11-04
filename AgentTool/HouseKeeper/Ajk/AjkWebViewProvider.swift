@@ -1,6 +1,6 @@
 //
 //  AjkWebViewProvider.swift
-//  公寓管家 · 安居客经纪人后台数据抓取（v2.12：抓取逻辑恢复 1.98 原实现，仅保留逐步进度显示）
+//  公寓管家 · 安居客经纪人后台数据抓取（v2.13：1.98 原实现 + 翻页到底判定，仅保留逐步进度显示）
 //  方案：WKWebView 持久登录态（cookie 保存，登录一次免登）→ 注入 JS 收集页面房源卡片文本与概览 → Swift 解析入库
 //  安全边界：仅用户主动触发抓取；只读取用户自己账号页面；绝不做任何写操作（发布/编辑/推广）
 //
@@ -31,6 +31,8 @@ final class AjkWebViewProvider: NSObject, WKNavigationDelegate {
     /// v1.91：两步抓取——先工作台首页（神奇分/房产币）再房源列表页
     private var phase = 0                 // 0=工作台概览 1=房源列表
     private var pendingOverviewText: String? = nil
+    /// 是否已经成功翻过页（翻页后列表页若整页重载，直接收尾，不再等超时）
+    private var hasPaginated = false
     /// 逐步进度回调（每次抓取前设置，完成/失败时清空）
     private var onProgress: ((String) -> Void)?
     private static let overviewURL = "https://vip.anjuke.com/user/brokerhomeV2"
@@ -43,6 +45,7 @@ final class AjkWebViewProvider: NSObject, WKNavigationDelegate {
         pendingHouses = []
         pendingOverview = .empty
         pendingOverviewText = nil
+        hasPaginated = false
         phase = 0
         return try await withCheckedThrowingContinuation { (cont: CheckedContinuation<FetchResult, Error>) in
             self.continuation = cont
@@ -78,6 +81,13 @@ final class AjkWebViewProvider: NSObject, WKNavigationDelegate {
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         pageLoadCount += 1
+        // 已经翻过页之后列表页又整页重载：说明点到了不存在的「下一页」，脚本上下文已被销毁，
+        // 此时不再重复注入、也不再等 75s 超时，直接用已收集的两页数据正常收尾。
+        if phase == 1 && hasPaginated && !pendingHouses.isEmpty {
+            progress("已读取全部页面，正在整理房源…")
+            finishWithCollected()
+            return
+        }
         progress(phase == 0 ? "正在读取工作台概览（神奇分/房产币）…" : "正在读取房源列表…")
         // SPA 异步渲染 + 登录判定后注入抓取脚本；phase 0=工作台概览，1=房源列表
         DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
@@ -167,18 +177,54 @@ final class AjkWebViewProvider: NSObject, WKNavigationDelegate {
           var out = {type:'page', overview: bodyText, cards: cards, page: 1};
           window.webkit.messageHandlers.ajkScrape.postMessage(JSON.stringify(out));
           // 自动翻页：点"下一页"直到没有或达到上限
+          // v2.13：点之前先确认「下一页」真的可用（可见 + 自身/祖先带 disabled 视作最后一页 + 总页数已到），
+          // 避免列表只有 2 页时点到不存在的第 3 页导致整页跳转、脚本上下文被销毁后干等到超时。
+          function isDeadNext(el) {
+            var node = el, depth = 0;
+            while (node && depth < 6) {
+              var cls = (node.className && node.className.toString()) ? node.className.toString() : '';
+              if (cls.toLowerCase().indexOf('disab') >= 0) return true;
+              if (node.getAttribute && (node.getAttribute('aria-disabled') === 'true' || node.hasAttribute('disabled'))) return true;
+              node = node.parentElement; depth++;
+            }
+            try {
+              var st = window.getComputedStyle(el);
+              if (st && (st.pointerEvents === 'none' || st.visibility === 'hidden' || parseFloat(st.opacity) === 0)) return true;
+            } catch (e) {}
+            return false;
+          }
+          function findNext() {
+            var nodes = document.querySelectorAll('a, button, span, div');
+            for (var i = 0; i < nodes.length; i++) {
+              var el = nodes[i];
+              if (norm(el.textContent) !== '下一页') continue;
+              var innerHasSame = false;
+              for (var j = 0; j < el.children.length; j++) {
+                if (norm(el.children[j].textContent).indexOf('下一页') >= 0) { innerHasSame = true; break; }
+              }
+              if (innerHasSame) continue;                  // 只认最内层节点，避免点到外层容器
+              var rect = el.getBoundingClientRect();
+              if (!rect || rect.width < 1 || rect.height < 1) continue;  // 隐藏模板/不可见不算
+              if (isDeadNext(el)) continue;                // 置灰的「下一页」= 已经是最后一页
+              return el;
+            }
+            return null;
+          }
+          function totalPageCount() {
+            var t = norm(document.body ? (document.body.innerText || '') : '');
+            var m = t.match(/共\\s*(\\d+)\\s*页/);
+            if (m) return parseInt(m[1], 10);
+            m = t.match(/(\\d+)\\s*\\/\\s*(\\d+)\\s*页/);
+            if (m) return parseInt(m[2], 10);
+            return 0;
+          }
           var page = 1;
           var maxP = \(maxPages);
+          var total = totalPageCount();
           for (var p = 1; p < maxP; p++) {
-            var next = null;
-            var links = document.querySelectorAll('a, span, div, button');
-            for (var i = 0; i < links.length; i++) {
-              var tx = norm(links[i].textContent);
-              if (tx === '下一页') { next = links[i]; break; }
-            }
+            if (total > 0 && (p + 1) > total) break;       // 已知总页数：到最后一页就停，绝不多点
+            var next = findNext();
             if (!next) break;
-            var disabled = next.getAttribute('class') || '';
-            if (disabled.indexOf('disabled') >= 0 || next.getAttribute('aria-disabled') === 'true') break;
             window.webkit.messageHandlers.ajkScrape.postMessage(JSON.stringify({type:'progress', text:'正在解析第 ' + (p + 1) + ' 页…'}));
             next.click();
             await sleep(2500);
@@ -186,7 +232,8 @@ final class AjkWebViewProvider: NSObject, WKNavigationDelegate {
             var cards2 = collectCards(seen);
             page = p + 1;
             window.webkit.messageHandlers.ajkScrape.postMessage(JSON.stringify({type:'page', overview: bodyText, cards: cards2, page: page}));
-            if (cards2.length === 0) break;
+            if (cards2.length === 0) break;                // 新页没有新卡片 = 已到最后一页
+            if (total === 0) total = totalPageCount();
           }
           window.webkit.messageHandlers.ajkScrape.postMessage(JSON.stringify({type:'done', total: seen.size, error:''}));
         })();
@@ -210,6 +257,23 @@ final class AjkWebViewProvider: NSObject, WKNavigationDelegate {
         onProgress = nil
         var result = FetchResult()
         result.error = error
+        c.resume(returning: result)
+    }
+
+    /// 用已收集到的数据正常收尾（翻页后列表页整页重载时使用，避免误报超时）
+    private func finishWithCollected() {
+        guard let c = continuation else { return }
+        continuation = nil
+        webView?.configuration.userContentController.removeScriptMessageHandler(forName: "ajkScrape")
+        webView?.stopLoading()
+        webView = nil
+        onProgress = nil
+        var result = FetchResult()
+        result.houses = pendingHouses
+        result.overview = pendingOverview
+        if result.houses.isEmpty && result.overview == .empty {
+            result.needLogin = true
+        }
         c.resume(returning: result)
     }
 }
@@ -239,6 +303,7 @@ extension AjkWebViewProvider: WKScriptMessageHandler {
         if type == "page" {
             let overview = (dict["overview"] as? String) ?? ""
             let page = (dict["page"] as? Int) ?? 1
+            if page > 1 { hasPaginated = true }
             progress("正在解析第 \(page) 页…")
             // v1.90：卡片元素为 {t, cover} 对象；兼容旧版纯文本数组
             var cardTexts: [String] = []
