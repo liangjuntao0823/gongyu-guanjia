@@ -25,10 +25,6 @@ struct F58BoardView: View {
     @State private var sortMode: F58SortMode = .defaultOrder
     @State private var onlyWithCover = false
     @State private var selectedHouse: F58House?
-    // v2.9（新增1）：详情页加载失败/超时不再白屏卡死——显示失败提示，可一键重试
-    @State private var detailLoadFailed = false
-    @State private var detailReloadToken = 0
-
     enum F58BoardTab: String, CaseIterable, Identifiable {
         case f58 = "58找房"
         case ajk = "安居客"
@@ -505,6 +501,9 @@ struct F58DetailWebView: View {
     let house: F58House
     @Environment(\.dismiss) private var dismiss
     @State private var canOpen = false
+    // v2.9（新增1）：详情页加载失败/超时不再白屏卡死——显示失败提示，可一键重试
+    @State private var detailLoadFailed = false
+    @State private var detailReloadToken = 0
 
     var body: some View {
         VStack(spacing: 0) {
@@ -533,7 +532,7 @@ struct F58DetailWebView: View {
                     }
                     Spacer()
                     Button {
-                        if let url = Self.detailURL(from: house.href) {
+                        if let url = F58BoardView.detailURL(from: house.href) {
                             UIApplication.shared.open(url)
                         }
                     } label: {
@@ -548,7 +547,7 @@ struct F58DetailWebView: View {
                 .padding(.horizontal, 12)
             }
             .frame(height: 62)
-            if let url = Self.detailURL(from: house.href) {
+            if let url = F58BoardView.detailURL(from: house.href) {
                 ZStack {
                     F58DetailWKView(url: url, onLoadFailed: { detailLoadFailed = true }, reloadToken: detailReloadToken)
                     if detailLoadFailed {

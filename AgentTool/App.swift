@@ -316,7 +316,7 @@ struct MainTabView: View {
     @State private var isCheckingAutomaticBackup = false
     /// v2.9：自动备份定时器改为条件启动——仅在设置中开启「自动备份」时才创建（每 2 分钟检查一次到点与否），
     /// 未开启时不存在定时器，避免 30 秒常驻轮询耗电；开启/关闭自动备份时由 refreshAutoBackupTimer() 重建/取消。
-    private var autoBackupTimerCancellable: AnyCancellable?
+    @State private var autoBackupTimerCancellable: AnyCancellable?
 
     init() {
         // v1.7：去掉系统导航栏底部阴影分隔线（所有板块顶部与滚动后都不再出现系统横线）；

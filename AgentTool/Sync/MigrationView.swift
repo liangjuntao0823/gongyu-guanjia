@@ -29,9 +29,7 @@ final class MigrationViewModel: ObservableObject {
     @Published var exportDocument = ZFGJMigrationDocument()
     @Published var isExporting = false
     @Published var isImporting = false
-    @Published var showScanner = false
     @Published var message = "迁移只会在你主动导出或导入时执行"
-    @Published var connection = SyncConnectionInfo(host: "", port: 8765, code: "")
     @Published var importReady = false
     @Published var stagedImport: Data?
 
@@ -75,10 +73,6 @@ final class MigrationViewModel: ObservableObject {
         } catch { message = "导入前备份失败，已停止导入：\(error.localizedDescription)" }
     }
 
-    func applyScanned(_ text: String) {
-        guard let value = SyncConnectionInfo.parse(text) else { message = "二维码不是有效迁移连接信息"; return }
-        connection = value; message = "已读取迁移连接信息；不会自动联网"
-    }
 }
 
 private enum MigrationError: LocalizedError {
@@ -115,23 +109,6 @@ struct MigrationView: View {
                     Text(model.message).font(.footnote).foregroundStyle(.secondary)
                 }
 
-                Section("迁移连接二维码") {
-                    TextField("IP 或服务器地址", text: $model.connection.host)
-                        .textInputAutocapitalization(.never).autocorrectionDisabled()
-                    TextField("端口", value: $model.connection.port, format: .number).keyboardType(.numberPad)
-                    SecureField("连接码", text: $model.connection.code)
-                    if !model.connection.host.isEmpty && !model.connection.code.isEmpty {
-                        QRCodeImage(text: model.connection.qrText)
-                            .frame(width: 210, height: 210).frame(maxWidth: .infinity)
-                            .accessibilityLabel("迁移连接二维码")
-                    }
-                    Button { model.showScanner = true } label: {
-                        Label("扫描旧设备二维码", systemImage: "qrcode.viewfinder")
-                    }
-                    Text("二维码只编码 IP、端口和连接码；扫描后不会自动联网。")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-
                 Section("说明") {
                     Text("换机迁移是一次性复制，不作为日常多端同步。导入前会检查文件大小和结构，并保存当前全量备份。")
                 }
@@ -143,65 +120,6 @@ struct MigrationView: View {
                 model.message = (try? result.get()) != nil ? "迁移包导出完成" : "迁移包导出失败"
             }
             .fileImporter(isPresented: $model.isImporting, allowedContentTypes: [.zfgjMigration, .json], allowsMultipleSelection: false, onCompletion: model.stageImport)
-            .sheet(isPresented: $model.showScanner) {
-                MigrationCodeScanner { model.applyScanned($0); model.showScanner = false }
-            }
-        }
-    }
-}
-
-private struct QRCodeImage: View {
-    let text: String
-    private let context = CIContext()
-    private let filter = CIFilter.qrCodeGenerator()
-    var body: some View {
-        Group {
-            if let image = image { Image(uiImage: image).interpolation(.none).resizable() }
-            else { Color.secondary.opacity(0.2) }
-        }
-    }
-    private var image: UIImage? {
-        filter.message = Data(text.utf8)
-        filter.correctionLevel = "M"
-        guard let output = filter.outputImage?.transformed(by: CGAffineTransform(scaleX: 10, y: 10)),
-              let cg = context.createCGImage(output, from: output.extent) else { return nil }
-        return UIImage(cgImage: cg)
-    }
-}
-
-private struct MigrationCodeScanner: View {
-    @Environment(\.dismiss) private var dismiss
-    let onCode: (String) -> Void
-    var body: some View {
-        NavigationStack {
-            Group {
-                if DataScannerViewController.isSupported && DataScannerViewController.isAvailable {
-                    MigrationScannerRepresentable(onCode: onCode)
-                } else {
-                    ContentUnavailableView("扫码不可用", systemImage: "camera.fill", description: Text("请返回后手动输入迁移连接信息。"))
-                }
-            }
-            .navigationTitle("扫描迁移二维码").navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("取消") { dismiss() } } }
-        }
-    }
-}
-
-private struct MigrationScannerRepresentable: UIViewControllerRepresentable {
-    let onCode: (String) -> Void
-    func makeCoordinator() -> Coordinator { Coordinator(onCode: onCode) }
-    func makeUIViewController(context: Context) -> DataScannerViewController {
-        let controller = DataScannerViewController(recognizedDataTypes: [.barcode(symbologies: [.qr])], recognizesMultipleItems: false, isHighFrameRateTrackingEnabled: false, isPinchToZoomEnabled: true, isGuidanceEnabled: true, isHighlightingEnabled: true)
-        controller.delegate = context.coordinator
-        try? controller.startScanning()
-        return controller
-    }
-    func updateUIViewController(_ uiViewController: DataScannerViewController, context: Context) {}
-    final class Coordinator: NSObject, DataScannerViewControllerDelegate {
-        let onCode: (String) -> Void
-        init(onCode: @escaping (String) -> Void) { self.onCode = onCode }
-        func dataScanner(_ dataScanner: DataScannerViewController, didTapOn item: RecognizedItem) {
-            if case .barcode(let code) = item, let value = code.payloadStringValue { onCode(value) }
         }
     }
 }

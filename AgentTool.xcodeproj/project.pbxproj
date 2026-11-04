@@ -29,6 +29,7 @@
 		A10000010000000000000098 /* presetBackup.json in Resources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000098 /* presetBackup.json */; };
 		A10000010000000000000116 /* CloudDeployPackage.zip in Resources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000116 /* CloudDeployPackage.zip */; };
 		A20000010000000000000003 /* MigrationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000010000000000000003 /* MigrationView.swift */; };
+		C20000010000000000000001 /* PlanEditors.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000010000000000000002 /* PlanEditors.swift */; };
 		A10000010000000000000013 /* Preview Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000013 /* Preview Assets.xcassets */; };
 		WA /* WidgetDataSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = WB /* WidgetDataSync.swift */; };
 		W1 /* AgentToolWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = W2 /* AgentToolWidget.swift */; };
@@ -109,6 +110,7 @@
 		B10000010000000000000013 /* Preview Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = "Preview Assets.xcassets"; sourceTree = "<group>"; };
 		B10000010000000000000014 /* AgentTool.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AgentTool.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		B20000010000000000000003 /* MigrationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MigrationView.swift; sourceTree = "<group>"; };
+		C20000010000000000000002 /* PlanEditors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlanEditors.swift; sourceTree = "<group>"; };
 		W2 /* AgentToolWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentToolWidget.swift; sourceTree = "<group>"; };
 		WB /* WidgetDataSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetDataSync.swift; sourceTree = "<group>"; };
 		W5 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
@@ -275,6 +277,7 @@
 			isa = PBXGroup;
 			children = (
 				B20000010000000000000003 /* MigrationView.swift */,
+				C20000010000000000000002 /* PlanEditors.swift */,
 			);
 			path = Sync;
 			sourceTree = "<group>";
@@ -504,6 +507,7 @@
 				A10000010000000000000015 /* Theme.swift in Sources */,
 				A10000010000000000000119 /* RentStatView.swift in Sources */,
 				A20000010000000000000003 /* MigrationView.swift in Sources */,
+				C20000010000000000000001 /* PlanEditors.swift in Sources */,
 				A10000010000000000000100 /* House.swift in Sources */,
 				A10000010000000000000101 /* CosUploader.swift in Sources */,
 				A10000010000000000000102 /* MediaStore.swift in Sources */,
