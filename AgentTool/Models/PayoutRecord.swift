@@ -86,35 +86,6 @@ final class PayoutUtilityRecord {
     }
 }
 
-@Model
-final class ProfitCalculation {
-    var id: UUID
-    var roomNumber: String
-    var totalPackageAmount: Double
-    var packageStart: Date
-    var packageEnd: Date
-    var vacancyDays: Int
-    var tenantMonthlyRent: Double
-    var rentStart: Date
-    var rentEnd: Date
-    var notes: String
-
-    init(id: UUID = UUID(), roomNumber: String = "", totalPackageAmount: Double = 0,
-         packageStart: Date = Date(), packageEnd: Date = Date(),
-         vacancyDays: Int = 0, tenantMonthlyRent: Double = 0,
-         rentStart: Date = Date(), rentEnd: Date = Date(), notes: String = "") {
-        self.id = id
-        self.roomNumber = roomNumber
-        self.totalPackageAmount = totalPackageAmount
-        self.packageStart = packageStart
-        self.packageEnd = packageEnd
-        self.vacancyDays = vacancyDays
-        self.tenantMonthlyRent = tenantMonthlyRent
-        self.rentStart = rentStart
-        self.rentEnd = rentEnd
-        self.notes = notes
-    }
-
     var packageTotalDays: Int {
         Calendar.current.dateComponents([.day], from: packageStart, to: packageEnd).day ?? 0
     }

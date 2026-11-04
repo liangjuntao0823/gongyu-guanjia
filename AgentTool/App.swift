@@ -2,6 +2,7 @@ import SwiftUI
 import SwiftData
 import UserNotifications
 import CoreData
+import Combine
 
 // Tab 路由，用于工作台快捷操作跳转
 final class TabRouter: ObservableObject {
@@ -114,7 +115,7 @@ struct AgentToolApp: App {
         let mainSchema = Schema([
             Property.self, RentMonthRecord.self, UtilityQuarterRecord.self, UtilitySettlementRecord.self, TodoItem.self,
             DealRecord.self, MiscIncome.self, MiscExpense.self,
-            PayoutRecord.self, PayoutMonthRecord.self, PayoutUtilityRecord.self, ProfitCalculation.self, UtilitySettlementHistory.self
+            PayoutRecord.self, PayoutMonthRecord.self, PayoutUtilityRecord.self, UtilitySettlementHistory.self
         ])
         let houseSchema = Schema([House.self, MediaItem.self])
         let main = try ModelContainer(for: mainSchema)
@@ -129,7 +130,7 @@ struct AgentToolApp: App {
         let mainSchema = Schema([
             Property.self, RentMonthRecord.self, UtilityQuarterRecord.self, UtilitySettlementRecord.self, TodoItem.self,
             DealRecord.self, MiscIncome.self, MiscExpense.self,
-            PayoutRecord.self, PayoutMonthRecord.self, PayoutUtilityRecord.self, ProfitCalculation.self, UtilitySettlementHistory.self
+            PayoutRecord.self, PayoutMonthRecord.self, PayoutUtilityRecord.self, UtilitySettlementHistory.self
         ])
         let houseSchema = Schema([House.self, MediaItem.self])
         let main = try ModelContainer(for: mainSchema, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
@@ -313,7 +314,9 @@ struct MainTabView: View {
     @State private var importRestoreStats: RestoreStatsV5?
     @State private var importRestoreError: String?
     @State private var isCheckingAutomaticBackup = false
-    private let automaticBackupTimer = Timer.publish(every: 30, on: .main, in: .common).autoconnect() // 记录已访问的tab，默认工作台已访问
+    /// v2.9：自动备份定时器改为条件启动——仅在设置中开启「自动备份」时才创建（每 2 分钟检查一次到点与否），
+    /// 未开启时不存在定时器，避免 30 秒常驻轮询耗电；开启/关闭自动备份时由 refreshAutoBackupTimer() 重建/取消。
+    private var autoBackupTimerCancellable: AnyCancellable?
 
     init() {
         // v1.7：去掉系统导航栏底部阴影分隔线（所有板块顶部与滚动后都不再出现系统横线）；
@@ -429,10 +432,10 @@ struct MainTabView: View {
             UNUserNotificationCenter.current().setBadgeCount(0)
             // v1.12：启动时安装崩溃日志、同步日志桥、清理恢复残留、重试未上传的云端备份
             CrashLogCollector.install()
-            BackupSyncLogBridge.install()
             BackupV5Manager.cleanupPreRestoreResidue()
             // v1.95：电表全局盯防定时器（设置里开启「定时自动刷新」后 App 前台按间隔自动刷新电表）
             MeterStore.shared.startAutoRefreshIfNeeded()
+            refreshAutoBackupTimer()
             checkAutoBackup()
             Task { await CloudBackupService.retryPendingUploads() }
             Task { await CloudBackupService.enforceCloudRetention() }
@@ -458,11 +461,6 @@ struct MainTabView: View {
             detectCloudLedgerChange()
             WidgetDataSync.sync(modelContext: modelContext)
         }
-        .onReceive(automaticBackupTimer) { _ in
-            // v1.83：30 秒定时器只做自动备份到点检查；通知重建/小组件同步改由「数据保存时」触发（见下方 didSave），
-            // 避免每 30 秒无条件执行无关的后台工作（耗电 + 无谓开销）。
-            checkAutoBackup()
-        }
         .onReceive(NotificationCenter.default.publisher(for: .NSManagedObjectContextDidSave)) { _ in
             // v1.83：任何 ModelContext 保存（记账/房源/待办等）后才重建本地通知与小组件数据，替代原来的 30 秒轮询
             // 注：SwiftData 的 ModelContext 底层即 CoreData context，didSave 通知名即 NSManagedObjectContextDidSave
@@ -470,6 +468,8 @@ struct MainTabView: View {
             WidgetDataSync.sync(modelContext: modelContext)
         }
         .onReceive(NotificationCenter.default.publisher(for: .autoBackupSettingsChanged)) { _ in
+            // v2.9：设置变更后按 enabled 重建/取消 2 分钟定时器，再立即检查是否到点
+            refreshAutoBackupTimer()
             checkAutoBackup()
         }
         .onReceive(NotificationCenter.default.publisher(for: LocalNotificationManager.navigationNotification)) { note in
@@ -606,7 +606,9 @@ struct MainTabView: View {
     ///        弃用云端快照基线（cloudLedgerBaseline.v1）——解决上一版「云端基线已最新 → 此后永远不提示」的失效。
     private func detectCloudLedgerChange() {
         Task {
-            guard await HouseListView.detectCloudLedgerChange(houseContext: houseModelContext) else { return }
+            // v2.9（P1-1）：仅「云端有更新」广播提示；检测失败/无变化不广播（失败态由房源列表页 onAppear 单独提示）
+            let state = await HouseListView.detectCloudLedgerChange(houseContext: houseModelContext)
+            guard state == .hasUpdate else { return }
             UserDefaults.standard.set(true, forKey: "cloudLedgerPendingHint")
             NotificationCenter.default.post(name: HouseListView.cloudLedgerChangedLight, object: nil)
         }
@@ -667,6 +669,21 @@ struct MainTabView: View {
             return false
         }()
         if isLower { showUpdateTip = true }
+    }
+
+    /// v2.9：按「设置 → 自动备份」开关创建或取消 2 分钟定时器（未启用自动备份则不启动定时器）
+    private func refreshAutoBackupTimer() {
+        autoBackupTimerCancellable?.cancel()
+        autoBackupTimerCancellable = nil
+        guard autoBackupEnabled() else { return }
+        autoBackupTimerCancellable = Timer.publish(every: 120, on: .main, in: .common).autoconnect()
+            .sink { [weak self] _ in self?.checkAutoBackup() }
+    }
+
+    private func autoBackupEnabled() -> Bool {
+        guard let data = UserDefaults.standard.data(forKey: "autoBackupSettings"),
+              let settings = try? JSONDecoder().decode(AutoBackupSettings.self, from: data) else { return false }
+        return settings.enabled
     }
 
     private func checkAutoBackup() {

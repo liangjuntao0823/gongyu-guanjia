@@ -20,7 +20,6 @@ struct BackupFileBrowseViewV5: View {
     // 列表
     @State private var fastBackups: [URL] = []
     @State private var fullBackups: [URL] = []
-    @State private var legacyJSONs: [(type: DataBackupManager.BackupType, url: URL)] = []
     @State private var cloudRecords: [CloudBackupService.CloudRecord] = []
     @State private var reloadTick = 0
     /// v1.13：查看备份页顶部「快速备份 / 全量备份」板块切换（0=快速，1=全量）
@@ -52,8 +51,6 @@ struct BackupFileBrowseViewV5: View {
     struct DeleteTarget { let name: String; let isCloud: Bool }
     struct RestoreTarget {
         let localURL: URL?
-        let legacyData: Data?
-        let legacyScope: DataBackupManager.ImportScope?
         let cloudName: String?
         var displayName: String
     }
@@ -238,22 +235,7 @@ struct BackupFileBrowseViewV5: View {
                     }
                 }
 
-                // v1.13：旧版备份收纳进折叠入口（点开才展开，功能不变）
-                if !legacyJSONs.isEmpty {
-                    Section {
-                        DisclosureGroup {
-                            ForEach(legacyJSONs, id: \.url.path) { item in
-                                legacyRow(item)
-                            }
-                        } label: {
-                            Label("旧版备份（JSON）· \(legacyJSONs.count) 个", systemImage: "archivebox")
-                        }
-                    } footer: {
-                        Text("旧版分板块 JSON 备份（v1.11 及更早），可继续查看、恢复或删除，数据不丢失。")
-                    }
-                }
-
-                if mode == .restore && fastBackups.isEmpty && fullBackups.isEmpty && legacyJSONs.isEmpty && cloudRecords.isEmpty {
+                if mode == .restore && fastBackups.isEmpty && fullBackups.isEmpty && cloudRecords.isEmpty {
                     Section {
                         Text("暂无备份文件。请先到「设置 → 备份数据」做一次备份。")
                             .foregroundColor(.secondary)
@@ -415,7 +397,7 @@ struct BackupFileBrowseViewV5: View {
         .contentShape(Rectangle())
         .onTapGesture {
             if mode == .restore {
-                restoreTarget = RestoreTarget(localURL: url, legacyData: nil, legacyScope: nil, cloudName: nil, displayName: name)
+                restoreTarget = RestoreTarget(localURL: url, cloudName: nil, displayName: name)
                 showRestoreConfirm = true
             }
         }
@@ -451,38 +433,8 @@ struct BackupFileBrowseViewV5: View {
         .contentShape(Rectangle())
         .onTapGesture {
             if mode == .restore {
-                restoreTarget = RestoreTarget(localURL: nil, legacyData: nil, legacyScope: nil, cloudName: record.name, displayName: record.name)
+                restoreTarget = RestoreTarget(localURL: nil, cloudName: record.name, displayName: record.name)
                 showRestoreConfirm = true
-            }
-        }
-    }
-
-    private func legacyRow(_ item: (type: DataBackupManager.BackupType, url: URL)) -> some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(item.url.lastPathComponent)
-                    .font(.subheadline.weight(.medium))
-                    .lineLimit(1)
-                Text("\(item.type.rawValue) · \(fileDateText(item.url))")
-                    .font(.footnote)
-                    .foregroundColor(.secondary)
-            }
-            Spacer()
-            if mode == .browse {
-                Button("删除", role: .destructive) {
-                    deleteTarget = DeleteTarget(name: item.url.lastPathComponent, isCloud: false)
-                    showDeleteConfirm = true
-                }
-                .font(.footnote)
-            }
-        }
-        .contentShape(Rectangle())
-        .onTapGesture {
-            if mode == .restore {
-                if let data = try? Data(contentsOf: item.url) {
-                    restoreTarget = RestoreTarget(localURL: nil, legacyData: data, legacyScope: scopeForLegacy(item.type), cloudName: nil, displayName: item.url.lastPathComponent)
-                    showRestoreConfirm = true
-                }
             }
         }
     }
@@ -514,7 +466,6 @@ struct BackupFileBrowseViewV5: View {
             return true
         }
         cloudRecords = CloudBackupService.cloudRecords()
-        legacyJSONs = listLegacyBackups()
     }
 
     /// v1.13 需求7：实时刷新桶内备份并同步显示
@@ -538,29 +489,6 @@ struct BackupFileBrowseViewV5: View {
                     showMessageInContext("云端刷新失败：\(error.localizedDescription)")
                 }
             }
-        }
-    }
-
-    private func listLegacyBackups() -> [(type: DataBackupManager.BackupType, url: URL)] {
-        let dm = DataBackupManager()
-        var result: [(type: DataBackupManager.BackupType, url: URL)] = []
-        for type in [DataBackupManager.BackupType.total, .deals, .properties, .payouts] {
-            for url in dm.listBackups(in: type) {
-                result.append((type: type, url: url))
-            }
-        }
-        return result.sorted { a, b in
-            (try? a.url.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? .distantPast >
-            (try? b.url.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? .distantPast
-        }
-    }
-
-    private func scopeForLegacy(_ type: DataBackupManager.BackupType) -> DataBackupManager.ImportScope {
-        switch type {
-        case .deals: return .deals
-        case .properties: return .properties
-        case .payouts: return .payouts
-        case .total: return .all
         }
     }
 
@@ -707,17 +635,9 @@ struct BackupFileBrowseViewV5: View {
                 }
             }
         } else {
-            // 本地删除：快速/全量 zip 或旧 JSON
-            let dm = DataBackupManager()
+            // 本地删除：快速/全量 zip
             let localDir = BackupV5Manager.backupsDirectory
-            let legacyDir: URL? = legacyJSONs.first { $0.url.lastPathComponent == target.name }?.url
-            if let legacy = legacyDir {
-                // 旧 JSON：从对应类型目录删除
-                let type = legacyJSONs.first { $0.url.path == legacy.path }?.type ?? .total
-                _ = dm.deleteBackup(legacy, type: type)
-            } else {
-                try? FileManager.default.removeItem(at: localDir.appendingPathComponent(target.name))
-            }
+            try? FileManager.default.removeItem(at: localDir.appendingPathComponent(target.name))
             CloudBackupService.removePendingUpload(name: target.name)
             BackupLogStore.log(category: "删除", action: "本地删除", result: "成功", detail: target.name)
             reloadTick += 1
@@ -774,16 +694,6 @@ struct BackupFileBrowseViewV5: View {
                         restoreStats = stats
                         restoreSourceNote = "本次恢复使用本地备份文件"
                         BackupLogStore.log(category: "恢复", action: "本地恢复", result: "成功", detail: stats.summaryLines.joined(separator: " / "))
-                        // v1.63：恢复（含媒体）完成后通知房源列表/详情刷新
-                        NotificationCenter.default.post(name: HouseListView.houseStoreChanged, object: nil)
-                    }
-                } else if let data = target.legacyData, let scope = target.legacyScope {
-                    let stats = try await BackupV5Manager.restoreLegacyJSON(data: data, mainContext: modelContext, scope: scope)
-                    await MainActor.run {
-                        isRestoring = false
-                        restoreStats = stats
-                        restoreSourceNote = "本次恢复使用旧版 JSON 备份"
-                        BackupLogStore.log(category: "恢复", action: "旧版恢复", result: "成功", detail: stats.summaryLines.joined(separator: " / "))
                         // v1.63：恢复（含媒体）完成后通知房源列表/详情刷新
                         NotificationCenter.default.post(name: HouseListView.houseStoreChanged, object: nil)
                     }

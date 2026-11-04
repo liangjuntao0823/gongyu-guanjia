@@ -29,7 +29,9 @@ final class F58WebViewProvider: NSObject, WKNavigationDelegate {
     /// 手机 UA：58 对手机浏览器风控宽松（实测 iPhone UA 加载 m 站手机版不弹验证码、关键词 key 生效）；
     /// 注意：桌面 UA + reform=pcfront 会被 58 反爬网关拦截（iOS WebKit 平台指纹与 UA 不符 → 弹验证码），
     /// 且 reform=pcfront 转 PC 站时会丢弃 key 参数导致抓到全城房源，故统一走手机站手机版
-    private static let mobileUA = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
+    /// 手机 UA：58 对手机浏览器风控宽松（实测 iPhone UA 加载 m 站手机版不弹验证码、关键词 key 生效）
+    /// v2.9：internal 供详情页 WKWebView 复用（详情页曾用桌面 UA 触发反爬验证码/无限跳转）
+    static let mobileUA = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
 
     private var webView: WKWebView?
     private var continuation: CheckedContinuation<FetchResult, Error>?

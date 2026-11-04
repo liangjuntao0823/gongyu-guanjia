@@ -32,14 +32,14 @@ final class DataManager: ObservableObject {
         return (totalIncome, totalExpense, totalIncome - totalExpense)
     }
 
-    func dashboardStats(modelContext: ModelContext) -> DashboardStats {
+    func dashboardStats(modelContext: ModelContext) throws -> DashboardStats {
         let calendar = Calendar.current
         let now = Date()
         let currentMonth = calendar.component(.month, from: now)
         let currentYear = calendar.component(.year, from: now)
 
         let propertyDescriptor = FetchDescriptor<Property>(predicate: #Predicate { !$0.isDeleted })
-        let properties = (try? modelContext.fetch(propertyDescriptor)) ?? []
+        let properties = try modelContext.fetch(propertyDescriptor)
         // 工作台房源、应收租金与到期提醒只统计仍在租的房源。
         let activeRentalProperties = properties.filter { !$0.isTerminated }
 
@@ -47,17 +47,14 @@ final class DataManager: ObservableObject {
         let monthEnd = calendar.date(byAdding: .month, value: 1, to: monthStart) ?? now
 
         let dealDescriptor = FetchDescriptor<DealRecord>(predicate: #Predicate { !$0.isDeleted && $0.date >= monthStart && $0.date < monthEnd })
-        let monthlyDealRecords = (try? modelContext.fetch(dealDescriptor)) ?? []
-        let totalDeals = (try? modelContext.fetchCount(FetchDescriptor<DealRecord>(predicate: #Predicate { !$0.isDeleted }))) ?? 0
-
-        let profitDescriptor = FetchDescriptor<ProfitCalculation>()
-        let profits = (try? modelContext.fetch(profitDescriptor)) ?? []
+        let monthlyDealRecords = try modelContext.fetch(dealDescriptor)
+        let totalDeals = try modelContext.fetchCount(FetchDescriptor<DealRecord>(predicate: #Predicate { !$0.isDeleted }))
 
         let incomeDescriptor = FetchDescriptor<MiscIncome>(predicate: #Predicate { !$0.isDeleted && $0.date >= monthStart && $0.date < monthEnd })
-        let incomes = (try? modelContext.fetch(incomeDescriptor)) ?? []
+        let incomes = try modelContext.fetch(incomeDescriptor)
 
         let expenseDescriptor = FetchDescriptor<MiscExpense>(predicate: #Predicate { !$0.isDeleted && $0.date >= monthStart && $0.date < monthEnd })
-        let expenses = (try? modelContext.fetch(expenseDescriptor)) ?? []
+        let expenses = try modelContext.fetch(expenseDescriptor)
 
         // “管理”与“托管包租”分别按房源类型统计；兼容旧数据中的“普通”类型。
         let activeProperties = activeRentalProperties.filter { $0.typeDisplayName == "管理" }
@@ -87,9 +84,6 @@ final class DataManager: ObservableObject {
             monthlyDealFee += deal.totalFee
             monthlyDeals += 1
         }
-
-        // 包租盈亏
-        let totalNetProfit = profits.reduce(0) { $0 + $1.netProfit }
 
         // 本月杂项收入
         var monthlyMiscIncome: Double = 0
@@ -139,7 +133,6 @@ final class DataManager: ObservableObject {
             monthlyDealFee: monthlyDealFee,
             totalDeals: totalDeals,
             monthlyDeals: monthlyDeals,
-            packageProfit: totalNetProfit,
             expiringSoon: expiringSoon,
             currentMonth: currentMonth,
             currentYear: currentYear,
@@ -159,7 +152,6 @@ struct DashboardStats {
     var monthlyDealFee: Double
     var totalDeals: Int
     var monthlyDeals: Int
-    var packageProfit: Double
     var expiringSoon: [Property]
     var currentMonth: Int
     var currentYear: Int

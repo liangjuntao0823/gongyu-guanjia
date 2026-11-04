@@ -1531,6 +1531,47 @@ enum CosUploader {
         }
     }
 
+    /// v2.9（P1-6）：文件流式上传——URLSession.uploadTask(fromFile:) 由系统按文件句柄分块读取，
+    /// 不把整个媒体读进内存，大视频/大图上传不再 OOM 闪退。返回前校验 COS 响应码。
+    internal static func uploadFile(_ fileURL: URL, to remotePath: String, contentType: String, config: CosConfig) async throws {
+        let url = try presignedPutURL(for: remotePath, contentType: contentType, config: config)
+        var request = URLRequest(url: url)
+        request.httpMethod = "PUT"
+        request.setValue(contentType, forHTTPHeaderField: "Content-Type")
+        let (respData, response) = try await URLSession.shared.upload(for: request, fromFile: fileURL)
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            let detail = extractCosError(from: respData)
+            let statusText: String
+            if let http = response as? HTTPURLResponse {
+                statusText = "HTTP \(http.statusCode)"
+            } else {
+                statusText = "网络响应无效"
+            }
+            throw CosError.uploadFailed(statusText + (detail.isEmpty ? "" : "（" + detail + "）"))
+        }
+    }
+
+    /// v2.9（P1-6）：带字节级进度的文件流式上传（分享/补传大媒体时显示百分比；同样不整读进内存）
+    internal static func uploadFileWithProgress(_ fileURL: URL, to remotePath: String, contentType: String, config: CosConfig, progress: @escaping (Double) -> Void) async throws {
+        let url = try presignedPutURL(for: remotePath, contentType: contentType, config: config)
+        var request = URLRequest(url: url)
+        request.httpMethod = "PUT"
+        request.setValue(contentType, forHTTPHeaderField: "Content-Type")
+        let delegate = CosUploadProgressDelegate(onProgress: progress)
+        let session = URLSession(configuration: .ephemeral, delegate: delegate, delegateQueue: nil)
+        let task = session.uploadTask(with: request, fromFile: fileURL)
+        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
+            delegate.onCompletion = { error in
+                if let error = error {
+                    cont.resume(throwing: error)
+                } else {
+                    cont.resume()
+                }
+            }
+            task.resume()
+        }
+    }
+
     /// v1.40 第2点：HEAD 探测桶内对象是否存在（省流量，不下载对象体）
     static func remoteObjectExists(path: String, config: CosConfig) async -> Bool {
         guard let url = try? presignedURL(for: path, method: "HEAD", expires: 300, headers: [], config: config) else { return false }
@@ -1559,18 +1600,20 @@ enum CosUploader {
         let remotePath = "h/\(roomKey)/\(remoteName)"
         // 桶内已存在 → 幂等跳过（不重复覆盖）
         if await remoteObjectExists(path: remotePath, config: config) { return }
-        var data = try Data(contentsOf: url)
-        var contentType = mimeType(for: kind, name: remoteName)
+        let contentType = mimeType(for: kind, name: remoteName)
+        // v2.9（P1-6）：视频转码 / 压缩有产物时走内存 Data（产物本身已驻留内存，无法避免）；
+        // 其余情况（原图直传）改用文件流式上传，不再把整个媒体读进内存。
         if isVideo {
             if let mp4 = await uploadVideoData(from: url, compress: compress) {
-                data = mp4
-                contentType = "video/mp4"
+                try await upload(data: mp4, to: remotePath, contentType: "video/mp4", config: config)
+            } else {
+                try await uploadFile(url, to: remotePath, contentType: contentType, config: config)
             }
         } else if compress, let compressed = compressedImageData(from: url) {
-            data = compressed
-            contentType = "image/jpeg"
+            try await upload(data: compressed, to: remotePath, contentType: "image/jpeg", config: config)
+        } else {
+            try await uploadFile(url, to: remotePath, contentType: contentType, config: config)
         }
-        try await upload(data: data, to: remotePath, contentType: contentType, config: config)
         // 视频同步补用户区首帧图（每次重新生成，与分享逻辑一致）
         if isVideo, let thumbData = makeVideoThumbJPEG(from: url) {
             try? await upload(data: thumbData, to: "\(CloudUser.sharePagePrefix)\(roomKey)/\(fileName).vthumb.jpg", contentType: "image/jpeg", config: config)

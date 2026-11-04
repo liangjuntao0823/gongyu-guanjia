@@ -222,7 +222,7 @@ struct AIToolExecutor {
             "parameters": [
                 "type": "object",
                 "properties": [
-                    "action_type": ["type": "string", "description": "refresh_meters=刷新全部电表；query_meters=只抄用户指定表号/房号的电表（未绑定表号会自动加入清单后再抄）；refresh_ajk=重新抓取安居客数据；create_quick_backup=新建快速备份；create_full_backup=新建全量备份；list_backups=列出本地备份；sync_status=查看待同步状态", "enum": ["refresh_meters", "query_meters", "refresh_ajk", "create_quick_backup", "create_full_backup", "list_backups", "sync_status"]],
+                    "action_type": ["type": "string", "description": "refresh_meters=刷新全部电表；query_meters=只抄用户指定表号/房号的电表（未绑定表号会自动加入清单后再抄）；refresh_ajk=重新抓取安居客数据；create_quick_backup=新建快速备份；create_full_backup=新建全量备份；list_backups=列出本地备份", "enum": ["refresh_meters", "query_meters", "refresh_ajk", "create_quick_backup", "create_full_backup", "list_backups"]],
                     "uids": ["type": "array", "items": ["type": "string"], "description": "query_meters 指定抄表的电表用户号数组，如 [\"012030\",\"010904\"]"],
                     "room_nos": ["type": "array", "items": ["type": "string"], "description": "query_meters 指定抄表的房号数组（按电表清单备注房号匹配），如 [\"1-2319\"]"]
                 ],
@@ -423,7 +423,6 @@ struct AIToolExecutor {
             case "create_quick_backup": return "新建快速备份（账本+媒体清单，自动上传云端）"
             case "create_full_backup": return "新建全量备份（账本+房源+媒体清单+诊断数据）"
             case "list_backups": return "列出本地备份文件"
-            case "sync_status": return "查看待同步状态"
             default: return "执行刷新/备份操作"
             }
         case "teach_action":
@@ -949,13 +948,6 @@ struct AIToolExecutor {
                 return "• \(url.lastPathComponent)（\(String(format: "%.1f", Double(size) / 1024 / 1024)) MB，\(dateText(modified))）"
             }
             return "本地备份文件（最近 \(lines.count) 个）：\n" + lines.joined(separator: "\n") + "\n完整列表请在 设置→备份数据 查看"
-
-        case "sync_status":
-            let state = await SyncStore.shared.snapshot()
-            var parts: [String] = []
-            parts.append("待同步变更 \(state.pending.count) 条")
-            if !state.conflicts.isEmpty { parts.append("冲突 \(state.conflicts.count) 条（需人工处理）") }
-            return "同步状态：\(parts.joined(separator: "，"))。执行同步请在「工作台 → 数据同步」页面确认后发起（涉及连接校验，AI 不代为执行）"
 
         default:
             return "未知刷新动作：\(action)"

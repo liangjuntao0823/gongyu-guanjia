@@ -9,6 +9,13 @@ enum HouseSortMode: String, CaseIterable {
     var label: String { rawValue }
 }
 
+/// v2.9（P1-1）：轻量变更感知三态结果
+enum CloudChangeState: Equatable {
+    case noChange        // 两端一致，无变化
+    case hasUpdate       // 云端有更新，提示用户下拉同步
+    case detectFailed    // 检测失败（断网/超时/未配置云），不再静默
+}
+
 struct HouseListView: View {
     /// 房源板块使用独立 HouseStore 容器的专属 context（由 App 注入）。
     /// 不能用主容器的 modelContext——iOS 17 早期版本多配置容器上查询会崩溃（闪退根因）。
@@ -419,7 +426,7 @@ struct HouseListView: View {
             Task {
                 isCheckingCloudChange = true
                 let checkStart = Date()
-                let hasChange = await Self.detectCloudLedgerChange(houseContext: houseModelContext)
+                let changeState = await Self.detectCloudLedgerChange(houseContext: houseModelContext)
                 // b121：检测完成条至少停留 0.6s 再收起——轻量检测常不足一秒，一闪而过用户感知不到
                 if Date().timeIntervalSince(checkStart) < 0.6 {
                     try? await Task.sleep(nanoseconds: 600_000_000)
@@ -427,8 +434,11 @@ struct HouseListView: View {
                 isCheckingCloudChange = false
                 let pending = UserDefaults.standard.bool(forKey: "cloudLedgerPendingHint")
                 UserDefaults.standard.set(false, forKey: "cloudLedgerPendingHint")
-                if hasChange || pending {
+                // v2.9（P1-1）：三态提示——无变化静默 / 有更新提示 / 检测失败单独提示（不再与无变化同值静默）
+                if changeState == .hasUpdate || pending {
                     showCloudChangeHint()
+                } else if changeState == .detectFailed {
+                    showCloudDetectFailedHint()
                 }
             }
         }
@@ -455,6 +465,15 @@ struct HouseListView: View {
         showToast("检测到云端有更新，请同步")
     }
 
+    /// v2.9（P1-1）：检测失败提示（断网/超时/未配置云），与「无变化」区分，不再静默吞错。
+    private func showCloudDetectFailedHint() {
+        let now = Date().timeIntervalSince1970
+        let last = UserDefaults.standard.double(forKey: "cloudLedgerHintShownAt")
+        if now - last < 5 { return }
+        UserDefaults.standard.set(now, forKey: "cloudLedgerHintShownAt")
+        showToast("云端检测失败：请检查网络或云配置后重试")
+    }
+
     /// b118/b119/b120（清单1）：打开 App 轻量变更感知——检测「本地与云端两端是否有差异」。
     /// 判定口径与左上角「同步云端房源」按钮完全一致（用户明确要求：检测机制 = 同步按钮机制，只是自动跑、只提示不执行）：
     ///  - 云端账本 fetchAll（只拉 info.json 轻量账本文本，不下载媒体内容）
@@ -464,13 +483,14 @@ struct HouseListView: View {
     ///  - ③ 本地有、云端没有 → 本地待上传/待删除（v1.71：云端账本为空时一律视为本地→云端补传）
     /// 任一差异 → 返回 true（提示「检测到云端有更新，请同步」）；完全一致 → false（不提示）。
     /// 不再依赖历史快照基线（cloudLedgerBaseline.v1 弃用）——解决上一版「云端快照基线已最新 → 此后永远不提示」的失效根因。
-    /// 探测失败（断网/超时/未配置云）返回 false 不误报。
+    /// 探测失败（断网/超时/未配置云）→ .detectFailed，不再与「无变化」同值静默（v2.9 三态）。
     /// b120：改签名接收本地容器（static 方法不能访问实例 @Environment；App 侧传 houseContainer.mainContext、
     ///        列表页 onAppear 传 self.houseModelContext）。
-    static func detectCloudLedgerChange(houseContext: ModelContext?) async -> Bool {
-        guard let config = CosConfig.load(), config.isValid else { return false }
-        guard let recs = try? await CloudHouseSync.fetchAll(config: config) else { return false }
-        guard let ctx = houseContext else { return false }
+    /// v2.9（P1-1）：三态返回——noChange 无变化 / hasUpdate 云端有更新 / detectFailed 检测失败（不再静默）。
+    static func detectCloudLedgerChange(houseContext: ModelContext?) async -> CloudChangeState {
+        guard let config = CosConfig.load(), config.isValid else { return .detectFailed }
+        guard let recs = try? await CloudHouseSync.fetchAll(config: config) else { return .detectFailed }
+        guard let ctx = houseContext else { return .detectFailed }
         // 本地房号集合（排除回收站；v1.9：可选 Bool 不能进 #Predicate，全量拉取内存过滤）
         let local = (try? ctx.fetch(FetchDescriptor<House>())) ?? []
         var localByKey: [String: House] = [:]
@@ -478,15 +498,15 @@ struct HouseListView: View {
         // ① 云端有、本地没有 → 新增
         // ② 同房号字段/媒体差异 → 更新
         for rec in recs {
-            guard let h = localByKey[rec.roomKey] else { return true }
-            if Self.cloudRecordDiffers(rec, from: h) != nil { return true }
+            guard let h = localByKey[rec.roomKey] else { return .hasUpdate }
+            if Self.cloudRecordDiffers(rec, from: h) != nil { return .hasUpdate }
         }
         // ③ 本地有、云端没有 → 待补传/待删除（两端不一致即提示同步）
         let cloudKeys = Set(recs.map { $0.roomKey })
         for (key, _) in localByKey where !cloudKeys.contains(key) {
-            return true
+            return .hasUpdate
         }
-        return false
+        return .noChange
     }
 
     /// 从独立 HouseStore 配置拉取房源（按创建时间倒序，与原来 @Query 一致；v1.7：排除已进回收站的软删除房源）
@@ -592,12 +612,13 @@ struct HouseListView: View {
             .accessibilityLabel("排序：\(houseSortMode.label)")
 
             // v2.7（P2⑮）：无媒体筛选按钮（只看没有实拍图/视频的房源）
-            // b119（清单3 换方法）：不再用主题色浅透明底（视觉上仍是灰）——直接系统绿着色：
-            // 未选中 浅绿底+绿图标，选中 实心绿底+白色图标，与排序按钮一眼区分
+            // b117→b119：曾用 photo.on.rectangle.slash（iOS 部分版本该符号渲染为空 → 只剩底色圆点）。
+            // v2.9（第六大点3 删除重建）：改用 photo/photo.fill 基础符号（全 iOS 版本确定渲染），
+            // 未选中 浅绿底+绿图标，选中 实心绿底+白图标，与排序按钮一眼区分。
             Button {
                 showOnlyNoMedia.toggle()
             } label: {
-                Image(systemName: showOnlyNoMedia ? "photo.on.rectangle.slash.fill" : "photo.on.rectangle.slash")
+                Image(systemName: showOnlyNoMedia ? "photo.fill" : "photo")
                     .font(.system(size: 11, weight: .semibold))
                     .frame(width: 28, height: 24)
                     .background(showOnlyNoMedia ? Color.green : Color.green.opacity(0.15))

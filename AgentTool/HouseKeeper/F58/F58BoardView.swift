@@ -25,6 +25,9 @@ struct F58BoardView: View {
     @State private var sortMode: F58SortMode = .defaultOrder
     @State private var onlyWithCover = false
     @State private var selectedHouse: F58House?
+    // v2.9（新增1）：详情页加载失败/超时不再白屏卡死——显示失败提示，可一键重试
+    @State private var detailLoadFailed = false
+    @State private var detailReloadToken = 0
 
     enum F58BoardTab: String, CaseIterable, Identifiable {
         case f58 = "58找房"
@@ -479,6 +482,25 @@ struct F58HouseCard: View {
 
 // MARK: - 详情页（点卡片 = 浏览器点击该房源）
 
+/// v2.9（新增1）：58 m 站详情 href 多为相对路径（/zufang/xxx.shtml），直接 URL(string:) 解析失败 → 补全为绝对地址
+private extension F58BoardView {
+    static func detailURL(from href: String) -> URL? {
+        let urlStr: String
+        if href.hasPrefix("http") {
+            urlStr = href
+        } else if href.hasPrefix("/") {
+            urlStr = "https://m.58.com" + href
+        } else {
+            urlStr = href
+        }
+        if let url = URL(string: urlStr) { return url }
+        // 含中文等字符时再做一次百分号编码兜底
+        if let encoded = urlStr.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+           let url = URL(string: encoded) { return url }
+        return nil
+    }
+}
+
 struct F58DetailWebView: View {
     let house: F58House
     @Environment(\.dismiss) private var dismiss
@@ -511,7 +533,7 @@ struct F58DetailWebView: View {
                     }
                     Spacer()
                     Button {
-                        if let url = URL(string: house.href) {
+                        if let url = Self.detailURL(from: house.href) {
                             UIApplication.shared.open(url)
                         }
                     } label: {
@@ -526,8 +548,30 @@ struct F58DetailWebView: View {
                 .padding(.horizontal, 12)
             }
             .frame(height: 62)
-            if let url = URL(string: house.href) {
-                F58DetailWKView(url: url)
+            if let url = Self.detailURL(from: house.href) {
+                ZStack {
+                    F58DetailWKView(url: url, onLoadFailed: { detailLoadFailed = true }, reloadToken: detailReloadToken)
+                    if detailLoadFailed {
+                        VStack(spacing: 8) {
+                            Image(systemName: "exclamationmark.triangle")
+                                .font(.system(size: 30))
+                                .foregroundColor(.themeAmber)
+                            Text("详情加载失败（网络或平台风控拦截），请重试")
+                                .font(.system(size: 13))
+                            Button("重新加载") {
+                                detailLoadFailed = false
+                                detailReloadToken += 1
+                            }
+                            .font(.system(size: 13, weight: .semibold))
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 6)
+                            .background(Color.themePanel)
+                            .clipShape(Capsule())
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(Color.themePanel)
+                    }
+                }
             } else {
                 VStack(spacing: 8) {
                     Image(systemName: "exclamationmark.triangle")
@@ -544,19 +588,65 @@ struct F58DetailWebView: View {
     }
 }
 
-/// 详情 WebView（桌面 UA + 持久会话，等同浏览器打开该房源）
+/// v2.9（新增1）：详情 WebView——手机 UA（与列表抓取一致，避免桌面 UA 触发 58 反爬验证码/无限跳转卡死）；
+/// 加载失败或 15 秒未完成（疑似验证码/无限重定向）回调 onLoadFailed，页面显示失败提示可重试，不再白屏卡死。
 struct F58DetailWKView: UIViewRepresentable {
     let url: URL
+    var onLoadFailed: (() -> Void)?
+    var reloadToken: Int = 0
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
 
     func makeUIView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
         config.websiteDataStore = .default()
         let wv = WKWebView(frame: .zero, configuration: config)
-        wv.customUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-        wv.load(URLRequest(url: url))
+        wv.customUserAgent = F58WebViewProvider.mobileUA
+        wv.navigationDelegate = context.coordinator
+        context.coordinator.start(url: url, webView: wv)
         return wv
     }
-    func updateUIView(_ uiView: WKWebView, context: Context) {}
+
+    func updateUIView(_ uiView: WKWebView, context: Context) {
+        if reloadToken != context.coordinator.lastReloadToken {
+            context.coordinator.lastReloadToken = reloadToken
+            context.coordinator.start(url: url, webView: uiView)
+        }
+    }
+
+    final class Coordinator: NSObject, WKNavigationDelegate {
+        private let parent: F58DetailWKView
+        var lastReloadToken: Int = -1
+        private var didFinish = false
+        private var timeoutWork: DispatchWorkItem?
+
+        init(_ parent: F58DetailWKView) { self.parent = parent }
+
+        func start(url: URL, webView: WKWebView) {
+            didFinish = false
+            timeoutWork?.cancel()
+            let work = DispatchWorkItem { [weak self] in
+                guard let self, !self.didFinish else { return }
+                self.parent.onLoadFailed?()
+            }
+            timeoutWork = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 15, execute: work)
+            webView.load(URLRequest(url: url))
+        }
+
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            didFinish = true
+            timeoutWork?.cancel()
+        }
+
+        func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+            parent.onLoadFailed?()
+        }
+
+        func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+            parent.onLoadFailed?()
+        }
+    }
 }
 
 // MARK: - 设置

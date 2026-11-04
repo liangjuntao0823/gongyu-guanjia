@@ -64,26 +64,3 @@ enum BackupLogStore {
     }
 }
 
-// MARK: - SyncCore 联动（跨端同步后记录日志）
-// SyncCore 完成 push/pull 后通过 Notification 通知本模块记录，避免侵入同步协议核心。
-
-extension Notification.Name {
-    static let backupSyncCompleted = Notification.Name("backupSyncCompleted")
-    static let backupSyncFailed = Notification.Name("backupSyncFailed")
-}
-
-enum BackupSyncLogBridge {
-    static func install() {
-        NotificationCenter.default.addObserver(forName: .backupSyncCompleted, object: nil, queue: .main) { note in
-            let info = note.userInfo ?? [:]
-            let uploaded = info["uploaded"] as? Int ?? 0
-            let downloaded = info["downloaded"] as? Int ?? 0
-            let conflicts = info["conflicts"] as? Int ?? 0
-            BackupLogStore.log(category: "同步", action: "跨端同步", result: "成功", detail: "上送 \(uploaded) 条 / 拉取 \(downloaded) 条 / 冲突 \(conflicts) 条")
-        }
-        NotificationCenter.default.addObserver(forName: .backupSyncFailed, object: nil, queue: .main) { note in
-            let detail = (note.userInfo?["detail"] as? String) ?? ""
-            BackupLogStore.log(category: "同步", action: "跨端同步", result: "失败", detail: detail)
-        }
-    }
-}

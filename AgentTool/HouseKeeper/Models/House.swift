@@ -205,34 +205,3 @@ extension House {
         return lines.joined(separator: "\n")
     }
 }
-
-// MARK: - 首次启动示例数据（可直接删除）
-
-enum SampleData {
-    @MainActor
-    static func seedIfNeeded(_ container: ModelContainer) {
-        let context = container.mainContext
-        let existing = (try? context.fetch(FetchDescriptor<House>())) ?? []
-        guard existing.isEmpty else { return }
-
-        let samples: [(roomNo: String, tower: Int, landlord: String, layout: String, price: Int, status: HouseStatus)] = [
-            ("2334", 1, "康", "单间", 1100, .available),
-            ("2325", 1, "康", "单间", 1000, .available),
-            ("1418", 2, "业主", "单间", 900, .rented),
-            ("1006", 2, "业主", "复式", 1500, .available)
-        ]
-
-        for item in samples {
-            let house = House(
-                roomNo: item.roomNo,
-                tower: item.tower,
-                landlord: item.landlord,
-                layout: item.layout,
-                price: item.price,
-                status: item.status
-            )
-            context.insert(house)
-        }
-        try? context.save()
-    }
-}

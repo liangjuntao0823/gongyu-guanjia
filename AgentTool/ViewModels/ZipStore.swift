@@ -44,40 +44,89 @@ enum ZipStore {
     }
 
     /// 从「归档路径 → 本地文件」流式写 zip（媒体全量备份用，避免大文件整包进内存）
+    /// v2.9（P1-6）：真流式 zip 打包——文件分块（1MB）读入算 CRC、分块写入输出文件，
+    /// 单文件不再整块读进内存，大视频/图片打包不再 OOM 闪退。纯文件入口（安全快照等）。
     static func createZipStreamed(entries: [(path: String, fileURL: URL)], to url: URL, progress: ((Double) -> Void)? = nil) throws {
-        var body = Data()
+        try createZipStreamed(dataEntries: [], fileEntries: entries, to: url, progress: progress)
+    }
+
+    /// v2.9（P1-6）：混合流式打包——dataEntries（manifest/business/houses 等小 JSON）直接内存写；
+    /// fileEntries（media 原文件）分块流式写，峰值内存只占 1MB 分块，不再「整包 Data + 单文件全读」。
+    static func createZipStreamed(dataEntries: [(path: String, data: Data)], fileEntries: [(path: String, fileURL: URL)], to url: URL, progress: ((Double) -> Void)? = nil) throws {
+        let chunkSize = 1 << 20  // 1MB 分块
+        FileManager.default.createFile(atPath: url.path, contents: nil)
+        let output = try FileHandle(forWritingTo: url)
+        defer { try? output.close() }
+
         var central: [Data] = []
         var offset: UInt64 = 0
         var seen = Set<String>()
         var totalBytes: Int64 = 0
-        for entry in entries {
+        for (_, data) in dataEntries { totalBytes += Int64(data.count) }
+        for entry in fileEntries {
             if let attrs = try? FileManager.default.attributesOfItem(atPath: entry.fileURL.path),
                let size = attrs[.size] as? Int64 {
                 totalBytes += size
             }
         }
         var writtenBytes: Int64 = 0
+        func report(_ add: Int64) {
+            writtenBytes += add
+            progress?(Double(writtenBytes) / Double(max(totalBytes, 1)))
+        }
 
-        for (path, fileURL) in entries {
+        // 小 JSON 数据：内存直接算 CRC 并写出
+        for (path, data) in dataEntries {
             let normalized = path.hasPrefix("/") ? String(path.dropFirst()) : path
             guard !seen.contains(normalized) else { continue }
             seen.insert(normalized)
             let nameData = Data(normalized.utf8)
-            let fileData = try Data(contentsOf: fileURL)  // 媒体单文件通常 < 200MB，可接受；超大可再改分块
-            let crc = crc32(of: fileData)
-            let size = UInt64(fileData.count)
-
-            var lfh = localHeaderData(nameData: nameData, crc: crc, size: size, offset: &offset)
-            lfh.append(fileData)
-            body.append(lfh)
-            writtenBytes += Int64(fileData.count)
-            progress?(Double(writtenBytes) / Double(max(totalBytes, 1)))
-            central.append(centralRecordData(nameData: nameData, crc: crc, size: size, localHeaderOffset: offset - UInt64(lfh.count)))
+            let crc = crc32(of: data)
+            let headerStart = offset
+            // 注意：localHeaderData 内部已将 offset 累加 header+name+data 全长，此处只物理写入不再累加
+            var lfh = localHeaderData(nameData: nameData, crc: crc, size: UInt64(data.count), offset: &offset)
+            try output.write(contentsOf: lfh)
+            try output.write(contentsOf: data)
+            report(Int64(data.count))
+            central.append(centralRecordData(nameData: nameData, crc: crc, size: UInt64(data.count), localHeaderOffset: headerStart))
         }
 
-        var full = body
-        appendCentralAndEOCD(central: central, bodyCount: body.count, centralRecords: &central, to: &full, startOffset: offset)
-        try full.write(to: url, options: .atomic)
+        // 媒体文件：两遍分块读（第一遍算 CRC+总大小，第二遍流式写），单文件不整读进内存
+        for (path, fileURL) in fileEntries {
+            let normalized = path.hasPrefix("/") ? String(path.dropFirst()) : path
+            guard !seen.contains(normalized) else { continue }
+            seen.insert(normalized)
+            let nameData = Data(normalized.utf8)
+
+            var crc: UInt32 = 0
+            var size: UInt64 = 0
+            let input = try FileHandle(forReadingFrom: fileURL)
+            defer { try? input.close() }
+            while let chunk = try input.read(upToCount: chunkSize) {
+                crc = crc32(update: crc, with: chunk)
+                size += UInt64(chunk.count)
+            }
+
+            let headerStart = offset
+            // localHeaderData 内部已累加 offset 全长；流式写 body 时不再累加，避免重复导致 central 偏移错位
+            var lfh = localHeaderData(nameData: nameData, crc: crc, size: size, offset: &offset)
+            try output.write(contentsOf: lfh)
+
+            let input2 = try FileHandle(forReadingFrom: fileURL)
+            defer { try? input2.close() }
+            while let chunk = try input2.read(upToCount: chunkSize) {
+                try output.write(contentsOf: chunk)
+                report(Int64(chunk.count))
+            }
+            central.append(centralRecordData(nameData: nameData, crc: crc, size: size, localHeaderOffset: headerStart))
+        }
+
+        // 中央目录 + EOCD（体量小，内存拼后追加）
+        var cdData = Data()
+        for cd in central { cdData.append(cd) }
+        try output.write(contentsOf: cdData)
+        try output.write(contentsOf: eocdData(centralSize: UInt64(cdData.count), centralOffset: offset, entryCount: UInt32(central.count)))
+        try output.synchronize()
         progress?(1.0)
     }
 
@@ -298,17 +347,21 @@ enum ZipStore {
         for cd in central { cdData.append(cd) }
         let cdSize = UInt64(cdData.count)
         full.append(cdData)
+        full.append(eocdData(centralSize: cdSize, centralOffset: cdStart, entryCount: UInt32(central.count)))
+    }
 
+    /// 构造 EOCD（End of Central Directory）记录
+    private static func eocdData(centralSize: UInt64, centralOffset: UInt64, entryCount: UInt32) -> Data {
         var eocd = Data()
         eocd.append(le32(0x06054B50))
         eocd.append(le16(0))
         eocd.append(le16(0))
-        eocd.append(le16(UInt16(central.count)))
-        eocd.append(le16(UInt16(central.count)))
-        eocd.append(le32(UInt32(cdSize)))
-        eocd.append(le32(UInt32(cdStart)))
+        eocd.append(le16(UInt16(entryCount)))
+        eocd.append(le16(UInt16(entryCount)))
+        eocd.append(le32(UInt32(centralSize)))
+        eocd.append(le32(UInt32(centralOffset)))
         eocd.append(le16(0))
-        full.append(eocd)
+        return eocd
     }
 
     private static func parseCentralDirectory(_ data: Data) throws -> [ZipEntry] {
@@ -376,11 +429,16 @@ enum ZipStore {
     }()
 
     static func crc32(of data: Data) -> UInt32 {
-        var crc: UInt32 = 0xFFFFFFFF
+        crc32(update: 0xFFFFFFFF, with: data) ^ 0xFFFFFFFF
+    }
+
+    /// v2.9（P1-6）：增量 CRC32——流式分块读文件时逐块累加，避免整文件驻留内存
+    private static func crc32(update crc: UInt32, with data: Data) -> UInt32 {
+        var c = crc
         for byte in data {
-            crc = crcTable[Int((crc ^ UInt32(byte)) & 0xFF)] ^ (crc >> 8)
+            c = crcTable[Int((c ^ UInt32(byte)) & 0xFF)] ^ (c >> 8)
         }
-        return crc ^ 0xFFFFFFFF
+        return c
     }
 
     // MARK: - 字节序

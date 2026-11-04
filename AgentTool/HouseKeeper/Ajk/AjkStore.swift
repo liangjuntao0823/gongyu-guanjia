@@ -76,6 +76,17 @@ final class AjkStore: ObservableObject {
         } catch { }
     }
 
+    /// v2.9（新增2）：按小区展示房源数量排名（Top5，等价 58 页「按经纪人排名」；小区去掉「顺德-龙江，」前缀）
+    var communityRank: [(name: String, count: Int)] {
+        var counts: [String: Int] = [:]
+        for h in houses {
+            let raw = h.community.components(separatedBy: "，").last ?? h.community
+            let key = raw.isEmpty ? "未知小区" : raw
+            counts[key, default: 0] += 1
+        }
+        return counts.map { ($0.key, $0.value) }.sorted { $0.1 != $1.1 ? $0.1 > $1.1 : $0.0 < $1.0 }
+    }
+
     // MARK: - 抓取结果落地
 
     func applyFetch(houses: [AjkHouse], overview: AjkOverview) {

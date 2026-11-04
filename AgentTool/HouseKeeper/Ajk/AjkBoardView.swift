@@ -166,6 +166,31 @@ struct AjkBoardView: View {
                 statItem(value: "\(o.score)", label: "神奇分")
                 statItem(value: "\(o.coin)", label: "房产币")
             }
+            // v2.9（新增2）：按小区展示房源数量排名（Top5，等价 58 页「按经纪人排名」）
+            if !store.communityRank.isEmpty {
+                VStack(spacing: 4) {
+                    ForEach(Array(store.communityRank.prefix(5).enumerated()), id: \.offset) { idx, rank in
+                        HStack(spacing: 8) {
+                            Text("\(idx + 1)")
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundColor(.white)
+                                .frame(width: 20, height: 20)
+                                .background(idx == 0 ? Color.themeAmber : Color.themeAccentDark)
+                                .clipShape(Circle())
+                            Text(rank.name)
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundColor(.themeText)
+                                .lineLimit(1)
+                            Spacer()
+                            Text("\(rank.count)套")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundColor(.themeAccentDark)
+                        }
+                        .padding(.horizontal, 14)
+                    }
+                }
+                .padding(.top, 2)
+            }
         }
         .padding(.vertical, 14)
         .background(Color.themePanel)
@@ -640,7 +665,7 @@ struct AjkSettingsDetailView: View {
                         .font(.system(size: 13))
                         .autocapitalization(.none)
                         .keyboardType(.URL)
-                    Text("一般无需修改；页面改版导致抓取失败时可按官方新链接更换")
+                    Text("默认：经纪人后台全部房源页（vip.anjuke.com … allHouse）。读取后自动只保留利保米兰公馆房源；如你在其他小区也发布房源，可在这里更换页面 URL")
                         .font(.system(size: 11))
                         .foregroundColor(.themeText3)
                 }

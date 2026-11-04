@@ -10,6 +10,7 @@ struct DashboardView: View {
     @EnvironmentObject private var tabRouter: TabRouter
     @Query(filter: #Predicate<TodoItem> { !$0.isDeleted }, sort: [SortDescriptor(\TodoItem.createdDate, order: .reverse), SortDescriptor(\TodoItem.sortOrder)]) private var todos: [TodoItem]
     @State private var stats: DashboardStats?
+    @State private var statsLoadFailed = false   // v2.9（P1-14）：统计加载失败不再静默显示 0
     // 提醒使用状态缓存，避免 SwiftUI 每次 body 重算时反复全表 fetch。
     @State private var rentReminders: [RentReminder] = []
     @State private var payoutReminders: [PayoutReminder] = []
@@ -571,6 +572,20 @@ struct DashboardView: View {
                     // KPI 看板
                 VStack(spacing: 10) {
                     DashboardSectionHeader(title: "KPI 看板", subtitle: "", isCollapsed: $kpiCollapsed)
+                    if statsLoadFailed {
+                        HStack(spacing: 6) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundColor(.orange)
+                            Text("统计加载失败，当前数据可能不准确，请下拉刷新重试")
+                                .font(.footnote)
+                                .foregroundColor(.orange)
+                        }
+                        .padding(10)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.orange.opacity(0.1))
+                        .cornerRadius(10)
+                        .padding(.horizontal)
+                    }
                     if !kpiCollapsed {
                     // 第一行：收租房间、即将到期
                     HStack(spacing: 10) {
@@ -875,7 +890,15 @@ struct DashboardView: View {
     }
 
     private func refreshDashboard() {
-        stats = DataManager.shared.dashboardStats(modelContext: modelContext)
+        // v2.9（P1-14）：统计读取失败必须显性提示，不再静默按 0 显示
+        do {
+            stats = try DataManager.shared.dashboardStats(modelContext: modelContext)
+            statsLoadFailed = false
+        } catch {
+            stats = nil
+            statsLoadFailed = true
+            BackupLogStore.log(category: "统计", action: "工作台统计", result: "失败", detail: error.localizedDescription)
+        }
         rentReminders = loadRentReminders()
         payoutReminders = loadPayoutReminders()
     }

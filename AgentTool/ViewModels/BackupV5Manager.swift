@@ -328,55 +328,24 @@ final class BackupV5Manager {
                 let manifestData = try JSONEncoder().encode(prepared.manifest)
                 let fingerprintData = try JSONEncoder().encode(prepared.fingerprints)
                 let mediaEntries = BackupV5Manager.collectMediaFileEntries()
-                var entries: [(path: String, data: Data)] = [
+                var dataEntries: [(path: String, data: Data)] = [
                     ("manifest.json", manifestData),
                     ("business.json", prepared.business),
                     ("houses.json", prepared.houses),
                     ("media_manifest.json", fingerprintData)
                 ]
                 // v1.40 第8点：操作日志 + 崩溃日志并入全量备份（诊断数据）
-                entries.append(contentsOf: BackupV5Manager.logEntriesForBackup())
-                var body = Data()
-                var central: [Data] = []
-                var offset: UInt64 = 0
-                var seen = Set<String>()
-                for (path, data) in entries {
-                    let normalized = path.hasPrefix("/") ? String(path.dropFirst()) : path
-                    guard !seen.contains(normalized) else { continue }
-                    seen.insert(normalized)
-                    let nameData = Data(normalized.utf8)
-                    let crc = ZipStore.crc32(of: data)
-                    var lfh = ZipStore.localHeaderData(nameData: nameData, crc: crc, size: UInt64(data.count), offset: &offset)
-                    lfh.append(data)
-                    body.append(lfh)
-                    central.append(ZipStore.centralRecordData(nameData: nameData, crc: crc, size: UInt64(data.count), localHeaderOffset: offset - UInt64(lfh.count)))
-                }
-                var totalBytes: Int64 = 0
-                for entry in mediaEntries {
-                    if let attrs = try? FileManager.default.attributesOfItem(atPath: entry.fileURL.path),
-                       let size = attrs[.size] as? Int64 { totalBytes += size }
-                }
-                var writtenBytes: Int64 = 0
-                for (path, fileURL) in mediaEntries {
-                    let normalized = path.hasPrefix("/") ? String(path.dropFirst()) : path
-                    guard !seen.contains(normalized) else { continue }
-                    seen.insert(normalized)
-                    let fileData = try Data(contentsOf: fileURL)
-                    let nameData = Data(normalized.utf8)
-                    let crc = ZipStore.crc32(of: fileData)
-                    var lfh = ZipStore.localHeaderData(nameData: nameData, crc: crc, size: UInt64(fileData.count), offset: &offset)
-                    lfh.append(fileData)
-                    body.append(lfh)
-                    writtenBytes += Int64(fileData.count)
-                    if totalBytes > 0 {
-                        let p = min(Double(writtenBytes) / Double(totalBytes), 1.0)
-                        await MainActor.run { progress?(p) }
+                dataEntries.append(contentsOf: BackupV5Manager.logEntriesForBackup())
+                // v2.9（P1-6）：混合流式打包——JSON 内存写、媒体文件 1MB 分块流式写，
+                // 不再「整包 Data + 单文件全读进内存」，大媒体不再 OOM 闪退
+                try ZipStore.createZipStreamed(
+                    dataEntries: dataEntries,
+                    fileEntries: mediaEntries,
+                    to: url,
+                    progress: { p in
+                        if p < 1.0 { Task { @MainActor in progress?(p) } }
                     }
-                    central.append(ZipStore.centralRecordData(nameData: nameData, crc: crc, size: UInt64(fileData.count), localHeaderOffset: offset - UInt64(lfh.count)))
-                }
-                var full = body
-                ZipStore.appendCentralAndEOCD(central: central, bodyCount: body.count, centralRecords: &central, to: &full, startOffset: offset)
-                try full.write(to: url, options: .atomic)
+                )
                 await MainActor.run { progress?(1.0) }
                 return url
             } catch {
@@ -516,20 +485,6 @@ final class BackupV5Manager {
         }
     }
 
-    /// 恢复旧版 JSON 备份（v4 及更早：分板块 total/deals/properties/payouts），复用 DataBackupManager
-    static func restoreLegacyJSON(data: Data, mainContext: ModelContext, scope: DataBackupManager.ImportScope) async throws -> RestoreStatsV5 {
-        // 先做安全快照（经营数据）
-        let preDir = preRestoreDirectory
-        try? FileManager.default.removeItem(at: preDir)
-        try FileManager.default.createDirectory(at: preDir, withIntermediateDirectories: true)
-        do {
-            try await MainActor.run {
-                let businessBefore = try exportBusinessJSON(mainContext: mainContext)
-                try businessBefore.write(to: preDir.appendingPathComponent("business_before.json"), options: .atomic)
-            }
-        } catch {
-            throw BackupV5Error.restoreFailed("安全快照创建失败：\(error.localizedDescription)")
-        }
         do {
             let dm = DataBackupManager()
             let (importOK, _) = await dm.importAllDataAsync(from: data, modelContext: mainContext, scope: scope)
@@ -563,7 +518,6 @@ final class BackupV5Manager {
         deleteAll(type: PayoutMonthRecord.self, ctx: mainContext)
         deleteAll(type: PayoutUtilityRecord.self, ctx: mainContext)
         deleteAll(type: TodoItem.self, ctx: mainContext)
-        deleteAll(type: ProfitCalculation.self, ctx: mainContext)
         deleteAll(type: UtilitySettlementHistory.self, ctx: mainContext)
         try mainContext.save()
     }

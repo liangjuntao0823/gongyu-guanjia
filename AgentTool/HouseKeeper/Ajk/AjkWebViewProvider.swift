@@ -241,7 +241,10 @@ extension AjkWebViewProvider: WKScriptMessageHandler {
             let combinedOverview = [pendingOverviewText, overview].compactMap { $0 }.joined(separator: " ")
             let parsed = AjkParser.parse(overview: combinedOverview, cards: cardTexts, covers: covers, page: page)
             if !parsed.houses.isEmpty {
-                pendingHouses += parsed.houses
+                // v2.9（新增2）：只保留利保米兰公馆房源（community/title 含「米兰」）；
+                // 若一条都没匹配（用户在设置里改了 URL 抓其他小区）则原样保留，避免整页误删
+                let milan = parsed.houses.filter { $0.community.contains("米兰") || $0.title.contains("米兰") }
+                pendingHouses += (milan.isEmpty ? parsed.houses : milan)
                 pendingOverview = parsed.overview
             }
             return
@@ -254,7 +257,13 @@ extension AjkWebViewProvider: WKScriptMessageHandler {
             webView?.stopLoading()
             webView = nil
             var result = FetchResult()
-            result.houses = pendingHouses
+            // v2.9（新增2）：跨页全局去重——同一套房源编号只保留首个，消除「同套重复」展示
+            var seen = Set<String>()
+            var deduped: [AjkHouse] = []
+            for h in pendingHouses where seen.insert(h.number).inserted {
+                deduped.append(h)
+            }
+            result.houses = deduped
             result.overview = pendingOverview
             // 登录态判定：一张卡片都没抓到且概览不含房源特征 → 可能未登录
             if result.houses.isEmpty && result.overview == .empty {
