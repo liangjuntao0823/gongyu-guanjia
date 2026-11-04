@@ -50,6 +50,29 @@ final class AIManager: ObservableObject {
     }
     private var queue: [PendingSend] = []
 
+    /// b119（清单5）：当前执行任务引用——「停止当前思考」按钮需要取消它（此前 Task 引用被丢弃无法停止）
+    private var currentTask: Task<Void, Never>?
+
+    /// b119（清单5）：停止当前 AI 思考/执行任务。
+    /// 语义：正在请求/思考/等待确认/执行工具时均可停止；已完成的写操作不回滚（仅中止剩余流程）；
+    /// 排队中的消息一并清空（停止后不再自动发送下一条）。
+    func stopCurrent() {
+        currentTask?.cancel()
+        currentTask = nil
+        // 若正挂起在「写操作确认框」：恢复为取消（不执行任何更改）
+        if let cont = confirmBox.continuation {
+            confirmBox.continuation = nil
+            pendingConfirm = false
+            pendingToolCalls = nil
+            pendingToolSummaries = []
+            cont.resume(returning: false)
+        }
+        queue.removeAll()
+        queuedCount = 0
+        sending = false
+        toolPhase = nil
+    }
+
     /// SwiftData 容器（每次 send 从页面注入并保存，页面关闭期间保留引用）
     private var modelContext: ModelContext?
     private var houseModelContext: ModelContext?
@@ -150,7 +173,7 @@ final class AIManager: ObservableObject {
             return AIRequestService.ChatTurn(role: msg.role == .user ? "user" : "assistant", text: msg.text)
         }
 
-        // 任务保存在属性上：View 关闭不取消；App 划掉进程终止
+        // b119（清单5）：任务保存在属性上——「停止当前思考」可取消；View 关闭不取消；App 划掉进程终止
         let task = Task {
             // 发送前实时拉取云端用量（失败给提示不阻断）
             let cloudUsage = await fetchCloudUsageText()
@@ -239,8 +262,12 @@ final class AIManager: ObservableObject {
                                                imagePath: toolImagePaths.first, imagePaths: toolImagePaths))
                 saveHistory()
             } catch {
-                // 超时/网络错误给中文提示
-                if let ue = error as? URLError, ue.code == .timedOut {
+                // b119（清单5）：用户主动停止——静默结束，不当作错误提示
+                if Task.isCancelled {
+                    // 停止时若正挂起在确认框，由 stopCurrent 负责 resume；这里直接结束
+                } else if let ue = error as? URLError, ue.code == .cancelled {
+                    // 取消导致的 URLError.cancelled，同样静默
+                } else if let ue = error as? URLError, ue.code == .timedOut {
                     errorText = "请求超时：模型响应较慢（工具定义多或生成内容较长），已自动重试可稍后再试；生成账单类任务请用「生成 XX 房 XX 月账单」让 AI 直接调用工具生成，速度更快。"
                 } else if let ue = error as? URLError, ue.code == .notConnectedToInternet {
                     errorText = "网络不可用，请检查网络后重试"
@@ -250,8 +277,8 @@ final class AIManager: ObservableObject {
             }
             sending = false
             toolPhase = nil
-            // 处理排队消息（自动发送下一条）
-            if !queue.isEmpty {
+            // 停止后不再自动发送排队消息（stopCurrent 已清空队列，这里兜底校验）
+            if !queue.isEmpty, !Task.isCancelled {
                 let next = queue.removeFirst()
                 queuedCount = queue.count
                 let text = next.text
@@ -261,7 +288,7 @@ final class AIManager: ObservableObject {
                 }
             }
         }
-        _ = task
+        currentTask = task
     }
 
     // MARK: - 工具确认与标签

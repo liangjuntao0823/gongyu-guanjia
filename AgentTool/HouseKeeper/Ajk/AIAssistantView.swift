@@ -303,6 +303,7 @@ struct AIAssistantView: View {
     }
 
     /// 「正在思考」气泡（v1.95：三个静态圆点改为动态转圈；v1.96：工具执行阶段动态显示文案）
+    /// b119（清单5）：气泡尾部加「停止」按钮——点击中止当前思考/执行（写操作已完成的不可回滚，仅中止剩余流程）
     private var thinkingBubble: some View {
         HStack {
             VStack(alignment: .leading, spacing: 6) {
@@ -324,6 +325,17 @@ struct AIAssistantView: View {
             .padding(.vertical, 11)
             .background(Color.themePanel)
             .clipShape(RoundedRectangle(cornerRadius: 12))
+
+            Button {
+                manager.stopCurrent()
+            } label: {
+                Image(systemName: "stop.circle.fill")
+                    .font(.system(size: 22))
+                    .foregroundColor(.red)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("停止当前思考")
+
             Spacer(minLength: 60)
         }
     }
@@ -623,8 +635,10 @@ struct AIAssistantView: View {
             .buttonStyle(.plain)
             // v1.97：思考/执行期间输入框与发送按钮保持可用——此时点发送会排队，当前任务完成后自动发送
             //（不再是"发送被转圈取代、只能打字不能发"）
-            TextField(manager.sending ? "正在思考…（仍可发送，将排队自动发出）" : "输入指令，或点上方场景带入", text: $input)
+            // b119（清单6）：输入框自动换行（axis: .vertical + 多行限制，回车换行、点 ↑ 发送；长文本不再单行截断）
+            TextField(manager.sending ? "正在思考…（仍可发送，将排队自动发出）" : "输入指令，或点上方场景带入", text: $input, axis: .vertical)
                 .font(.system(size: 14))
+                .lineLimit(1...5)
                 .textFieldStyle(.plain)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 10)

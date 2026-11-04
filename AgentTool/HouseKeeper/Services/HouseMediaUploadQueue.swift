@@ -69,7 +69,7 @@ enum HouseMediaUploadQueue {
             }
         }
         if successCount > 0 {
-            BackupLogStore.log(category: "房源", action: "补传媒体", result: "成功", detail: "自动补传 \(successCount) 个媒体", cloud: true)
+            BackupLogStore.log(category: "房源", action: "补传媒体", result: "成功", detail: "自动补传 \(successCount) 个媒体", cloud: false)
         }
     }
 }

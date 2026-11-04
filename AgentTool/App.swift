@@ -603,7 +603,8 @@ struct MainTabView: View {
     private func detectCloudLedgerChange() {
         Task {
             guard let config = CosConfig.load(), config.isValid else { return }
-            let objs = (try? await CosUploader.listObjects(prefix: "h/", config: config)) ?? []
+            // b119：探测失败（断网/超时）直接跳过本次——不写空基线、不误报「有更新」
+            guard let objs = try? await CosUploader.listObjects(prefix: "h/", config: config) else { return }
             var current: [String: String] = [:]
             for obj in objs {
                 let name = obj.name
@@ -615,6 +616,9 @@ struct MainTabView: View {
             let changed = current != baseline
             UserDefaults.standard.set(current, forKey: key)
             if changed && !baseline.isEmpty {
+                // b119：变更提示持久化——即使启动时不在房源页（通知无人接收），
+                // 房源列表 onAppear 也会读取该标记补一次横幅提示
+                UserDefaults.standard.set(true, forKey: "cloudLedgerPendingHint")
                 NotificationCenter.default.post(name: HouseListView.cloudLedgerChangedLight, object: nil)
             }
         }

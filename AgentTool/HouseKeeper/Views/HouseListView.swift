@@ -62,12 +62,10 @@ struct HouseListView: View {
     // v1.73（#1 重做）：原生悬浮结果提示——顶部胶囊横幅，自动消失，替代「占半个屏幕」的居中大弹窗
     @State private var infoToast: String?
     @State private var infoToastIsError = false
-    // v1.40 第11点：同步先弹变化确认（预览 → 确认 → 应用）
-    @State private var showSyncConfirm = false
     // v1.72（#1/#5）：刷新/同步进行中状态——点刷新立即反馈「正在刷新…」，比对完成才收起
     @State private var isSyncing = false
-    // v1.68：云端媒体对账确认（先干跑列桶 → 弹确认 → 确认后才上传）+ 同步任务进度/最小化
-    @State private var showMediaSyncConfirm = false
+    // v1.68：云端媒体对账（先干跑列桶 → 全局确认 → 确认后才上传）+ 同步任务进度/最小化
+    // b119（清单4）：同步/补媒体确认框已上移全局提示中心（切页不打断），视图不再持有确认状态
     @State private var pendingMediaSnaps: [PendingMediaHouseSnapshot] = []
     @State private var syncTaskMinimized = false
     @ObservedObject private var syncCenter = SyncTaskCenter.shared
@@ -314,24 +312,7 @@ struct HouseListView: View {
                     GlobalAlertCenter.shared.show(msg)
                 }
             }
-            // v1.40 第11点：同步变化确认——先展示变化详情，确认后才应用
-            .alert("发现云端变化", isPresented: $showSyncConfirm) {
-                Button("确认同步", role: .destructive) {
-                    Task { await applySyncPreview() }
-                }
-                Button("取消", role: .cancel) {}
-            } message: {
-                Text(syncChangeSummary())
-            }
-            // v1.68：云端媒体对账确认——干跑列桶后发现云端缺媒体，确认后才开始上传（不再静默后台跑）
-            .alert("确认补齐云端媒体", isPresented: $showMediaSyncConfirm) {
-                Button("开始补齐", role: .destructive) {
-                    Task { await runMediaUpload(snaps: pendingMediaSnaps, config: CosConfig.load(), ctx: houseModelContext) }
-                }
-                Button("取消", role: .cancel) { pendingMediaSnaps = [] }
-            } message: {
-                Text(mediaSyncConfirmSummary())
-            }
+            // b119（清单4）：同步变化确认已上移全局提示中心（切页不打断），删除原视图级 alert
             .sheet(item: $currentShareStep, onDismiss: {
                 // 上一张分享面板关闭后自动弹下一张；全部发完自动退出多选
                 if shareIndex < shareQueue.count - 1 {
@@ -410,6 +391,12 @@ struct HouseListView: View {
         }
         .onAppear {
             reloadHouses()
+            // b119：变更感知补显示——启动时若不在本页（通知已发但没人接收），
+            // 进入房源页时读取持久化标记补一次提示；横幅显示后清除标记
+            if UserDefaults.standard.bool(forKey: "cloudLedgerPendingHint") {
+                UserDefaults.standard.set(false, forKey: "cloudLedgerPendingHint")
+                showToast("检测到云端房源有更新，下拉刷新即可同步")
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: Self.houseStoreChanged)) { _ in
             reloadHouses()
@@ -417,6 +404,8 @@ struct HouseListView: View {
         // b118（清单12：打开 App 轻量变更感知）：App 启动/回前台探测到云端账本有变化 →
         // 顶部横幅轻提示「云端有更新」，用户下拉刷新即同步（不自动拉取，省流量、不打断当前操作）
         .onReceive(NotificationCenter.default.publisher(for: Self.cloudLedgerChangedLight)) { _ in
+            // b119：横幅已显示即视为已感知，清除持久化标记
+            UserDefaults.standard.set(false, forKey: "cloudLedgerPendingHint")
             showToast("检测到云端房源有更新，下拉刷新即可同步")
         }
     }
@@ -524,14 +513,15 @@ struct HouseListView: View {
             .accessibilityLabel("排序：\(houseSortMode.label)")
 
             // v2.7（P2⑮）：无媒体筛选按钮（只看没有实拍图/视频的房源）
+            // b119：按钮视觉从纯灰色改为主题色图标（与排序按钮一致）：未选中浅绿底+绿图标，选中实心绿底+白图标
             Button {
                 showOnlyNoMedia.toggle()
             } label: {
                 Image(systemName: showOnlyNoMedia ? "photo.on.rectangle.slash.fill" : "photo.on.rectangle.slash")
                     .font(.system(size: 11, weight: .semibold))
                     .frame(width: 28, height: 24)
-                    .background(showOnlyNoMedia ? AppTheme.primary.opacity(0.22) : Color.secondary.opacity(0.08))
-                    .foregroundColor(showOnlyNoMedia ? AppTheme.primary : .secondary)
+                    .background(showOnlyNoMedia ? AppTheme.primary : AppTheme.primary.opacity(0.08))
+                    .foregroundColor(showOnlyNoMedia ? .white : AppTheme.primary)
                     .clipShape(Capsule())
             }
             .buttonStyle(.plain)
@@ -923,10 +913,10 @@ struct HouseListView: View {
                     house.cloudStatus = .both
                     try? houseModelContext?.save()
                 }
-                BackupLogStore.log(category: "房源", action: action, result: "成功", detail: house.displayRoomNo, cloud: true)
+                BackupLogStore.log(category: "房源", action: action, result: "成功", detail: house.displayRoomNo, cloud: false)
             } catch {
                 HouseSyncProgress.shared.end()
-                BackupLogStore.log(category: "房源", action: action, result: "失败", detail: "\(house.displayRoomNo)：\(error.localizedDescription)", cloud: true)
+                BackupLogStore.log(category: "房源", action: action, result: "失败", detail: "\(house.displayRoomNo)：\(error.localizedDescription)", cloud: false)
             }
         }
     }
@@ -1207,14 +1197,24 @@ struct HouseListView: View {
                     let ledger = rebuildLocalLedgers()
                     if ledger.written > 0 {
                         showToast(RemoteConfig.tip("refreshNoChangeLedger", "已刷新，无变化\n本地账本已同步 {n} 套").replacingOccurrences(of: "{n}", with: String(ledger.written)))
-                        BackupLogStore.log(category: "同步", action: "重建本地账本镜像", result: "成功", detail: "\(ledger.written) 套", cloud: true)
+                        BackupLogStore.log(category: "同步", action: "重建本地账本镜像", result: "成功", detail: "\(ledger.written) 套", cloud: false)
                     } else {
                         showToast(RemoteConfig.tip("refreshNoChange", "已刷新，无变化"))
                     }
                     return
                 }
                 pendingMediaSnaps = pending
-                showMediaSyncConfirm = true
+                // b119（清单4：同步任务全局化）：确认框上移到全局提示中心——
+                // 切到其他页面也能看到并确认，正在进行的同步任务不被打断
+                GlobalAlertCenter.shared.confirm(
+                    title: "确认补齐云端媒体",
+                    message: mediaSyncConfirmSummary(),
+                    confirmTitle: "开始补齐",
+                    onConfirm: {
+                        Task { await self.runMediaUpload(snaps: self.pendingMediaSnaps, config: CosConfig.load(), ctx: self.houseModelContext) }
+                    },
+                    onCancel: { self.pendingMediaSnaps = [] }
+                )
                 return
             }
             pendingSyncRecs = recs
@@ -1222,7 +1222,15 @@ struct HouseListView: View {
             pendingSyncUpdated = updated
             pendingSyncDeleted = deleted
             pendingSyncPushed = pushed
-            showSyncConfirm = true
+            GlobalAlertCenter.shared.confirm(
+                title: "发现云端变化",
+                message: syncChangeSummary(),
+                confirmTitle: "确认同步",
+                onConfirm: {
+                    Task { await self.applySyncPreview() }
+                },
+                onCancel: {}
+            )
         } catch {
             // v1.83：自动重试一次（弱网瞬断场景），第二次失败才提示并记录
             if !retriedOnce {
@@ -1231,7 +1239,7 @@ struct HouseListView: View {
                 return
             }
             showToast(RemoteConfig.tip("syncFail", "同步失败：{error}").replacingOccurrences(of: "{error}", with: error.localizedDescription), isError: true)
-            BackupLogStore.log(category: "同步", action: "同步房源（云端→本地）", result: "失败", detail: error.localizedDescription, cloud: true)
+            BackupLogStore.log(category: "同步", action: "同步房源（云端→本地）", result: "失败", detail: error.localizedDescription, cloud: false)
         }
     }
 
@@ -1335,10 +1343,10 @@ struct HouseListView: View {
         if !failed.isEmpty { lines.append("补传失败（可稍后再刷新重试）：" + failed.joined(separator: "，")) }
         showToast(lines.isEmpty ? "没有需要补传的媒体" : lines.joined(separator: "\n"))
         if !uploaded.isEmpty {
-            BackupLogStore.log(category: "同步", action: "补齐云端媒体（本地→云端）", result: "成功", detail: uploaded.joined(separator: "，"), cloud: true)
+            BackupLogStore.log(category: "同步", action: "补齐云端媒体（本地→云端）", result: "成功", detail: uploaded.joined(separator: "，"), cloud: false)
         }
         if !failed.isEmpty {
-            BackupLogStore.log(category: "同步", action: "补齐云端媒体（本地→云端）", result: "失败", detail: failed.joined(separator: "，"), cloud: true)
+            BackupLogStore.log(category: "同步", action: "补齐云端媒体（本地→云端）", result: "失败", detail: failed.joined(separator: "，"), cloud: false)
         }
     }
 
@@ -1562,13 +1570,13 @@ struct HouseListView: View {
                     if !pushedMediaHouses.isEmpty {
                         Task { await runMediaUpload(snaps: pushedMediaHouses, config: config, ctx: ctx) }
                     }
-                    BackupLogStore.log(category: "同步", action: "补传房源（本地→云端）", result: "成功", detail: pushedRoomNo.joined(separator: "，"), cloud: true)
+                    BackupLogStore.log(category: "同步", action: "补传房源（本地→云端）", result: "成功", detail: pushedRoomNo.joined(separator: "，"), cloud: false)
                 } catch {
                     HouseSyncProgress.shared.end()   // v2.4：失败也归还计数，避免进度条残留
                     await MainActor.run {
                         showToast(RemoteConfig.tip("backfillFail", "补传云端失败：{error}。本地房源保持「仅本地」，可稍后重新同步补传").replacingOccurrences(of: "{error}", with: error.localizedDescription), isError: true)
                     }
-                    BackupLogStore.log(category: "同步", action: "补传房源（本地→云端）", result: "失败", detail: error.localizedDescription, cloud: true)
+                    BackupLogStore.log(category: "同步", action: "补传房源（本地→云端）", result: "失败", detail: error.localizedDescription, cloud: false)
                 }
             }
             var mediaSaved = 0
@@ -1600,7 +1608,7 @@ struct HouseListView: View {
                         if pruned.mediaNames.count != rec.mediaNames.count {
                             _ = try? await CloudHouseSync.uploadGuarded(record: pruned, removedMedia: Set(missingLedger), config: config)
                             BackupLogStore.log(category: "同步", action: "清理账本失效媒体引用", result: "成功",
-                                               detail: "\(roomKey)：桶中不存在 \(missingLedger.joined(separator: "，"))，已从云端账本剔除", cloud: true)
+                                               detail: "\(roomKey)：桶中不存在 \(missingLedger.joined(separator: "，"))，已从云端账本剔除", cloud: false)
                         }
                     }
                     mediaSaved += files.count
@@ -1650,9 +1658,9 @@ struct HouseListView: View {
             } else {
                 showToast(msg)
             }
-            BackupLogStore.log(category: "同步", action: "同步房源（云端→本地）", result: "成功", detail: msg, cloud: true)
+            BackupLogStore.log(category: "同步", action: "同步房源（云端→本地）", result: "成功", detail: msg, cloud: false)
             if ledger.written > 0 {
-                BackupLogStore.log(category: "同步", action: "重建本地账本镜像", result: "成功", detail: "\(ledger.written) 套", cloud: true)
+                BackupLogStore.log(category: "同步", action: "重建本地账本镜像", result: "成功", detail: "\(ledger.written) 套", cloud: false)
             }
             HouseSyncProgress.shared.end()
             // v2.7（P1⑩）：总进度条完成
@@ -1666,7 +1674,7 @@ struct HouseListView: View {
             Task.detached { await Self.cleanupOrphanMedia(config: config, knownRoomKeys: Set(recs.map { $0.roomKey })) }
         } catch {
             showToast(RemoteConfig.tip("syncFail", "同步失败：{error}").replacingOccurrences(of: "{error}", with: error.localizedDescription), isError: true)
-            BackupLogStore.log(category: "同步", action: "同步房源（云端→本地）", result: "失败", detail: error.localizedDescription, cloud: true)
+            BackupLogStore.log(category: "同步", action: "同步房源（云端→本地）", result: "失败", detail: error.localizedDescription, cloud: false)
             HouseSyncProgress.shared.end()
             syncCenter.finish(success: false)
         }
@@ -1747,7 +1755,7 @@ struct HouseListView: View {
             let deleted = await deleteOrphanMedia(orphans, config: config)
             if deleted > 0 {
                 await MainActor.run {
-                    BackupLogStore.log(category: "同步", action: "桶孤儿清理", result: "成功", detail: "自动清理 \(deleted) 个残留媒体对象", cloud: true)
+                    BackupLogStore.log(category: "同步", action: "桶孤儿清理", result: "成功", detail: "自动清理 \(deleted) 个残留媒体对象", cloud: false)
                 }
             }
         } catch {
