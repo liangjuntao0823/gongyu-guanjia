@@ -98,6 +98,8 @@ struct HouseListView: View {
     @State private var shareQueue: [[Any]] = []
     // v2.17：多选逐套分享时，一套发完询问「继续下一套 / 结束」
     @State private var showContinueShare = false
+    // v2.17：保存类操作的轻提示（与工作台/成交板块一致的底部小胶囊，不弹遮罩、不占屏）
+    @State private var saveToast: String?
     @State private var remainingShareCount = 0
     @State private var shareIndex = 0
     @State private var currentShareStep: ShareStep? = nil
@@ -956,6 +958,23 @@ struct HouseListView: View {
                 .padding(.horizontal, 16)
                 .padding(.vertical, 10)
                 .background(.ultraThinMaterial)
+            }
+        }
+        // v2.17：轻提示（底部胶囊，2.6 秒自动消失，不挡列表、不需要点「好」）
+        .overlay(alignment: .bottom) {
+            if let t = saveToast {
+                Text(t)
+                    .font(.system(size: 13))
+                    .foregroundColor(.white)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 10)
+                    .background(Color.black.opacity(0.82))
+                    .clipShape(Capsule())
+                    .padding(.horizontal, 24)
+                    .padding(.bottom, 96)
+                    .transition(.opacity)
+                    .allowsHitTesting(false)
             }
         }
     }
@@ -2159,6 +2178,13 @@ struct HouseListView: View {
         }
     }
 
+    private func showSaveToast(_ msg: String) {
+        withAnimation { saveToast = msg }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.6) {
+            withAnimation { if saveToast == msg { saveToast = nil } }
+        }
+    }
+
     /// v2.17：多选 → 批量把选中房源的视频存进相册（拍摄时间改成当前，图库最上面能直接看到）。
     /// 之后到微信聊天里点 + → 相册，多选一次发完，不用一套一套弹分享面板。
     private func saveSelectedVideos() {
@@ -2169,8 +2195,7 @@ struct HouseListView: View {
                 .filter { FileManager.default.fileExists(atPath: $0.path) }
         }
         guard !urls.isEmpty else {
-            infoMessage = "选中的房源没有可保存的视频；视频若还在云端，先下载到本地再保存"
-            showInfoAlert = true
+            showSaveToast("选中的房源没有可保存的视频")
             return
         }
         isGenerating = true
@@ -2180,8 +2205,7 @@ struct HouseListView: View {
             await VideoOnlyShare.saveToAlbumQuietly(urls)
             await MainActor.run {
                 isGenerating = false
-                infoMessage = "已保存 \(urls.count) 个视频到相册（图库最上面）。去微信聊天点 + → 相册，多选一次发完。"
-                showInfoAlert = true
+                showSaveToast("已保存 \(urls.count) 个视频到相册，微信里点 + → 相册多选发完")
             }
         }
     }
