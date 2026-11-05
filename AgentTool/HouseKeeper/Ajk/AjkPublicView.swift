@@ -13,7 +13,7 @@ import WebKit
 
 struct AjkPublicView: View {
     @EnvironmentObject private var store: AjkPublicStore
-    @State private var sortMode: AjkSortMode = .defaultOrder
+    @State private var sortMode: AjkPublicSortMode = .defaultOrder
     @State private var onlyWithCover = false
     @State private var selectedHouse: AjkPublicHouse?
     @State private var errorText: String?
@@ -95,7 +95,7 @@ struct AjkPublicView: View {
     private var toolRow: some View {
         HStack(spacing: 10) {
             Menu {
-                ForEach(AjkSortMode.allCases, id: \.self) { mode in
+                ForEach(AjkPublicSortMode.allCases, id: \.self) { mode in
                     Button {
                         sortMode = mode
                     } label: {
@@ -196,7 +196,7 @@ struct AjkPublicView: View {
 
 // MARK: - 排序
 
-enum AjkSortMode: String, CaseIterable {
+enum AjkPublicSortMode: String, CaseIterable {
     case defaultOrder, priceAsc, priceDesc
     var label: String {
         switch self {
