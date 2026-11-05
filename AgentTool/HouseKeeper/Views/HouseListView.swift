@@ -2167,12 +2167,11 @@ struct HouseListView: View {
                     showInfoAlert = true
                     return
                 }
+                // 微信分享扩展单次只认 1 个视频：一次塞多个它整条消失，所以按「每个视频一次面板」排队，
+                // 关掉一个自动弹下一个（不用退出重选多套）
                 var batches: [[Any]] = []
-                var rest = files
-                while !rest.isEmpty {
-                    let chunk = Array(rest.prefix(9))
-                    rest.removeFirst(chunk.count)
-                    batches.append(VideoOnlyShare.movieItems(from: chunk) as [Any])
+                for file in files {
+                    batches.append(VideoOnlyShare.movieItems(from: [file]) as [Any])
                 }
                 shareQueue = batches
                 shareIndex = 0
