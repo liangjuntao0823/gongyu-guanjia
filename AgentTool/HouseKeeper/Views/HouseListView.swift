@@ -1427,10 +1427,11 @@ struct HouseListView: View {
         if !failed.isEmpty { lines.append("补传失败（可稍后再刷新重试）：" + failed.joined(separator: "，")) }
         showToast(lines.isEmpty ? "没有需要补传的媒体" : lines.joined(separator: "\n"))
         if !uploaded.isEmpty {
-            BackupLogStore.log(category: "同步", action: "补齐云端媒体（本地→云端）", result: "成功", detail: uploaded.joined(separator: "，"), cloud: false)
+            // v2.16：补齐云端媒体属于云端侧动作，只写云端日志区，本机区不再出现
+            CloudOps.log(category: "同步", action: "补齐云端媒体（本地→云端）", result: "成功", detail: uploaded.joined(separator: "，"))
         }
         if !failed.isEmpty {
-            BackupLogStore.log(category: "同步", action: "补齐云端媒体（本地→云端）", result: "失败", detail: failed.joined(separator: "，"), cloud: false)
+            CloudOps.log(category: "同步", action: "补齐云端媒体（本地→云端）", result: "失败", detail: failed.joined(separator: "，"))
         }
     }
 
