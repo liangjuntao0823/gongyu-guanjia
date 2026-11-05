@@ -28,6 +28,11 @@ struct AjkPublicHouse: Identifiable, Codable, Equatable {
     var coverURL: String        // 封面图
     var coverPath: String?      // 封面本地文件名
     let href: String            // 详情链接
+    /// 经纪人姓名（v2.17 b139：列表页不带，详情页 prop-broker-name 补抓；失败留空）
+    var agentName: String = ""
+
+    /// 经纪人展示名（空则「—」）
+    var agentDisplay: String { agentName.isEmpty ? "—" : agentName }
     /// 兼容旧字段名（老视图/兜底解析用）
     var area: String { [room, size].filter { !$0.isEmpty }.joined(separator: " ") }
 
@@ -63,10 +68,14 @@ final class AjkPublicStore: ObservableObject {
     @Published var loading = false
     /// v2.17：安居客弹验证码，等用户手动过验证
     @Published var needVerify = false
+    /// v2.17 b139：详情页经纪人补抓进度（current/total；nil = 未在补抓）
+    @Published var enrichProgress: (current: Int, total: Int)?
     @Published var settingsURL = AjkPublicSettings.default.url
     @Published var settingsKeyword = AjkPublicSettings.default.keyword
 
     private let defaults = UserDefaults.standard
+    /// v2.17 b139：房源清单持久化（与 58 一致，重启 App 不丢已抓到的经纪人姓名）
+    private let housesURL: URL
 
     private init() {
         // v2.17：旧的精选页/小区ID链接自动迁移到关键词入口（旧参数会让页面退回全城房源）
@@ -74,6 +83,10 @@ final class AjkPublicStore: ObservableObject {
             "https://fs.zu.anjuke.com/?kw=%E5%88%A9%E4%BF%9D%E7%B1%B3%E5%85%B0%E5%85%AC%E9%A6%86&comm_exist=on&from=list_ac&facet_comm_id=102286650",
             "https://fs.zu.anjuke.com/?t=1&from=0&comm_exist=on&kw=%E5%88%A9%E4%BF%9D%E7%B1%B3%E5%85%B0%E5%85%AC%E9%A6%86"
         ]
+        let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("AjkPublic", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        housesURL = dir.appendingPathComponent("houses.json")
         var savedURL = defaults.string(forKey: "ajk.public.url")
         if let s = savedURL, legacyURLs.contains(s) || s.contains("facet_comm_id") {
             savedURL = AjkPublicSettings.defaultURL
@@ -81,6 +94,17 @@ final class AjkPublicStore: ObservableObject {
         }
         settingsURL = savedURL ?? AjkPublicSettings.defaultURL
         settingsKeyword = defaults.string(forKey: "ajk.public.keyword") ?? AjkPublicSettings.default.keyword
+        if let data = try? Data(contentsOf: housesURL),
+           let list = try? JSONDecoder().decode([AjkPublicHouse].self, from: data) {
+            houses = list
+        }
+    }
+
+    /// 房源清单落盘（含经纪人姓名）
+    func saveHouses() {
+        if let data = try? JSONEncoder().encode(houses) {
+            try? data.write(to: housesURL, options: .atomic)
+        }
     }
 
     /// 抓取关键词过滤 token——含「米兰」时用「米兰」（利保米兰公馆/米兰公馆都命中）
@@ -143,7 +167,34 @@ final class AjkPublicStore: ObservableObject {
         houses = result.houses
         lastFetch = Date()
         lastError = nil
+        saveHouses()
         downloadCovers()
+        // v2.17 b139：列表先展示，经纪人（列表页没有）转后台详情页补抓，进度走 enrichProgress
+        startAgentEnrich()
+    }
+
+    /// v2.17 b139：详情页补抓经纪人姓名（与 58 同机制：先出列表，后台补，失败降级留空不阻塞）
+    private func startAgentEnrich() {
+        let pending = houses.filter { $0.agentName.isEmpty }
+        guard !pending.isEmpty else { enrichProgress = nil; return }
+        enrichProgress = (0, pending.count)
+        let snapshot = houses
+        Task { @MainActor [weak self] in
+            let enriched = await AjkPublicWebViewProvider.shared.enrichAgents(snapshot) { cur, total in
+                Task { @MainActor [weak self] in
+                    self?.enrichProgress = (cur, total)
+                }
+            }
+            guard let self else { return }
+            self.enrichProgress = nil
+            self.houses = enriched
+            self.saveHouses()
+        }
+    }
+
+    /// 用户在验证弹窗里过完码后，继续补抓剩余经纪人（不重抓列表）
+    func resumeAgentEnrichIfNeeded() {
+        startAgentEnrich()
     }
 
     // MARK: - 缩略图（与 58 同机制）
@@ -194,6 +245,21 @@ final class AjkPublicStore: ObservableObject {
     }
 
     var maxPrice: Int? { houses.compactMap { $0.priceValue }.max() }
+
+    /// 经纪人数（按姓名去重；空名不计）
+    var agentCount: Int {
+        Set(houses.filter { !$0.agentName.isEmpty }.map { $0.agentName }).count
+    }
+
+    /// 经纪人排名（与 58 一致：按姓名计数倒序，同数按名字排序）
+    var agentRank: [(name: String, count: Int)] {
+        var counts: [String: Int] = [:]
+        for h in houses where !h.agentName.isEmpty {
+            counts[h.agentName, default: 0] += 1
+        }
+        return counts.sorted { $0.value != $1.value ? $0.value > $1.value : $0.key < $1.key }
+            .map { ($0.key, $0.value) }
+    }
 }
 
 // MARK: - 抓取 Provider
@@ -465,6 +531,154 @@ extension AjkPublicWebViewProvider: WKScriptMessageHandler {
             finish(result)
         }
     }
+}
+
+// MARK: - 详情页经纪人补抓（v2.17 b139，与 58 同机制）
+
+extension AjkPublicWebViewProvider {
+
+    /// 列表页没有经纪人字段（实测 JSON-LD 与卡片均无），逐个打开详情页取 `prop-broker-name`。
+    /// 2 个并发、单页 10 秒超时；失败（风控/网络）留空，不阻塞列表；连续 4 条被拦则提前收手省时间。
+    func enrichAgents(_ houses: [AjkPublicHouse], onProgress: @escaping (Int, Int) -> Void) async -> [AjkPublicHouse] {
+        var result = houses
+        let todo = houses.filter { $0.agentName.isEmpty }
+        let total = todo.count
+        guard total > 0 else { return result }
+        var done = 0
+        var blockedInRow = 0
+        let batchSize = 2
+        var start = 0
+        while start < total {
+            let end = min(start + batchSize, total)
+            let slice = Array(todo[start..<end])
+            await withTaskGroup(of: (String, String?).self) { group in
+                for h in slice {
+                    let href = h.href
+                    let infoid = h.infoid
+                    group.addTask { (infoid, await AjkDetailAgentLoader.load(href: href)) }
+                }
+                for await (infoid, name) in group {
+                    done += 1
+                    if let name, !name.isEmpty {
+                        if let idx = result.firstIndex(where: { $0.infoid == infoid }) {
+                            result[idx].agentName = name
+                        }
+                        blockedInRow = 0
+                    } else {
+                        blockedInRow += 1
+                    }
+                    onProgress(done, total)
+                }
+            }
+            if blockedInRow >= 4 { break }
+            start = end
+        }
+        return result
+    }
+}
+
+/// 单次详情页加载取经纪人姓名（共享默认数据存储，沿用列表页验证过的 cookie）
+/// 注意：全部回调都在主线程，active 列表只在主线程读写
+final class AjkDetailAgentLoader: NSObject, WKNavigationDelegate {
+
+    private static var active: [AjkDetailAgentLoader] = []
+
+    static func load(href: String, timeout: Double = 10) async -> String? {
+        let full: String
+        if href.hasPrefix("http") {
+            full = href
+        } else if href.hasPrefix("/") {
+            full = "https://m.anjuke.com" + href
+        } else {
+            full = href
+        }
+        guard let url = URL(string: full) else { return nil }
+        return await withCheckedContinuation { (cont: CheckedContinuation<String?, Never>) in
+            DispatchQueue.main.async {
+                let loader = AjkDetailAgentLoader(url: url, continuation: cont, timeout: timeout)
+                active.append(loader)
+                loader.start()
+            }
+        }
+    }
+
+    private let url: URL
+    private var continuation: CheckedContinuation<String?, Never>?
+    private var webView: WKWebView?
+    private var timeoutWork: DispatchWorkItem?
+
+    private init(url: URL, continuation: CheckedContinuation<String?, Never>, timeout: Double) {
+        self.url = url
+        self.continuation = continuation
+        super.init()
+        let config = WKWebViewConfiguration()
+        config.websiteDataStore = .default()
+        let wv = WKWebView(frame: .init(x: 0, y: 0, width: 390, height: 844), configuration: config)
+        wv.navigationDelegate = self
+        wv.customUserAgent = AjkPublicWebViewProvider.mobileUA
+        webView = wv
+        let work = DispatchWorkItem { [weak self] in
+            self?.finish(nil)
+        }
+        timeoutWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + timeout, execute: work)
+    }
+
+    func start() {
+        webView?.load(URLRequest(url: url))
+    }
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+            guard let self, self.continuation != nil else { return }
+            self.webView?.evaluateJavaScript(Self.script) { value, _ in
+                let raw = (value as? String) ?? ""
+                let name = raw.replacingOccurrences(of: "经纪人", with: "")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                self.finish(name.isEmpty || name == "__CAPTCHA__" ? nil : name)
+            }
+        }
+    }
+
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        finish(nil)
+    }
+
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        finish(nil)
+    }
+
+    private func finish(_ name: String?) {
+        guard let c = continuation else { return }
+        continuation = nil
+        timeoutWork?.cancel()
+        timeoutWork = nil
+        webView?.stopLoading()
+        webView?.navigationDelegate = nil
+        webView = nil
+        Self.active.removeAll { $0 === self }
+        c.resume(returning: name)
+    }
+
+    private static let script = """
+    (function(){
+      try {
+        var t = ((document.body && document.body.innerText) || '');
+        if (t.indexOf('请输入验证码') >= 0 || t.indexOf('访问过于频繁') >= 0 ||
+            (document.getElementById && document.getElementById('@@xxzlGatewayUrl'))) return '__CAPTCHA__';
+        var el = document.querySelector('.prop-broker-name');
+        var n = el ? (el.innerText || el.textContent || '') : '';
+        if (!n) {
+          var box = document.querySelector('.prop-broker-detail') || document.querySelector('[class*=broker-info]');
+          if (box) {
+            var nm = box.querySelector('[class*=name]');
+            n = nm ? (nm.innerText || nm.textContent || '') : '';
+          }
+        }
+        return (n || '').replace(/\\s+/g, ' ').trim();
+      } catch(e) { return ''; }
+    })()
+    """
 }
 
 // MARK: - 解析

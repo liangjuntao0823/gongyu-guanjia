@@ -20,7 +20,7 @@ struct AjkPublicView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if store.loading { progressBar }
+            if store.loading || store.enrichProgress != nil { progressBar }
             ScrollView {
                 VStack(spacing: 0) {
                     overviewCard
@@ -56,21 +56,53 @@ struct AjkPublicView: View {
     private var progressBar: some View {
         HStack(spacing: 8) {
             ProgressView().controlSize(.small)
-            Text("正在读取安居客找房页…")
-                .font(.system(size: 12))
+            if let p = store.enrichProgress {
+                Text("正在补抓经纪人 \(p.current)/\(p.total)…")
+                    .font(.system(size: 12))
+            } else {
+                Text("正在读取安居客找房页…")
+                    .font(.system(size: 12))
+            }
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 8)
         .background(Color.themeAccent.opacity(0.08))
     }
 
-    // MARK: - 概览（与 58 同风格三列）
+    // MARK: - 概览（v2.17 b139：照搬 58，房源/经纪人/上榜经纪人 + Top5 排名）
 
     private var overviewCard: some View {
-        HStack(spacing: 0) {
-            statItem(value: "\(store.houses.count)", label: "房源(套)")
-            statItem(value: store.avgPrice.map(String.init) ?? "—", label: "均价(元/月)")
-            statItem(value: store.maxPrice.map(String.init) ?? "—", label: "最高(元/月)")
+        let rank = store.agentRank
+        return VStack(spacing: 10) {
+            HStack(spacing: 0) {
+                statItem(value: "\(store.houses.count)", label: "房源(套)")
+                statItem(value: "\(store.agentCount)", label: "经纪人(位)")
+                statItem(value: "\(rank.count)", label: "上榜经纪人")
+            }
+            if !rank.isEmpty {
+                VStack(spacing: 4) {
+                    ForEach(Array(rank.prefix(5).enumerated()), id: \.offset) { idx, item in
+                        HStack(spacing: 8) {
+                            Text("\(idx + 1)")
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundColor(.white)
+                                .frame(width: 20, height: 20)
+                                .background(idx == 0 ? Color.themeAmber : Color.themeAccentDark)
+                                .clipShape(Circle())
+                            Text(item.name)
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundColor(.themeText)
+                                .lineLimit(1)
+                            Spacer()
+                            Text("\(item.count)套")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundColor(.themeAccentDark)
+                        }
+                        .padding(.horizontal, 14)
+                    }
+                }
+                .padding(.top, 2)
+            }
         }
         .padding(.vertical, 14)
         .background(Color.themePanel)
@@ -151,7 +183,7 @@ struct AjkPublicView: View {
                         .foregroundColor(.themeText3)
                     Text(store.lastError == nil ? "还没有安居客数据" : "读取失败")
                         .font(.system(size: 14, weight: .medium))
-                    Text(store.lastError ?? "点右上角「读取」抓取安居客找房页\n标题/缩略图/价格/位置，点卡片看详情")
+                    Text(store.lastError ?? "点右上角「读取」抓取安居客找房页\n标题/缩略图/价格/经纪人，点卡片看详情")
                         .font(.system(size: 12))
                         .foregroundColor(.themeText3)
                         .multilineTextAlignment(.center)
@@ -189,6 +221,7 @@ struct AjkPublicView: View {
         case .defaultOrder: break
         case .priceAsc:  list.sort { ($0.priceValue ?? .max) < ($1.priceValue ?? .max) }
         case .priceDesc: list.sort { ($0.priceValue ?? .min) > ($1.priceValue ?? .min) }
+        case .agent:     list.sort { $0.agentName < $1.agentName }
         }
         return list
     }
@@ -197,12 +230,13 @@ struct AjkPublicView: View {
 // MARK: - 排序
 
 enum AjkPublicSortMode: String, CaseIterable {
-    case defaultOrder, priceAsc, priceDesc
+    case defaultOrder, priceAsc, priceDesc, agent
     var label: String {
         switch self {
         case .defaultOrder: return "默认顺序"
         case .priceAsc: return "价格从低到高"
         case .priceDesc: return "价格从高到低"
+        case .agent: return "按经纪人"
         }
     }
 }
@@ -263,8 +297,8 @@ struct AjkPublicCard: View {
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundColor(.themeText)
                     .lineLimit(2)
-                if !house.room.isEmpty || !house.size.isEmpty || !house.loc.isEmpty {
-                    Text([house.room, house.size, house.loc].filter { !$0.isEmpty }.joined(separator: " ｜ "))
+                if !house.room.isEmpty || !house.size.isEmpty || !house.loc.isEmpty || !house.floor.isEmpty {
+                    Text([house.room, house.size, house.loc, house.floor].filter { !$0.isEmpty }.joined(separator: " ｜ "))
                         .font(.system(size: 12))
                         .foregroundColor(.themeText2)
                         .lineLimit(1)
@@ -277,12 +311,11 @@ struct AjkPublicCard: View {
                         .font(.system(size: 11))
                         .foregroundColor(.themeText3)
                     Spacer()
-                    if !house.floor.isEmpty {
-                        Text(house.floor)
-                            .font(.system(size: 11))
-                            .foregroundColor(.themeText3)
-                            .lineLimit(1)
-                    }
+                    // v2.17 b139：卡片补上经纪人（详情页补抓；未取到显示「—」）
+                    Text("来自经纪人：\(house.agentDisplay)")
+                        .font(.system(size: 11))
+                        .foregroundColor(house.agentName.isEmpty ? .themeText3 : .themeAmber)
+                        .lineLimit(1)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
