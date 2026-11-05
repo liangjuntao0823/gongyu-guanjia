@@ -531,38 +531,48 @@ struct EmptyStateView: View {
 /// 系统分享面板把「文件地址」交给微信时，微信只当文件附件；只有给视频素材（AVAsset）且容器是 mp4，
 /// 微信才按视频消息处理。这里统一做三件事：转 mp4（mov 也能播）、组装素材、顺手在相册留一份兜底。
 enum VideoOnlyShare {
-    /// 本地视频 → 可直接分享的 mp4 素材（已是 mp4 直接用；mov 先无损转封装）
-    static func prepareAssets(from urls: [URL]) async -> [AVURLAsset] {
-        var assets: [AVURLAsset] = []
+    /// 本地视频 → 可直接交给系统分享面板的 mp4 文件地址（已是 mp4 直接用；mov 先转封装）。
+    /// 注意必须给「文件地址」，不能给 AVAsset 对象：给对象时分享面板识别不出类型，
+    /// 微信等扩展会整条消失，只剩备忘录这类万能接收项。
+    static func prepareFiles(from urls: [URL]) async -> [URL] {
+        var files: [URL] = []
         for url in urls {
             guard FileManager.default.fileExists(atPath: url.path) else { continue }
             if url.pathExtension.lowercased() == "mp4" {
-                assets.append(AVURLAsset(url: url))
+                files.append(url)
                 continue
             }
             if let mp4 = await exportMP4(from: url) {
-                assets.append(AVURLAsset(url: mp4))
+                files.append(mp4)
             } else {
-                assets.append(AVURLAsset(url: url))   // 转封装失败：退回原文件，不让分享中断
+                files.append(url)   // 转封装失败：退回原文件，不让分享中断
             }
         }
-        return assets
+        return files
     }
 
-    /// 静默在系统相册留一份（只申请新增权限）；用户拒绝或保存失败都不打断分享
+    /// 静默在系统相册留一份（只申请新增权限）。
+    /// 保存前先把视频内的拍摄时间改写成「现在」：相册「图库」是按拍摄日期分组排序的，
+    /// 沿用原片日期会被排到几个月前的位置，只能在「精选集 → 最近保存」里看到。
     static func saveToAlbumQuietly(_ urls: [URL]) async {
         guard !urls.isEmpty else { return }
         let status = await PHPhotoLibrary.requestAuthorization(for: .addOnly)
         guard status == .authorized || status == .limited else { return }
+        var copies: [URL] = []
+        for url in urls {
+            if let dated = await exportMP4(from: url, retagDate: true) { copies.append(dated) }
+            else { copies.append(url) }
+        }
         try? await PHPhotoLibrary.shared().performChanges {
-            for url in urls {
+            for url in copies {
                 PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: url)
             }
         }
     }
 
-    /// mov → mp4：先 passthrough（不重编码、秒级完成、画质零损失），不适用时回退最高质量重编码
-    private static func exportMP4(from url: URL) async -> URL? {
+    /// mov → mp4：先 passthrough（不重编码、秒级完成、画质零损失），不适用时回退最高质量重编码。
+    /// retagDate = true 时顺带把拍摄时间改写成当前时间（只用于存相册的副本）。
+    private static func exportMP4(from url: URL, retagDate: Bool = false) async -> URL? {
         let asset = AVURLAsset(url: url)
         let out = FileManager.default.temporaryDirectory
             .appendingPathComponent("share_video_\(UUID().uuidString).mp4")
@@ -574,6 +584,18 @@ enum VideoOnlyShare {
             session.outputURL = out
             session.outputFileType = .mp4
             session.shouldOptimizeForNetworkUse = true
+            if retagDate {
+                let now = ISO8601DateFormatter().string(from: Date())
+                var items: [AVMetadataItem] = []
+                for key in ["com.apple.quicktime.creationdate", "com.apple.quicktime.creationtime"] {
+                    let item = AVMutableMetadataItem()
+                    item.key = key as NSString
+                    item.keySpace = .quickTimeMetadata
+                    item.value = now as NSString
+                    items.append(item)
+                }
+                session.metadata = items
+            }
             await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
                 session.exportAsynchronously { cont.resume() }
             }

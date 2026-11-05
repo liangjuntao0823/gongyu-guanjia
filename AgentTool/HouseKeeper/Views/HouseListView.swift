@@ -1991,19 +1991,19 @@ struct HouseListView: View {
         generateTip = "正在准备视频…"
         generateProgress = 0
         Task {
-            let assets = await VideoOnlyShare.prepareAssets(from: urls)
+            let files = await VideoOnlyShare.prepareFiles(from: urls)
             await VideoOnlyShare.saveToAlbumQuietly(urls)
             await MainActor.run {
                 isGenerating = false
                 singleShareHouse = nil
-                guard !assets.isEmpty else {
+                guard !files.isEmpty else {
                     infoMessage = "视频文件缺失，无法分享"
                     showInfoAlert = true
                     return
                 }
-                shareQueue = [assets as [Any]]
+                shareQueue = [files as [Any]]
                 shareIndex = 0
-                currentShareStep = ShareStep(items: assets)
+                currentShareStep = ShareStep(items: files)
             }
         }
     }
@@ -2160,9 +2160,9 @@ struct HouseListView: View {
         Task {
             var steps: [[Any]] = []
             for (i, urls) in videoURLs.enumerated() {
-                let assets = await VideoOnlyShare.prepareAssets(from: urls)
+                let files = await VideoOnlyShare.prepareFiles(from: urls)
                 await VideoOnlyShare.saveToAlbumQuietly(urls)
-                if !assets.isEmpty { steps.append(assets as [Any]) }
+                if !files.isEmpty { steps.append(files as [Any]) }
                 await MainActor.run { self.generateProgress = Double(i + 1) / Double(videoURLs.count) }
             }
             await MainActor.run {

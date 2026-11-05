@@ -925,15 +925,15 @@ struct HouseDetailView: View {
             }
             isPreparingVideo = true
             Task {
-                let assets = await VideoOnlyShare.prepareAssets(from: urls)
+                let files = await VideoOnlyShare.prepareFiles(from: urls)
                 await VideoOnlyShare.saveToAlbumQuietly(urls)
                 await MainActor.run {
                     isPreparingVideo = false
-                    guard !assets.isEmpty else {
+                    guard !files.isEmpty else {
                         shareError = "视频文件缺失，无法分享"
                         return
                     }
-                    shareItems = assets
+                    shareItems = files
                     showShare = true
                 }
             }
