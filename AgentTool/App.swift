@@ -17,6 +17,8 @@ struct AgentToolApp: App {
     // v1.44：外部传入配置备份 json（文件 App「用其他 App 打开」）识别后的提示
     @State private var configImportTip: String?
     @StateObject private var tabRouter = TabRouter()
+    // b140：启动图——系统 LaunchScreen 显示静态图（不含版本号），App 首帧叠同一张图 + 动态版本号，0.5 秒内收起
+    @State private var showLaunchSplash = true
 
     init() {
         // 强制应用内系统控件使用中文
@@ -176,8 +178,55 @@ struct AgentToolApp: App {
                         BackupImportHandler.handleIncomingZip(url)
                     }
                 }
+                // b140：启动图覆盖层（0.5 秒内淡出，期间挡住下层点击）
+                .overlay {
+                    if showLaunchSplash {
+                        LaunchSplashOverlay(isPresented: $showLaunchSplash)
+                            .transition(.opacity)
+                            .zIndex(1)
+                    }
+                }
         }
         .modelContainer(mainContainer)
+    }
+}
+
+/// b140：启动图覆盖层。
+/// - 系统 LaunchScreen（LaunchScreen.storyboard + LaunchSplash 图）先显示同一张图，保证冷启动无白屏；
+/// - App 首帧在这里叠同一张图，并动态读取 CFBundleShortVersionString 显示版本号——以后升版不用重做图；
+/// - 总时长 0.5 秒：0.44 秒开始 0.06 秒淡出，超出即移除，不阻塞主界面与启动任务。
+struct LaunchSplashOverlay: View {
+    @Binding var isPresented: Bool
+
+    private var versionText: String {
+        let v = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? ""
+        return v.isEmpty ? "" : "v\(v)"
+    }
+
+    var body: some View {
+        GeometryReader { geo in
+            ZStack(alignment: .top) {
+                Image("LaunchSplash")
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: geo.size.width, height: geo.size.height)
+                    .clipped()
+                Text(versionText)
+                    .font(.system(size: 12, weight: .regular))
+                    .foregroundColor(Color(red: 0.431, green: 0.518, blue: 0.451))
+                    .padding(.top, geo.size.height * 0.5475)
+            }
+            .frame(width: geo.size.width, height: geo.size.height)
+        }
+        .ignoresSafeArea()
+        .background(Color(red: 0.9686, green: 0.9608, blue: 0.9412))
+        .onAppear {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.44) {
+                withAnimation(.linear(duration: 0.06)) {
+                    isPresented = false
+                }
+            }
+        }
     }
 }
 
