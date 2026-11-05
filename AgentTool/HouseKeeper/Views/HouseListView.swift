@@ -2182,6 +2182,7 @@ struct HouseListView: View {
             Task { await VideoOnlyShare.saveToAlbumQuietly(flat) }
         }
     }
+}
 
 // MARK: - 多选分享步骤（sheet(item:) 依次弹分享面板）
 
