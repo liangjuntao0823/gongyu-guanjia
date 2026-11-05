@@ -4,6 +4,7 @@ import CryptoKit
 import Security
 import UIKit
 import AVFoundation
+import CoreImage
 import SwiftUI
 import WebKit
 
@@ -1389,8 +1390,10 @@ enum CosUploader {
         var media = "<h2 class=\"sec\">实拍 · 点击放大</h2><div class=\"media\">"
         for tag in videoTags { media += tag }
         // v1.25：图片用 <img> 渲染（修复空白），img 自身 pointer-events:none + 外层 div 点击放大——防长按保存
+        // v2.15：首屏前 3 张立即加载，其余 loading="lazy"——滚动到才下载，避免一打开把十几张图全拉下来
         for (offset, url) in imageURLs.enumerated() {
-            media += "<div class=\"cellwrap\" onclick=\"openImg(\(startIndex + offset))\"><img class=\"cell\" src=\"\(url)\" draggable=\"false\" alt=\"\">\(wm)</div>"
+            let loadAttr = offset < 3 ? "loading=\"eager\"" : "loading=\"lazy\""
+            media += "<div class=\"cellwrap\" onclick=\"openImg(\(startIndex + offset))\"><img class=\"cell\" src=\"\(url)\" \(loadAttr) decoding=\"async\" draggable=\"false\" alt=\"\">\(wm)</div>"
         }
         media += "</div>"
         parts.append(media)
@@ -1420,8 +1423,10 @@ enum CosUploader {
     private static func mediaBlockHTML(videoTags: [String], imageURLs: [String], wm: String = "") -> String {
         var parts: [String] = []
         for tag in videoTags { parts.append(tag) }
+        // v2.15：同 collectionDetailHTML，首屏 3 张立即加载、其余懒加载
         for (index, url) in imageURLs.enumerated() {
-            parts.append("<div class=\"cellwrap\" onclick=\"openImg(\(index))\"><img class=\"cell\" src=\"\(url)\" draggable=\"false\" alt=\"\">\(wm)</div>")
+            let loadAttr = index < 3 ? "loading=\"eager\"" : "loading=\"lazy\""
+            parts.append("<div class=\"cellwrap\" onclick=\"openImg(\(index))\"><img class=\"cell\" src=\"\(url)\" \(loadAttr) decoding=\"async\" draggable=\"false\" alt=\"\">\(wm)</div>")
         }
         guard !parts.isEmpty else { return "" }
         return "<div class=\"media\">" + parts.joined(separator: "") + "</div>"
@@ -1879,22 +1884,180 @@ enum CosUploader {
 
     // MARK: - v1.23 分享时压缩（视频 720p / 图片轻压缩）
 
-    /// 视频压缩到 720p（H.264 mp4，shouldOptimizeForNetworkUse 利于在线播放）。
-    /// 源分辨率低于 720p 时导出保持源分辨率（preset 为上限不放大）；压缩失败返回 nil，调用方回退原文件。
+    /// v2.15：视频压缩对齐实测样本参数——长边 960（横屏 960×540、竖屏 540×960）、H.264 平均码率 1.0 Mbps、
+    /// AAC 96 kbps、faststart。旧实现用 AVAssetExportSession 的 1280x720 预设，只降分辨率不控码率，
+    /// 28 秒素材仍输出 9.6 Mbps / 34MB；新实现同素材约 3.9MB（约原来的 1/9）。
+    /// 源视频长边不足 960 时不放大；压缩失败返回 nil，调用方回退原文件。
     private static func compressedVideoData(from url: URL) async -> Data? {
         let asset = AVURLAsset(url: url)
-        guard let export = AVAssetExportSession(asset: asset, presetName: AVAssetExportPreset1280x720) else { return nil }
         let temp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".mp4")
-        export.outputURL = temp
-        export.outputFileType = .mp4
-        export.shouldOptimizeForNetworkUse = true
-        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
-            export.exportAsynchronously {
-                cont.resume()
+        defer { try? FileManager.default.removeItem(at: temp) }
+
+        guard let videoTrack = (try? await asset.loadTracks(withMediaType: .video))?.first else { return nil }
+        let naturalSize = (try? await videoTrack.load(.naturalSize)) ?? CGSize(width: 1280, height: 720)
+        let transform = (try? await videoTrack.load(.preferredTransform)) ?? .identity
+        let duration = (try? await asset.load(.duration)) ?? CMTime(value: 1, timescale: 1)
+        let nominalFPS = (try? await videoTrack.load(.nominalFrameRate)) ?? 30
+        let audioTrack = (try? await asset.loadTracks(withMediaType: .audio))?.first
+
+        let longSide = max(naturalSize.width, naturalSize.height)
+        guard longSide > 0 else { return nil }
+        let shrink = min(960.0 / Double(longSide), 1.0)
+        var outW = Int((Double(naturalSize.width) * shrink).rounded())
+        var outH = Int((Double(naturalSize.height) * shrink).rounded())
+        outW -= outW % 2
+        outH -= outH % 2
+        outW = max(outW, 2)
+        outH = max(outH, 2)
+
+        // 码率按像素面积等比缩放：960×540 = 1.0 Mbps，更小的片子相应降低，下限 400 kbps
+        let pixelRatio = min(Double(outW * outH) / Double(960 * 540), 1.0)
+        let videoBitrate = max(Int(1_000_000 * pixelRatio), 400_000)
+        let fps = nominalFPS > 1 ? max(Int(nominalFPS.rounded()), 15) : 30
+
+        let videoSettings: [String: Any] = [
+            AVVideoCodecKey: AVVideoCodecType.h264,
+            AVVideoWidthKey: outW,
+            AVVideoHeightKey: outH,
+            AVVideoCompressionPropertiesKey: [
+                AVVideoAverageBitRateKey: videoBitrate,
+                AVVideoMaxKeyFrameIntervalKey: fps * 2,
+                AVVideoProfileLevelKey: AVVideoProfileLevelH264HighAutoLevel,
+                AVVideoExpectedSourceFrameRateKey: fps,
+                AVVideoAllowFrameReorderingKey: true
+            ] as [String: Any]
+        ]
+
+        guard let writer = try? AVAssetWriter(outputURL: temp, fileType: .mp4),
+              let reader = try? AVAssetReader(asset: asset) else { return nil }
+        writer.shouldOptimizeForNetworkUse = true
+
+        let videoInput = AVAssetWriterInput(mediaType: .video, outputSettings: videoSettings)
+        videoInput.expectsMediaDataInRealTime = false
+        videoInput.transform = transform
+        guard writer.canAdd(videoInput) else { return nil }
+        writer.add(videoInput)
+
+        let adaptor = AVAssetWriterInputPixelBufferAdaptor(
+            assetWriterInput: videoInput,
+            sourcePixelBufferAttributes: [
+                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+                kCVPixelBufferWidthKey as String: outW,
+                kCVPixelBufferHeightKey as String: outH
+            ] as [String: Any]
+        )
+
+        let videoOutput = AVAssetReaderTrackOutput(
+            track: videoTrack,
+            outputSettings: [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA]
+        )
+        videoOutput.alwaysCopiesSampleData = false
+        guard reader.canAdd(videoOutput) else { return nil }
+        reader.add(videoOutput)
+
+        // 音频同样按样本参数重编码：解成 PCM → AAC 96 kbps
+        var audioInput: AVAssetWriterInput?
+        var audioOutput: AVAssetReaderTrackOutput?
+        if let audioTrack {
+            let pcmSettings: [String: Any] = [
+                AVFormatIDKey: kAudioFormatLinearPCM,
+                AVNumberOfChannelsKey: 2,
+                AVSampleRateKey: 44100,
+                AVLinearPCMBitDepthKey: 16,
+                AVLinearPCMIsFloatKey: false,
+                AVLinearPCMIsBigEndianKey: false,
+                AVLinearPCMIsNonInterleaved: false
+            ]
+            let aacSettings: [String: Any] = [
+                AVFormatIDKey: kAudioFormatMPEG4AAC,
+                AVNumberOfChannelsKey: 2,
+                AVSampleRateKey: 44100,
+                AVEncoderBitRateKey: 96_000
+            ]
+            let out = AVAssetReaderTrackOutput(track: audioTrack, outputSettings: pcmSettings)
+            out.alwaysCopiesSampleData = false
+            let input = AVAssetWriterInput(mediaType: .audio, outputSettings: aacSettings)
+            input.expectsMediaDataInRealTime = false
+            if reader.canAdd(out), writer.canAdd(input) {
+                reader.add(out)
+                writer.add(input)
+                audioOutput = out
+                audioInput = input
             }
         }
-        defer { try? FileManager.default.removeItem(at: temp) }
-        guard export.status == .completed, let data = try? Data(contentsOf: temp) else { return nil }
+
+        guard writer.startWriting(), reader.startReading() else { return nil }
+        writer.startSession(atSourceTime: .zero)
+
+        let ciContext = CIContext(options: [.cacheIntermediates: false])
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let outRect = CGRect(x: 0, y: 0, width: outW, height: outH)
+
+        let finished = await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
+            DispatchQueue(label: "cos.video.compress").async {
+                var ok = true
+                let deadline = Date().addingTimeInterval(900)
+
+                func drainAudio() {
+                    guard let input = audioInput, let output = audioOutput else { return }
+                    while input.isReadyForMoreMediaData, let sample = output.copyNextSampleBuffer() {
+                        if !input.append(sample) {
+                            ok = false
+                            return
+                        }
+                    }
+                }
+
+                while ok {
+                    if Date() > deadline {
+                        ok = false
+                        break
+                    }
+                    if !videoInput.isReadyForMoreMediaData {
+                        drainAudio()
+                        Thread.sleep(forTimeInterval: 0.002)
+                        continue
+                    }
+                    guard let sample = videoOutput.copyNextSampleBuffer() else { break }
+                    autoreleasepool {
+                        guard let srcBuffer = CMSampleBufferGetImageBuffer(sample),
+                              let pool = adaptor.pixelBufferPool else {
+                            ok = false
+                            return
+                        }
+                        var dstRef: CVPixelBuffer?
+                        guard CVPixelBufferPoolCreatePixelBuffer(nil, pool, &dstRef) == kCVReturnSuccess,
+                              let dst = dstRef else {
+                            ok = false
+                            return
+                        }
+                        let sourceImage = CIImage(cvPixelBuffer: srcBuffer)
+                        let scaleX = CGFloat(outW) / CGFloat(CVPixelBufferGetWidth(srcBuffer))
+                        let scaleY = CGFloat(outH) / CGFloat(CVPixelBufferGetHeight(srcBuffer))
+                        let scaled = sourceImage.transformed(by: CGAffineTransform(scaleX: scaleX, y: scaleY))
+                        ciContext.render(scaled, to: dst, bounds: outRect, colorSpace: colorSpace)
+                        if !adaptor.append(dst, withPresentationTime: CMSampleBufferGetPresentationTimeStamp(sample)) {
+                            ok = false
+                        }
+                    }
+                    drainAudio()
+                }
+
+                videoInput.markAsFinished()
+                audioInput?.markAsFinished()
+                if ok, writer.status == .writing {
+                    writer.endSession(atSourceTime: duration)
+                    writer.finishWriting {
+                        cont.resume(returning: writer.status == .completed)
+                    }
+                } else {
+                    writer.cancelWriting()
+                    reader.cancelReading()
+                    cont.resume(returning: false)
+                }
+            }
+        }
+        guard finished, let data = try? Data(contentsOf: temp) else { return nil }
         return data
     }
 
