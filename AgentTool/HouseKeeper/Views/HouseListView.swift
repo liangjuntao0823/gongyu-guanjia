@@ -1,4 +1,5 @@
 import SwiftUI
+import AVFoundation
 import SwiftData
 
 /// b106：房源排序三档——默认（座号/楼层/房号）/ 价格升序 / 更新时间降序
@@ -93,7 +94,8 @@ struct HouseListView: View {
     // 不再逐套生成链接逐次弹微信，避免 App 与微信来回跳转
     @State private var isSelecting = false
     @State private var selectedHouseIDs = Set<UUID>()
-    @State private var shareQueue: [URL] = []
+    // v2.17：队列元素从「卡片链接」扩展为任意分享素材（卡片 = [URL]，只分享视频 = [AVAsset]）
+    @State private var shareQueue: [[Any]] = []
     @State private var shareIndex = 0
     @State private var currentShareStep: ShareStep? = nil
     @State private var isGenerating = false
@@ -308,10 +310,14 @@ struct HouseListView: View {
                 case .multiShare:
                     Button("发给客户（隐藏版）") { generateShareQueue(mode: .masked) }
                     Button("发给同事（完整版）") { generateShareQueue(mode: .full) }
+                    // v2.17：只分享视频——不走云端卡片，直接按视频消息发（每套一次，微信收到即可播放）
+                    Button("只分享视频（\(selectedHouseIDs.count) 套）") { generateVideoOnlyShare() }
                     Button("取消", role: .cancel) {}
                 case .singleShare:
                     Button("发给客户（隐藏版）") { generateSingleShare(mode: .masked) }
                     Button("发给同事（完整版）") { generateSingleShare(mode: .full) }
+                    // v2.17：只分享视频——不生成卡片，直接按视频消息发
+                    Button("只分享视频") { generateSingleVideoShare() }
                     Button("取消", role: .cancel) {}
                 case nil:
                     EmptyView()
@@ -358,12 +364,12 @@ struct HouseListView: View {
                 // 上一张分享面板关闭后自动弹下一张；全部发完自动退出多选
                 if shareIndex < shareQueue.count - 1 {
                     shareIndex += 1
-                    currentShareStep = ShareStep(url: shareQueue[shareIndex])
+                    currentShareStep = ShareStep(items: shareQueue[shareIndex])
                 } else {
                     exitMultiSelect()
                 }
             }) { step in
-                HouseShareSheet(items: [step.url])
+                HouseShareSheet(items: step.items)
             }
             .overlay {
                 if isGenerating {
@@ -1969,6 +1975,39 @@ struct HouseListView: View {
 
     /// v1.7：卡片左滑「分享」→ 单套分享卡片（脱敏 / 完整），生成链接后弹系统分享面板
     /// 注意：Task 内只传值类型，绝不直接访问 SwiftData @Model（跨线程读取模型会闪退）
+    /// v2.17：列表页单套 → 只分享视频（不走云端卡片，不需要 COS 配置）
+    private func generateSingleVideoShare() {
+        guard let house = singleShareHouse else { return }
+        let urls = house.videos
+            .map { MediaStore.url(for: $0.fileName, roomKey: house.mediaRoomKey) }
+            .filter { FileManager.default.fileExists(atPath: $0.path) }
+        guard !urls.isEmpty else {
+            infoMessage = "这套房源没有可分享的视频；视频若还在云端，先下载到本地再分享"
+            showInfoAlert = true
+            singleShareHouse = nil
+            return
+        }
+        isGenerating = true
+        generateTip = "正在准备视频…"
+        generateProgress = 0
+        Task {
+            let assets = await VideoOnlyShare.prepareAssets(from: urls)
+            await VideoOnlyShare.saveToAlbumQuietly(urls)
+            await MainActor.run {
+                isGenerating = false
+                singleShareHouse = nil
+                guard !assets.isEmpty else {
+                    infoMessage = "视频文件缺失，无法分享"
+                    showInfoAlert = true
+                    return
+                }
+                shareQueue = [assets as [Any]]
+                shareIndex = 0
+                currentShareStep = ShareStep(items: assets)
+            }
+        }
+    }
+
     private func generateSingleShare(mode: ShareMode) {
         guard let house = singleShareHouse else { return }
         guard let config = CosConfig.load(), config.isValid else {
@@ -2004,9 +2043,9 @@ struct HouseListView: View {
                 }
                 await MainActor.run {
                     isGenerating = false
-                    shareQueue = [url]
+                    shareQueue = [[url]]
                     shareIndex = 0
-                    currentShareStep = ShareStep(url: url)
+                    currentShareStep = ShareStep(items: [url])
                     singleShareHouse = nil
                 }
             } catch {
@@ -2080,9 +2119,9 @@ struct HouseListView: View {
                 }
                 await MainActor.run {
                     isGenerating = false
-                    shareQueue = [url]
+                    shareQueue = [[url]]
                     shareIndex = 0
-                    currentShareStep = ShareStep(url: url)
+                    currentShareStep = ShareStep(items: [url])
                 }
             } catch {
                 await MainActor.run {
@@ -2095,11 +2134,60 @@ struct HouseListView: View {
     }
 }
 
+    /// v2.17：多选 → 只分享视频（不走云端卡片，不需要 COS 配置）。逐套组装视频素材，每套弹一次系统面板。
+    /// 微信收到的是视频消息（有缩略图、点开直接播放），不再是文件附件；同时在相册留一份副本兜底。
+    private func generateVideoOnlyShare() {
+        let selected = houses.filter { selectedHouseIDs.contains($0.id) }
+        let sortedSelected = selected.sorted { a, b in
+            if a.tower != b.tower { return a.tower < b.tower }
+            if a.floorNumber != b.floorNumber { return a.floorNumber < b.floorNumber }
+            if a.roomNumber != b.roomNumber { return a.roomNumber < b.roomNumber }
+            return a.roomNo < b.roomNo
+        }
+        // 主线程先取本地视频地址（Task 内不再触碰 SwiftData 模型）
+        let videoURLs: [[URL]] = sortedSelected.map { house in
+            house.videos
+                .map { MediaStore.url(for: $0.fileName, roomKey: house.mediaRoomKey) }
+                .filter { FileManager.default.fileExists(atPath: $0.path) }
+        }.filter { !$0.isEmpty }
+        guard !videoURLs.isEmpty else {
+            infoMessage = "选中的房源没有可分享的视频；视频若还在云端，先下载到本地再分享"
+            showInfoAlert = true
+            return
+        }
+        isGenerating = true
+        generateTip = "正在准备视频（共 \(videoURLs.count) 套）…"
+        generateProgress = 0
+        Task {
+            var steps: [[Any]] = []
+            for (i, urls) in videoURLs.enumerated() {
+                let assets = await VideoOnlyShare.prepareAssets(from: urls)
+                await VideoOnlyShare.saveToAlbumQuietly(urls)
+                if !assets.isEmpty { steps.append(assets as [Any]) }
+                await MainActor.run { self.generateProgress = Double(i + 1) / Double(videoURLs.count) }
+            }
+            await MainActor.run {
+                isGenerating = false
+                guard !steps.isEmpty else {
+                    infoMessage = "视频文件缺失，无法分享"
+                    showInfoAlert = true
+                    return
+                }
+                shareQueue = steps
+                shareIndex = 0
+                currentShareStep = ShareStep(items: steps[0])
+            }
+        }
+    }
+
 // MARK: - 多选分享步骤（sheet(item:) 依次弹分享面板）
 
 struct ShareStep: Identifiable {
     let id = UUID()
-    let url: URL
+    // v2.17：卡片分享塞链接、只分享视频塞视频素材，统一走同一个系统分享面板
+    let items: [Any]
+    init(items: [Any]) { self.items = items }
+    init(url: URL) { self.items = [url] }
 }
 
 // MARK: - List 滚动偏移监听（b106：房源列表下滑折叠头部、上滑展开）

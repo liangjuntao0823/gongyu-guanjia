@@ -1,6 +1,7 @@
 import SwiftUI
 import SwiftData
 import AVKit
+import AVFoundation
 import Photos
 
 struct HouseDetailView: View {
@@ -36,6 +37,8 @@ struct HouseDetailView: View {
     @State private var isSharing = false           // 生成分享卡片中
     @State private var shareProgress = 0.0         // v1.13 需求13：上传百分比进度
     @State private var shareError: String?
+    // v2.17：只分享视频——准备中（转 mp4 + 相册留副本）
+    @State private var isPreparingVideo = false
     // v1.15 需求1：一键保存到相册（独立状态，避免与多选「保存选中」的 saveTip/alert 冲突）
     @State private var showSaveConfirm = false
     @State private var isSavingMedia = false
@@ -89,9 +92,27 @@ struct HouseDetailView: View {
             }
         }
     }
-    @ViewBuilder private var saveOverlayView: some View {
-        if isSavingMedia {
+    /// v2.17：只分享视频准备中（转 mp4 + 相册留副本，通常 1～3 秒）
+    @ViewBuilder private var videoPrepareOverlay: some View {
+        if isPreparingVideo {
             ZStack {
+                Color.black.opacity(0.35).ignoresSafeArea()
+                VStack(spacing: 12) {
+                    ProgressView()
+                        .tint(.white)
+                    Text("正在准备视频…")
+                        .font(.footnote)
+                        .foregroundColor(.white)
+                }
+                .padding(20)
+                .background(Color.black.opacity(0.6))
+                .clipShape(RoundedRectangle(cornerRadius: 14))
+            }
+        }
+    }
+
+    @ViewBuilder private var saveOverlayView: some View {
+        if isSavingMedia {            ZStack {
                 Color.black.opacity(0.35).ignoresSafeArea()
                 VStack(spacing: 12) {
                     ProgressView()
@@ -172,9 +193,11 @@ struct HouseDetailView: View {
                 // v1.21：脱敏版隐藏房号/价格/房东，发给找房客户；完整版显示全部信息，发给同事
                 Button("发给客户（隐藏版）") { startShare(mode: .masked) }
                 Button("发给同事（完整版）") { startShare(mode: .full) }
+                // v2.17：只分享视频——不生成云端卡片，直接把视频按「视频消息」发出去（微信收到可播放）
+                Button("只分享视频") { startVideoOnlyShare() }
                 Button("取消", role: .cancel) {}
             } message: {
-                Text("隐藏版只显示户型、位置和您的联系方式；完整版额外显示房号、价格、房东和密码。")
+                Text("隐藏版只显示户型、位置和您的联系方式；完整版额外显示房号、价格、房东和密码；只分享视频 = 直接把视频发到微信，好友收到即可播放，不需要备案域名。")
             }
             // v1.15 需求1：一键保存确认（显示将保存的照片/视频数量）
             .confirmationDialog("保存到手机相册？", isPresented: $showSaveConfirm, titleVisibility: .visible) {
@@ -192,6 +215,10 @@ struct HouseDetailView: View {
             // v1.15 需求1：一键保存中 + 保存完成提示（overlay 卡片，不占 alert 链，避开 iOS 17 多弹窗覆盖问题）
             .overlay {
                 saveOverlayView
+            }
+            // v2.17：只分享视频的准备中提示
+            .overlay {
+                videoPrepareOverlay
             }
     }
 
@@ -882,6 +909,35 @@ struct HouseDetailView: View {
             return
         }
         showShareModePicker = true
+    }
+
+    /// v2.17：只分享视频——不走云端卡片（无需备案域名、无需 COS 配置）。
+    /// 把本地视频转成 mp4 后以「视频素材」交给系统分享面板，微信按视频消息接收（有缩略图、可播放）；
+    /// 同时在相册留一份副本，万一某个微信版本仍按文件接收，可从相册再发一次。
+    private func startVideoOnlyShare() {
+        ensureLocalMedia {
+            let urls = house.videos
+                .map { MediaStore.url(for: $0.fileName, roomKey: house.mediaRoomKey) }
+                .filter { FileManager.default.fileExists(atPath: $0.path) }
+            guard !urls.isEmpty else {
+                shareError = "这套房源没有可分享的视频"
+                return
+            }
+            isPreparingVideo = true
+            Task {
+                let assets = await VideoOnlyShare.prepareAssets(from: urls)
+                await VideoOnlyShare.saveToAlbumQuietly(urls)
+                await MainActor.run {
+                    isPreparingVideo = false
+                    guard !assets.isEmpty else {
+                        shareError = "视频文件缺失，无法分享"
+                        return
+                    }
+                    shareItems = assets
+                    showShare = true
+                }
+            }
+        }
     }
 
     /// 按模式生成分享卡片链接并弹系统分享面板

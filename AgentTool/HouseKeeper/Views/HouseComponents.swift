@@ -1,6 +1,7 @@
 import SwiftUI
 import UIKit
 import AVKit
+import AVFoundation
 import Photos
 
 // MARK: - 主题色（合体后统一跟随主 App 深绿主题：主题绿主色 + 主题绿强调 + 统一底色）
@@ -522,5 +523,64 @@ struct EmptyStateView: View {
         // 首页内容块不再整体收缩被居中顶到页面中间（修复「搜索无结果时空态下沉」）
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(.horizontal, 32)
+    }
+}
+
+// MARK: - v2.17：只分享视频（微信按视频消息接收，收到即显示缩略图、点开直接播放）
+
+/// 系统分享面板把「文件地址」交给微信时，微信只当文件附件；只有给视频素材（AVAsset）且容器是 mp4，
+/// 微信才按视频消息处理。这里统一做三件事：转 mp4（mov 也能播）、组装素材、顺手在相册留一份兜底。
+enum VideoOnlyShare {
+    /// 本地视频 → 可直接分享的 mp4 素材（已是 mp4 直接用；mov 先无损转封装）
+    static func prepareAssets(from urls: [URL]) async -> [AVURLAsset] {
+        var assets: [AVURLAsset] = []
+        for url in urls {
+            guard FileManager.default.fileExists(atPath: url.path) else { continue }
+            if url.pathExtension.lowercased() == "mp4" {
+                assets.append(AVURLAsset(url: url))
+                continue
+            }
+            if let mp4 = await exportMP4(from: url) {
+                assets.append(AVURLAsset(url: mp4))
+            } else {
+                assets.append(AVURLAsset(url: url))   // 转封装失败：退回原文件，不让分享中断
+            }
+        }
+        return assets
+    }
+
+    /// 静默在系统相册留一份（只申请新增权限）；用户拒绝或保存失败都不打断分享
+    static func saveToAlbumQuietly(_ urls: [URL]) async {
+        guard !urls.isEmpty else { return }
+        let status = await PHPhotoLibrary.requestAuthorization(for: .addOnly)
+        guard status == .authorized || status == .limited else { return }
+        try? await PHPhotoLibrary.shared().performChanges {
+            for url in urls {
+                PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: url)
+            }
+        }
+    }
+
+    /// mov → mp4：先 passthrough（不重编码、秒级完成、画质零损失），不适用时回退最高质量重编码
+    private static func exportMP4(from url: URL) async -> URL? {
+        let asset = AVURLAsset(url: url)
+        let out = FileManager.default.temporaryDirectory
+            .appendingPathComponent("share_video_\(UUID().uuidString).mp4")
+        for preset in [AVAssetExportPresetPassthrough, AVAssetExportPresetHighestQuality] {
+            guard let session = AVAssetExportSession(asset: asset, presetName: preset) else { continue }
+            if FileManager.default.fileExists(atPath: out.path) {
+                try? FileManager.default.removeItem(at: out)
+            }
+            session.outputURL = out
+            session.outputFileType = .mp4
+            session.shouldOptimizeForNetworkUse = true
+            await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+                session.exportAsynchronously { cont.resume() }
+            }
+            if session.status == .completed, FileManager.default.fileExists(atPath: out.path) {
+                return out
+            }
+        }
+        return nil
     }
 }
