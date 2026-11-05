@@ -2,6 +2,7 @@ import SwiftUI
 import UIKit
 import AVKit
 import AVFoundation
+import UniformTypeIdentifiers
 import Photos
 
 // MARK: - 主题色（合体后统一跟随主 App 深绿主题：主题绿主色 + 主题绿强调 + 统一底色）
@@ -549,6 +550,21 @@ enum VideoOnlyShare {
             }
         }
         return files
+    }
+
+    /// 把 mp4 文件包成「影片」类型的分享项：系统按类型标签匹配微信扩展，
+    /// 只给文件地址时微信拿到的是「文件」标签，就当附件发；显式声明 public.movie 才按视频消息发。
+    static func movieItems(from files: [URL]) -> [NSItemProvider] {
+        files.map { url in
+            let provider = NSItemProvider()
+            provider.registerFileRepresentation(forTypeIdentifier: UTType.movie.identifier,
+                                                fileOptions: [],
+                                                visibility: .all) { completion in
+                completion(url, false, nil)
+                return nil
+            }
+            return provider
+        }
     }
 
     /// 静默在系统相册留一份（只申请新增权限）。

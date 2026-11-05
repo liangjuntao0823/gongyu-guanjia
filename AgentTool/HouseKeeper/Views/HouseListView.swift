@@ -2001,9 +2001,9 @@ struct HouseListView: View {
                     showInfoAlert = true
                     return
                 }
-                shareQueue = [files as [Any]]
+                shareQueue = [VideoOnlyShare.movieItems(from: files) as [Any]]
                 shareIndex = 0
-                currentShareStep = ShareStep(items: files)
+                currentShareStep = ShareStep(items: VideoOnlyShare.movieItems(from: files))
             }
         }
     }
@@ -2162,7 +2162,7 @@ struct HouseListView: View {
             for (i, urls) in videoURLs.enumerated() {
                 let files = await VideoOnlyShare.prepareFiles(from: urls)
                 await VideoOnlyShare.saveToAlbumQuietly(urls)
-                if !files.isEmpty { steps.append(files as [Any]) }
+                if !files.isEmpty { steps.append(VideoOnlyShare.movieItems(from: files) as [Any]) }
                 await MainActor.run { self.generateProgress = Double(i + 1) / Double(videoURLs.count) }
             }
             await MainActor.run {

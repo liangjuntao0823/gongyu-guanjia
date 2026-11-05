@@ -933,7 +933,7 @@ struct HouseDetailView: View {
                         shareError = "视频文件缺失，无法分享"
                         return
                     }
-                    shareItems = files
+                    shareItems = VideoOnlyShare.movieItems(from: files)
                     showShare = true
                 }
             }
