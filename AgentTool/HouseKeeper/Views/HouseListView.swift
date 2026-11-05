@@ -2133,8 +2133,8 @@ struct HouseListView: View {
         }
     }
 
-    /// v2.17：多选 → 只分享视频（不走云端卡片，不需要 COS 配置）。逐套组装视频素材，每套弹一次系统面板。
-    /// 微信收到的是视频消息（有缩略图、点开直接播放），不再是文件附件；同时在相册留一份副本兜底。
+    /// v2.17：多选 → 只分享视频，一次面板发完（微信端连续收到多条视频消息）。
+    /// 微信单次最多接 9 条视频，超过 9 个自动拆成 2 次面板，避免整批发不出去。
     private func generateVideoOnlyShare() {
         let selected = houses.filter { selectedHouseIDs.contains($0.id) }
         let sortedSelected = selected.sorted { a, b in
@@ -2143,42 +2143,45 @@ struct HouseListView: View {
             if a.roomNumber != b.roomNumber { return a.roomNumber < b.roomNumber }
             return a.roomNo < b.roomNo
         }
-        // 主线程先取本地视频地址（Task 内不再触碰 SwiftData 模型）
+        // 主线程先按排序收集视频地址（Task 内不再触碰 SwiftData 模型）
         let videoURLs: [[URL]] = sortedSelected.map { house in
             house.videos
                 .map { MediaStore.url(for: $0.fileName, roomKey: house.mediaRoomKey) }
                 .filter { FileManager.default.fileExists(atPath: $0.path) }
         }.filter { !$0.isEmpty }
-        guard !videoURLs.isEmpty else {
+        let flat = videoURLs.flatMap { $0 }
+        guard !flat.isEmpty else {
             infoMessage = "选中的房源没有可分享的视频；视频若还在云端，先下载到本地再分享"
             showInfoAlert = true
             return
         }
         isGenerating = true
-        generateTip = "正在准备视频（共 \(videoURLs.count) 套）…"
+        generateTip = "正在准备视频（\(videoURLs.count) 套 / \(flat.count) 个）…"
         generateProgress = 0
         Task {
-            var steps: [[Any]] = []
-            for (i, urls) in videoURLs.enumerated() {
-                let files = await VideoOnlyShare.prepareFiles(from: urls)
-                await VideoOnlyShare.saveToAlbumQuietly(urls)
-                if !files.isEmpty { steps.append(VideoOnlyShare.movieItems(from: files) as [Any]) }
-                await MainActor.run { self.generateProgress = Double(i + 1) / Double(videoURLs.count) }
-            }
+            let files = await VideoOnlyShare.prepareFiles(from: flat)
             await MainActor.run {
                 isGenerating = false
-                guard !steps.isEmpty else {
+                guard !files.isEmpty else {
                     infoMessage = "视频文件缺失，无法分享"
                     showInfoAlert = true
                     return
                 }
-                shareQueue = steps
+                var batches: [[Any]] = []
+                var rest = files
+                while !rest.isEmpty {
+                    let chunk = Array(rest.prefix(9))
+                    rest.removeFirst(chunk.count)
+                    batches.append(VideoOnlyShare.movieItems(from: chunk) as [Any])
+                }
+                shareQueue = batches
                 shareIndex = 0
-                currentShareStep = ShareStep(items: steps[0])
+                currentShareStep = ShareStep(items: batches[0])
             }
+            // 相册副本后台补存，不拖慢分享
+            Task { await VideoOnlyShare.saveToAlbumQuietly(flat) }
         }
     }
-}
 
 // MARK: - 多选分享步骤（sheet(item:) 依次弹分享面板）
 
