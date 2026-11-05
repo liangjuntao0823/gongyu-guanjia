@@ -177,46 +177,50 @@ final class AjkWebViewProvider: NSObject, WKNavigationDelegate {
           var out = {type:'page', overview: bodyText, cards: cards, page: 1};
           window.webkit.messageHandlers.ajkScrape.postMessage(JSON.stringify(out));
           // 自动翻页：点"下一页"直到没有或达到上限
-          // v2.13：点之前先确认「下一页」真的可用（可见 + 自身/祖先带 disabled 视作最后一页 + 总页数已到），
-          // 避免列表只有 2 页时点到不存在的第 3 页导致整页跳转、脚本上下文被销毁后干等到超时。
+          // v2.13：按安居客真实分页（Ant Design：li.ant-pagination-next > button > span("下一页")）取点击目标。
+          // span 自身 pointer-events:none，点它无效，必须点上层的 button；
+          // 是否最后一页只认 aria-disabled="true" / disabled 类，不能用 pointer-events 判断。
+          function pickClickable(el) {
+            var p = el;
+            while (p && p.tagName !== 'BODY') {
+              if (p.tagName === 'BUTTON' || p.tagName === 'A') return p;
+              p = p.parentElement;
+            }
+            return el;
+          }
           function isDeadNext(el) {
             var node = el, depth = 0;
-            while (node && depth < 6) {
-              var cls = (node.className && node.className.toString()) ? node.className.toString() : '';
-              if (cls.toLowerCase().indexOf('disab') >= 0) return true;
-              if (node.getAttribute && (node.getAttribute('aria-disabled') === 'true' || node.hasAttribute('disabled'))) return true;
+            while (node && depth < 5) {
+              var cls = (node.className && node.className.toString()) ? node.className.toString().toLowerCase() : '';
+              if (cls.indexOf('disabled') >= 0) return true;
+              if (node.getAttribute && node.getAttribute('aria-disabled') === 'true') return true;
+              if (node.hasAttribute && node.hasAttribute('disabled')) return true;
               node = node.parentElement; depth++;
             }
-            try {
-              var st = window.getComputedStyle(el);
-              if (st && (st.pointerEvents === 'none' || st.visibility === 'hidden' || parseFloat(st.opacity) === 0)) return true;
-            } catch (e) {}
             return false;
           }
           function findNext() {
-            var nodes = document.querySelectorAll('a, button, span, div');
+            var nodes = document.querySelectorAll('a, button, span, div, li');
             for (var i = 0; i < nodes.length; i++) {
               var el = nodes[i];
               if (norm(el.textContent) !== '下一页') continue;
-              var innerHasSame = false;
-              for (var j = 0; j < el.children.length; j++) {
-                if (norm(el.children[j].textContent).indexOf('下一页') >= 0) { innerHasSame = true; break; }
-              }
-              if (innerHasSame) continue;                  // 只认最内层节点，避免点到外层容器
               var rect = el.getBoundingClientRect();
-              if (!rect || rect.width < 1 || rect.height < 1) continue;  // 隐藏模板/不可见不算
-              if (isDeadNext(el)) continue;                // 置灰的「下一页」= 已经是最后一页
-              return el;
+              if (!rect || rect.width < 1 || rect.height < 1) continue;
+              var click = pickClickable(el);
+              if (isDeadNext(click)) continue;
+              return click;
             }
             return null;
           }
           function totalPageCount() {
-            var t = norm(document.body ? (document.body.innerText || '') : '');
-            var m = t.match(/共\\s*(\\d+)\\s*页/);
-            if (m) return parseInt(m[1], 10);
-            m = t.match(/(\\d+)\\s*\\/\\s*(\\d+)\\s*页/);
-            if (m) return parseInt(m[2], 10);
-            return 0;
+            // 只认分页器上真实存在的页码（Ant 的 li[title="2"]），避免把正文里无关的"N页"当成总页数
+            var items = document.querySelectorAll('li[title], .ant-pagination-item');
+            var max = 0;
+            for (var i = 0; i < items.length; i++) {
+              var n = parseInt((items[i].getAttribute('title') || '').trim(), 10);
+              if (!isNaN(n) && n > max) max = n;
+            }
+            return max;
           }
           var page = 1;
           var maxP = \(maxPages);
