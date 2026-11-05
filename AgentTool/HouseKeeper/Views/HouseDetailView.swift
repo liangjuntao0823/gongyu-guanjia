@@ -926,7 +926,6 @@ struct HouseDetailView: View {
             isPreparingVideo = true
             Task {
                 let files = await VideoOnlyShare.prepareFiles(from: urls)
-                await VideoOnlyShare.saveToAlbumQuietly(urls)
                 await MainActor.run {
                     isPreparingVideo = false
                     guard !files.isEmpty else {

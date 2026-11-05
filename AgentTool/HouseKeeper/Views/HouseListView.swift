@@ -1992,7 +1992,6 @@ struct HouseListView: View {
         generateProgress = 0
         Task {
             let files = await VideoOnlyShare.prepareFiles(from: urls)
-            await VideoOnlyShare.saveToAlbumQuietly(urls)
             await MainActor.run {
                 isGenerating = false
                 singleShareHouse = nil
@@ -2177,8 +2176,6 @@ struct HouseListView: View {
                 shareIndex = 0
                 currentShareStep = ShareStep(items: batches[0])
             }
-            // 相册副本后台补存，不拖慢分享
-            Task { await VideoOnlyShare.saveToAlbumQuietly(flat) }
         }
     }
 }
