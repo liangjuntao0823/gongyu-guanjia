@@ -96,6 +96,9 @@ struct HouseListView: View {
     @State private var selectedHouseIDs = Set<UUID>()
     // v2.17：队列元素从「卡片链接」扩展为任意分享素材（卡片 = [URL]，只分享视频 = [AVAsset]）
     @State private var shareQueue: [[Any]] = []
+    // v2.17：多选逐套分享时，一套发完询问「继续下一套 / 结束」
+    @State private var showContinueShare = false
+    @State private var remainingShareCount = 0
     @State private var shareIndex = 0
     @State private var currentShareStep: ShareStep? = nil
     @State private var isGenerating = false
@@ -332,6 +335,18 @@ struct HouseListView: View {
                     Text("")
                 }
             }
+            // v2.17：多选逐套分享——继续 / 结束
+            .alert("还有 \(remainingShareCount) 套没发", isPresented: $showContinueShare) {
+                Button("继续发送下一套") {
+                    if shareIndex < shareQueue.count - 1 {
+                        shareIndex += 1
+                        currentShareStep = ShareStep(items: shareQueue[shareIndex])
+                    }
+                }
+                Button("结束分享", role: .cancel) { exitMultiSelect() }
+            } message: {
+                Text("发完在微信里不会自动跳回来。切回公寓管家后点「继续发送下一套」接着发；不想发了点「结束分享」。")
+            }
             // v1.16 需求2：分享错误 / 批量结果提示（单行文本，独立 alert）
             // v1.71（#95）：提示改由 MainTabView 的 GlobalAlertOverlay 全局呈现——
             // 此前挂在房源页，离开房源板块后「好」按钮被禁用变灰只能重启；现在任何页面都能点。
@@ -361,10 +376,11 @@ struct HouseListView: View {
                 Text(mediaSyncConfirmSummary())
             }
             .sheet(item: $currentShareStep, onDismiss: {
-                // 上一张分享面板关闭后自动弹下一张；全部发完自动退出多选
+                // v2.17：一套发完不再自动弹下一套（发完在微信里，自动弹你也看不到）。
+                // 还有待发就回来问一句，切回公寓管家点「继续」才发下一套。
                 if shareIndex < shareQueue.count - 1 {
-                    shareIndex += 1
-                    currentShareStep = ShareStep(items: shareQueue[shareIndex])
+                    remainingShareCount = shareQueue.count - shareIndex - 1
+                    showContinueShare = true
                 } else {
                     exitMultiSelect()
                 }
@@ -890,6 +906,17 @@ struct HouseListView: View {
                         .disabled(selectedHouseIDs.count == filteredHouses.count)
                     }
                     HStack(spacing: 10) {
+                        // v2.17：批量保存视频到相册——之后到微信聊天里「相册」多选一次发完
+                        Button {
+                            saveSelectedVideos()
+                        } label: {
+                            Text("保存")
+                                .font(.subheadline.weight(.semibold))
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.blue)
+                        .disabled(selectedHouseIDs.isEmpty)
                         // v1.12：批量已租——选中的待租房源一键标为已租（已租的保持不变）
                         Button {
                             batchSetRented()
@@ -2128,6 +2155,33 @@ struct HouseListView: View {
                     infoMessage = error.localizedDescription; showInfoAlert = true
                     exitMultiSelect()
                 }
+            }
+        }
+    }
+
+    /// v2.17：多选 → 批量把选中房源的视频存进相册（拍摄时间改成当前，图库最上面能直接看到）。
+    /// 之后到微信聊天里点 + → 相册，多选一次发完，不用一套一套弹分享面板。
+    private func saveSelectedVideos() {
+        let selected = houses.filter { selectedHouseIDs.contains($0.id) }
+        let urls = selected.flatMap { house in
+            house.videos
+                .map { MediaStore.url(for: $0.fileName, roomKey: house.mediaRoomKey) }
+                .filter { FileManager.default.fileExists(atPath: $0.path) }
+        }
+        guard !urls.isEmpty else {
+            infoMessage = "选中的房源没有可保存的视频；视频若还在云端，先下载到本地再保存"
+            showInfoAlert = true
+            return
+        }
+        isGenerating = true
+        generateTip = "正在保存视频到相册（共 \(urls.count) 个）…"
+        generateProgress = 0
+        Task {
+            await VideoOnlyShare.saveToAlbumQuietly(urls)
+            await MainActor.run {
+                isGenerating = false
+                infoMessage = "已保存 \(urls.count) 个视频到相册（图库最上面）。去微信聊天点 + → 相册，多选一次发完。"
+                showInfoAlert = true
             }
         }
     }
