@@ -37,6 +37,8 @@ struct HouseListView: View {
     }
 
     @State private var searchText = ""
+    /// v2.16：订阅卡片进度条——正在上传/同步的那套临时置顶，让高楼层的房源不用下滑才看到进度
+    @ObservedObject private var syncProgress = HouseSyncProgress.shared
     @State private var towerFilter: Int? = nil      // nil = 全部
     @State private var statusFilter: HouseStatus? = .available   // 首页默认显示待租房源
     @State private var layoutFilters: Set<String> = []   // v1.3：户型筛选支持多选，空 = 全部户型
@@ -117,7 +119,7 @@ struct HouseListView: View {
     /// v1.29（优化评估）：搜索/筛选在内存中进行。房源规模通常为个位数~几十套，
     /// 全量 @Query + 内存过滤即最优解；若未来房源破百再考虑把过滤下推到 SQLite（动态 @Query predicate）。
     private var filteredHouses: [House] {
-        houses
+        let base = houses
             .filter { house in
                 let matchSearch: Bool = {
                     guard !searchText.isEmpty else { return true }
@@ -153,6 +155,17 @@ struct HouseListView: View {
                 // 同座同层同号（如 1420上 / 1420下）：按原始房号字符串稳定排序
                 return a.roomNo < b.roomNo
             }
+
+        // v2.16：正在上传/云端同步的那套临时置顶（高楼层的房源不用下滑去找进度条）；
+        // 进度清空（HouseSyncProgress.end 后 roomKey 变 nil）自动回落到原排序，不改变任何排序规则
+        guard let activeKey = syncProgress.roomKey, !activeKey.isEmpty,
+              let activeIndex = base.firstIndex(where: { $0.mediaRoomKey == activeKey }) else {
+            return base
+        }
+        var list = base
+        let activeHouse = list.remove(at: activeIndex)
+        list.insert(activeHouse, at: 0)
+        return list
     }
 
     // v2.7（P2⑬ 户型筛选联动）：基于「已按座号+状态+搜索+无媒体过滤后」的结果取户型去重，
