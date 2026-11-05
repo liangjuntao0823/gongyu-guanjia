@@ -1,11 +1,11 @@
 //
 //  AjkPublic.swift
-//  公寓管家 · 安居客前台找房页读取（v2.2 b109）
-//  功能：App 内 WKWebView 手机 UA 打开用户提供的安居客找房链接（如 fs.zu.anjuke.com 精选页），
-//       注入 JS 收集第一页房源卡片文本 → Swift 宽松正则解析（标题/价格/位置/面积）→ 可点击跳详情
-//  已知约束：VM 云 IP 实测被安居客/58 反爬网关拦截（antibot verifycode）；App 内走用户手机网络大概率放行
-//       （与 58 m 站同理）。代码做可失败降级：弹验证码自动重试一次，仍失败提示稍后重试，不阻塞双 tab。
-//  安全：只读展示，不做任何写操作；仅用户主动点击读取；只抓第一页
+//  公寓管家 · 安居客前台找房页读取（v2.17 b138 重做）
+//  功能：App 内 WKWebView 手机 UA 打开安居客找房页（默认 m.anjuke.com/fs/rent/?q=关键词），
+//        优先读取页面内嵌 JSON-LD 结构化数据（标题/价格/面积/户型/朝向/楼层/小区/封面/详情链接），
+//        JSON-LD 缺失时回退 DOM 卡片文本宽松解析；遇到验证码弹出可交互页面由用户手动过验证后继续。
+//  已知约束：VM 云 IP 被安居客反爬网关拦截；真机手机网络可正常访问（用户实测过验证码后页面正常）。
+//  安全：只读展示，不做任何写操作；仅用户主动点击读取。
 //
 
 import Foundation
@@ -14,23 +14,41 @@ import WebKit
 
 // MARK: - 模型
 
-/// 安居客前台找房页单套房源（宽松文本解析）
+/// 安居客找房页单套房源
 struct AjkPublicHouse: Identifiable, Codable, Equatable {
-    var id: String { href }
-    let title: String   // 标题（户型/面积或小区名）
-    let price: String   // 租金（元/月 数字）
-    let loc: String     // 位置（区域-小区）
-    let area: String    // 户型/面积
-    let href: String    // 详情链接（跳转浏览器打开）
+    let infoid: String          // 房源 ID（详情链接里的数字）
+    var title: String           // 标题
+    var price: String           // 租金数字（元/月）
+    var room: String            // 户型（1室1厅1卫）
+    var size: String            // 面积（40.7㎡）
+    var loc: String             // 区域 + 小区（顺德-龙江 利保米兰公馆）
+    var floor: String           // 楼层（22/24层）
+    var toward: String          // 朝向（朝南）
+    var tag: String             // 出租方式（整租/合租）
+    var coverURL: String        // 封面图
+    var coverPath: String?      // 封面本地文件名
+    let href: String            // 详情链接
+    /// 兼容旧字段名（老视图/兜底解析用）
+    var area: String { [room, size].filter { !$0.isEmpty }.joined(separator: " ") }
+
+    var id: String { infoid }
+    var priceValue: Int? { Int(price.filter { $0.isNumber }) }
 }
 
-/// 安居客前台找房设置（UserDefaults 持久化，可在设置页修改）
+/// 安居客找房设置（UserDefaults 持久化，可在房源排名设置页修改）
 struct AjkPublicSettings: Codable, Equatable {
-    /// 默认：利保米兰公馆指定小区链接（v2.10：带 facet_comm_id 锁定小区，页面只含该小区房源；
-    /// 旧默认链接无此参数，页面会混入其他小区房源，如「万科京都荟 950 元」重复多条）
-    var url: String = "https://fs.zu.anjuke.com/?kw=%E5%88%A9%E4%BF%9D%E7%B1%B3%E5%85%B0%E5%85%AC%E9%A6%86&comm_exist=on&from=list_ac&facet_comm_id=102286650"
+    /// v2.17：旧的小区 ID 链接（facet_comm_id）已失效，会返回佛山全城房源；改用 m 站关键词搜索入口
+    static let defaultURL = "https://m.anjuke.com/fs/rent/?q=%E5%88%A9%E4%BF%9D%E7%B1%B3%E5%85%B0%E5%85%AC%E9%A6%86"
+    var url: String = AjkPublicSettings.defaultURL
     var keyword: String = "利保米兰公馆"
     static let `default` = AjkPublicSettings()
+}
+
+/// 一次抓取的结果
+struct AjkFetchResult {
+    var houses: [AjkPublicHouse] = []
+    var needVerify: Bool = false
+    var error: String = ""
 }
 
 // MARK: - 本地存储
@@ -43,25 +61,29 @@ final class AjkPublicStore: ObservableObject {
     @Published var lastFetch: Date?
     @Published var lastError: String?
     @Published var loading = false
+    /// v2.17：安居客弹验证码，等用户手动过验证
+    @Published var needVerify = false
     @Published var settingsURL = AjkPublicSettings.default.url
     @Published var settingsKeyword = AjkPublicSettings.default.keyword
 
     private let defaults = UserDefaults.standard
 
     private init() {
-        // v2.10：旧默认链接（无 facet_comm_id，页面混入其他小区房源）自动迁移到「利保米兰公馆」指定小区链接
-        let oldDefault = "https://fs.zu.anjuke.com/?t=1&from=0&comm_exist=on&kw=%E5%88%A9%E4%BF%9D%E7%B1%B3%E5%85%B0%E5%85%AC%E9%A6%86"
+        // v2.17：旧的精选页/小区ID链接自动迁移到关键词入口（旧参数会让页面退回全城房源）
+        let legacyURLs = [
+            "https://fs.zu.anjuke.com/?kw=%E5%88%A9%E4%BF%9D%E7%B1%B3%E5%85%B0%E5%85%AC%E9%A6%86&comm_exist=on&from=list_ac&facet_comm_id=102286650",
+            "https://fs.zu.anjuke.com/?t=1&from=0&comm_exist=on&kw=%E5%88%A9%E4%BF%9D%E7%B1%B3%E5%85%B0%E5%85%AC%E9%A6%86"
+        ]
         var savedURL = defaults.string(forKey: "ajk.public.url")
-        if savedURL == oldDefault {
-            savedURL = AjkPublicSettings.default.url
+        if let s = savedURL, legacyURLs.contains(s) || s.contains("facet_comm_id") {
+            savedURL = AjkPublicSettings.defaultURL
             defaults.set(savedURL, forKey: "ajk.public.url")
         }
-        settingsURL = savedURL ?? AjkPublicSettings.default.url
+        settingsURL = savedURL ?? AjkPublicSettings.defaultURL
         settingsKeyword = defaults.string(forKey: "ajk.public.keyword") ?? AjkPublicSettings.default.keyword
     }
 
-    /// v2.10：抓取关键词过滤 token——关键词含「米兰」时用「米兰」（利保米兰公馆/米兰公馆都命中），
-    /// 否则用完整关键词；空 = 不过滤
+    /// 抓取关键词过滤 token——含「米兰」时用「米兰」（利保米兰公馆/米兰公馆都命中）
     var filterToken: String {
         let kw = settingsKeyword.trimmingCharacters(in: .whitespacesAndNewlines)
         if kw.isEmpty { return "" }
@@ -73,114 +95,260 @@ final class AjkPublicStore: ObservableObject {
         defaults.set(settingsKeyword, forKey: "ajk.public.keyword")
     }
 
+    /// v2.17：发起读取（不阻塞 UI；验证码需要人工时弹窗）
     func fetch() async {
         guard !loading else { return }
         loading = true
-        defer { loading = false }
-        do {
-            let result = try await AjkPublicWebViewProvider.shared.fetch(urlString: settingsURL)
-            if result.needCaptcha {
-                lastError = "安居客弹出验证码校验。请稍后重试；若反复出现，可到手机上打开该链接确认可访问，或在设置里更换链接。"
-                return
+        needVerify = false
+        lastError = nil
+        let provider = AjkPublicWebViewProvider.shared
+        provider.onNeedVerify = { [weak self] in
+            self?.loading = false
+            self?.needVerify = true
+        }
+        provider.startFetch(urlString: settingsURL) { [weak self] result in
+            Task { @MainActor in
+                guard let self else { return }
+                self.apply(result)
             }
-            if !result.error.isEmpty {
-                lastError = result.error
-                return
-            }
-            houses = result.houses
-            lastFetch = Date()
-            lastError = nil
-        } catch {
-            lastError = error.localizedDescription
         }
     }
+
+    /// v2.17：用户在弹窗里过完验证码后继续读取
+    func continueAfterVerify() async {
+        needVerify = false
+        loading = true
+        AjkPublicWebViewProvider.shared.onNeedVerify = { [weak self] in
+            self?.loading = false
+            self?.needVerify = true
+        }
+        AjkPublicWebViewProvider.shared.resumeAfterVerify { [weak self] result in
+            Task { @MainActor in
+                guard let self else { return }
+                self.apply(result)
+            }
+        }
+    }
+
+    private func apply(_ result: AjkFetchResult) {
+        loading = false
+        if result.needVerify {
+            needVerify = true
+            return
+        }
+        if !result.error.isEmpty {
+            lastError = result.error
+            return
+        }
+        houses = result.houses
+        lastFetch = Date()
+        lastError = nil
+        downloadCovers()
+    }
+
+    // MARK: - 缩略图（与 58 同机制）
+
+    static var coversDirectory: URL {
+        let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("AjkPublic", isDirectory: true)
+            .appendingPathComponent("Covers", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    static func coverFileURL(for infoid: String) -> URL {
+        coversDirectory.appendingPathComponent("\(infoid).jpg")
+    }
+
+    func coverLocalPath(for infoid: String) -> String? {
+        let url = Self.coverFileURL(for: infoid)
+        return FileManager.default.fileExists(atPath: url.path) ? url.path : nil
+    }
+
+    private func downloadCovers() {
+        let toDownload = houses.filter {
+            !$0.coverURL.isEmpty && !FileManager.default.fileExists(atPath: Self.coverFileURL(for: $0.infoid).path)
+        }
+        guard !toDownload.isEmpty else { return }
+        let dir = Self.coversDirectory
+        Task.detached {
+            for house in toDownload {
+                guard let url = URL(string: house.coverURL) else { continue }
+                do {
+                    let (data, _) = try await URLSession.shared.data(from: url)
+                    try data.write(to: dir.appendingPathComponent("\(house.infoid).jpg"), options: .atomic)
+                    await MainActor.run { self.objectWillChange.send() }
+                } catch {
+                    // 单张失败静默，保持无图占位
+                }
+            }
+        }
+    }
+
+    // MARK: - 概览
+
+    var avgPrice: Int? {
+        let p = houses.compactMap { $0.priceValue }
+        guard !p.isEmpty else { return nil }
+        return p.reduce(0, +) / p.count
+    }
+
+    var maxPrice: Int? { houses.compactMap { $0.priceValue }.max() }
 }
 
-// MARK: - 抓取 Provider（WKWebView 手机 UA + JS 收集 + 宽松解析）
+// MARK: - 抓取 Provider
 
 @MainActor
 final class AjkPublicWebViewProvider: NSObject, WKNavigationDelegate {
 
     static let shared = AjkPublicWebViewProvider()
 
-    struct FetchResult {
-        var houses: [AjkPublicHouse] = []
-        var needCaptcha: Bool = false
-        var error: String = ""
-    }
+    /// 手机 UA：安居客对手机浏览器风控相对宽松
+    static let mobileUA = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
 
-    /// 手机 UA：安居客对手机浏览器风控相对宽松（与 58 m 站同理；桌面 UA + 云 IP 实测必弹验证码）
-    private static let mobileUA = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
+    /// 需要人工过验证码时回调（UI 弹窗展示当前页面）
+    var onNeedVerify: (() -> Void)?
+    /// 供弹窗展示的当前页面（用户在这里点验证码）
+    private(set) var verifyWebView: WKWebView?
 
     private var webView: WKWebView?
-    private var continuation: CheckedContinuation<FetchResult, Error>?
-    private var retriedCaptcha = false
-    private var lastLoadedURL = ""
-    private var pendingHouses: [AjkPublicHouse] = []
+    private var completion: ((AjkFetchResult) -> Void)?
+    private var captchaWaiting = false
+    private var timeoutWork: DispatchWorkItem?
+    private var housesJSONLD: [AjkPublicHouse] = []
+    private var housesDOM: [AjkPublicHouse] = []
+    private var didConsumeJSONLD = false
 
-    func fetch(urlString: String) async throws -> FetchResult {
-        pendingHouses = []
-        retriedCaptcha = false
+    // MARK: 对外
+
+    func startFetch(urlString: String, completion: @escaping (AjkFetchResult) -> Void) {
+        self.completion = completion
+        housesJSONLD = []
+        housesDOM = []
+        didConsumeJSONLD = false
+        captchaWaiting = false
         let cleaned = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
-        return try await withCheckedThrowingContinuation { (cont: CheckedContinuation<FetchResult, Error>) in
-            self.continuation = cont
-            let config = WKWebViewConfiguration()
-            config.websiteDataStore = .default()
-            let wv = WKWebView(frame: .init(x: 0, y: 0, width: 390, height: 844), configuration: config)
-            wv.navigationDelegate = self
-            wv.customUserAgent = Self.mobileUA
-            wv.configuration.userContentController.add(self, name: "ajkPublicScrape")
-            self.webView = wv
-            guard let url = URL(string: cleaned) else {
-                self.continuation = nil
-                cont.resume(returning: FetchResult(error: "安居客链接无效，请在设置里检查"))
-                return
-            }
-            self.lastLoadedURL = cleaned
-            wv.load(URLRequest(url: url))
-            DispatchQueue.main.asyncAfter(deadline: .now() + 30) {
-                if let c = self.continuation {
-                    self.continuation = nil
-                    self.webView?.stopLoading()
-                    self.webView = nil
-                    c.resume(throwing: AjkPublicError.msg("页面加载超时，请检查网络后重试"))
-                }
-            }
+        guard let url = URL(string: cleaned) else {
+            finish(AjkFetchResult(error: "安居客链接无效，请在设置里检查"))
+            return
         }
+        reload(url)
     }
 
+    /// 用户过完验证码后继续
+    func resumeAfterVerify(completion: @escaping (AjkFetchResult) -> Void) {
+        self.completion = completion
+        guard let wv = webView else {
+            finish(AjkFetchResult(error: "页面已关闭，请重新点「读取」"))
+            return
+        }
+        captchaWaiting = false
+        scheduleTimeout(30)
+        runScrape(on: wv)
+    }
+
+    // MARK: 内部
+
+    private func reload(_ url: URL) {
+        if let old = webView {
+            old.stopLoading()
+            old.configuration.userContentController.removeScriptMessageHandler(forName: "ajkPublicScrape")
+        }
+        let config = WKWebViewConfiguration()
+        config.websiteDataStore = .default()
+        let wv = WKWebView(frame: .init(x: 0, y: 0, width: 390, height: 844), configuration: config)
+        wv.navigationDelegate = self
+        wv.customUserAgent = Self.mobileUA
+        wv.configuration.userContentController.add(self, name: "ajkPublicScrape")
+        webView = wv
+        verifyWebView = wv
+        wv.load(URLRequest(url: url))
+        scheduleTimeout(35)
+    }
+
+    private func scheduleTimeout(_ seconds: Double) {
+        timeoutWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, !self.captchaWaiting else { return }
+            self.finish(AjkFetchResult(error: "页面加载超时，请检查网络后重试"))
+        }
+        timeoutWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + seconds, execute: work)
+    }
+
+    private func finish(_ result: AjkFetchResult) {
+        timeoutWork?.cancel()
+        timeoutWork = nil
+        if let wv = webView {
+            wv.stopLoading()
+            wv.configuration.userContentController.removeScriptMessageHandler(forName: "ajkPublicScrape")
+        }
+        webView = nil
+        verifyWebView = nil
+        let c = completion
+        completion = nil
+        c?(result)
+    }
+
+    // MARK: 导航回调
+
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+        guard !captchaWaiting else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+            guard let self, !self.captchaWaiting else { return }
             self.runScrape(on: webView)
         }
     }
 
-    // MARK: - JS：收集第一页卡片文本（v2.3：容器找不到时自动降级为「全文价格锚点」扫描，页面改版也能兜底）
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        guard !captchaWaiting else { return }
+        finish(AjkFetchResult(error: "页面加载失败：\(error.localizedDescription)"))
+    }
+
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        guard !captchaWaiting else { return }
+        finish(AjkFetchResult(error: "页面加载失败：\(error.localizedDescription)"))
+    }
+
+    // MARK: - JS：优先读 JSON-LD，兜底扫描卡片文本
 
     private func runScrape(on webView: WKWebView) {
         let js = """
         (async function(){
           function sleep(ms){ return new Promise(function(r){ setTimeout(r, ms); }); }
           function norm(s){ return (s||'').replace(/\\s+/g,' ').trim(); }
-          // 等待列表卡片渲染（安居客精选页/找房页；兜底宽泛选择器；最多 12 秒）
-          var waited = 0;
-          while (waited < 12000) {
-            if (document.querySelector('.zu-itemmod') || document.querySelector('.list-item') ||
-                document.querySelector('[class*="zu-item"]') || document.querySelector('[class*="house-list"] li') ||
-                document.querySelector('[class*="list"] li a')) break;
-            await sleep(400); waited += 400;
-          }
-          // 验证码/反爬网关检测（含常见变体文案）
+          // 验证码/反爬网关检测
           var bodyText = norm((document.body && (document.body.innerText || document.body.textContent)) || '');
           var titleText = norm(document.title || '');
           var hrefNow = location.href || '';
-          if (bodyText.indexOf('请输入验证码') >= 0 || bodyText.indexOf('安全验证') >= 0 ||
-              bodyText.indexOf('人机验证') >= 0 || bodyText.indexOf('滑动验证') >= 0 ||
-              titleText.indexOf('验证') >= 0 || titleText.indexOf('verify') >= 0 ||
-              hrefNow.indexOf('antibot') >= 0 || hrefNow.indexOf('verifycode') >= 0) {
+          if (bodyText.indexOf('请输入验证码') >= 0 || bodyText.indexOf('访问过于频繁') >= 0 ||
+              bodyText.indexOf('安全验证') >= 0 || bodyText.indexOf('人机验证') >= 0 ||
+              titleText.indexOf('请输入验证码') >= 0 || titleText.indexOf('验证码') >= 0 ||
+              hrefNow.indexOf('antibot') >= 0 || hrefNow.indexOf('verifycode') >= 0 ||
+              (document.getElementById && document.getElementById('@@xxzlGatewayUrl'))) {
             window.webkit.messageHandlers.ajkPublicScrape.postMessage(JSON.stringify({type:'captcha', text: titleText}));
             return;
           }
+          // 等页面把列表/结构化数据渲染出来（最多 8 秒）
+          var waited = 0;
+          while (waited < 8000) {
+            if (document.querySelector('script[type="application/ld+json"]') ||
+                document.querySelector('[class*="rent"]') ||
+                document.querySelector('[class*="house"]')) break;
+            await sleep(400); waited += 400;
+          }
+          // 1) JSON-LD 结构化清单
+          var blocks = [];
+          var sc = document.querySelectorAll('script[type="application/ld+json"]');
+          for (var i = 0; i < sc.length; i++) {
+            var raw = '';
+            try { raw = sc[i].textContent || ''; } catch(e) { raw = ''; }
+            if (raw && raw.indexOf('itemListElement') >= 0) blocks.push(raw);
+          }
+          if (blocks.length > 0) {
+            window.webkit.messageHandlers.ajkPublicScrape.postMessage(JSON.stringify({type:'jsonld', blocks: blocks}));
+          }
+          // 2) DOM 卡片兜底（JSON-LD 没有时才有用）
           var cards = [];
           var seen = {};
           function pushCard(text, href){
@@ -190,19 +358,17 @@ final class AjkPublicWebViewProvider: NSObject, WKNavigationDelegate {
             seen[href] = 1;
             cards.push({text: text.slice(0, 800), href: href});
           }
-          // 方案1：已知容器选择器
-          var containers = document.querySelectorAll('.zu-itemmod, .list-item, li.item, [class*="zu-item"], [class*="list-item"], [class*="house-list"] li, [class*="item-list"] li, [class*="content-list"] li');
-          for (var i = 0; i < containers.length; i++) {
-            var el = containers[i];
+          var containers = document.querySelectorAll('[class*="rent-item"], [class*="house-item"], [class*="list-item"], [class*="zu-item"], li[class*="item"], a[class*="item"]');
+          for (var k = 0; k < containers.length; k++) {
+            var el = containers[k];
             var text = norm(el.innerText || '');
             if (text.indexOf('元/月') < 0) continue;
-            var a = el.querySelector('a[href*="zufang"], a[href*="fangyuan"]') || (el.tagName === 'A' ? el : null);
+            var a = el.querySelector('a[href*="rent/"]') || el.querySelector('a[href*="zufang"]') || (el.tagName === 'A' ? el : null);
             if (!a) continue;
             var href = a.href || a.getAttribute('href') || '';
-            if (href.indexOf('zufang') < 0 && href.indexOf('fangyuan') < 0) continue;
             pushCard(text, href);
+            if (cards.length >= 60) break;
           }
-          // 方案2：容器一个都没抓到 → 全文扫描「含 元/月 的链接」（页面改版兜底）
           if (cards.length === 0) {
             var allA = document.querySelectorAll('a');
             for (var j = 0; j < allA.length; j++) {
@@ -210,39 +376,29 @@ final class AjkPublicWebViewProvider: NSObject, WKNavigationDelegate {
               var h2 = aa.href || aa.getAttribute('href') || '';
               var t2 = norm(aa.innerText || '');
               if (t2.indexOf('元/月') < 0) continue;
-              if (h2.indexOf('zufang') < 0 && h2.indexOf('fangyuan') < 0 && h2.indexOf('anjuke') < 0) continue;
+              if (h2.indexOf('rent/') < 0 && h2.indexOf('zufang') < 0 && h2.indexOf('anjuke') < 0) continue;
               var box = aa;
               for (var up = 0; up < 3 && box.parentElement; up++) {
                 box = box.parentElement;
                 if (norm(box.innerText || '').length > 30) break;
               }
-              var fullText = norm(box.innerText || '');
-              pushCard(fullText.length > 10 ? fullText : t2, h2);
+              pushCard(norm(box.innerText || ''), h2);
               if (cards.length >= 60) break;
             }
           }
           window.webkit.messageHandlers.ajkPublicScrape.postMessage(JSON.stringify({type:'page', cards: cards.slice(0, 60)}));
-          window.webkit.messageHandlers.ajkPublicScrape.postMessage(JSON.stringify({type:'done', total: cards.length, error:''}));
+          window.webkit.messageHandlers.ajkPublicScrape.postMessage(JSON.stringify({type:'done'}));
         })();
         void 0;
         """
-        webView.evaluateJavaScript(js) { _, error in
+        webView.evaluateJavaScript(js) { [weak self] _, error in
+            guard let self else { return }
             if let error = error {
                 Task { @MainActor in
-                    self.finish(error: "脚本执行失败：\(error.localizedDescription)")
+                    self.finish(AjkFetchResult(error: "脚本执行失败：\(error.localizedDescription)"))
                 }
             }
         }
-    }
-
-    private func finish(error: String) {
-        guard let c = continuation else { return }
-        continuation = nil
-        webView?.stopLoading()
-        webView = nil
-        var result = FetchResult()
-        result.error = error
-        c.resume(returning: result)
     }
 }
 
@@ -253,148 +409,177 @@ extension AjkPublicWebViewProvider: WKScriptMessageHandler {
               let dict = try? JSONSerialization.jsonObject(with: Data(body.utf8)) as? [String: Any],
               let type = dict["type"] as? String else { return }
 
+        // 验证码：交给 UI 弹窗，用户在这里手动过验证；不自动重试、不判失败
         if type == "captcha" {
-            guard let c = continuation else { return }
-            if !retriedCaptcha, let url = URL(string: lastLoadedURL) {
-                retriedCaptcha = true
-                userContentController.removeScriptMessageHandler(forName: "ajkPublicScrape")
-                webView?.stopLoading()
-                webView = nil
-                let config = WKWebViewConfiguration()
-                config.websiteDataStore = .default()
-                let wv2 = WKWebView(frame: .init(x: 0, y: 0, width: 390, height: 844), configuration: config)
-                wv2.navigationDelegate = self
-                wv2.customUserAgent = Self.mobileUA
-                wv2.configuration.userContentController.add(self, name: "ajkPublicScrape")
-                self.webView = wv2
-                wv2.load(URLRequest(url: url))
-                DispatchQueue.main.asyncAfter(deadline: .now() + 30) {
-                    if let cc = self.continuation {
-                        self.continuation = nil
-                        self.webView?.stopLoading()
-                        self.webView = nil
-                        cc.resume(throwing: AjkPublicError.msg("页面加载超时，请检查网络后重试"))
-                    }
-                }
-                return
+            guard completion != nil else { return }
+            captchaWaiting = true
+            timeoutWork?.cancel()
+            verifyWebView = webView
+            onNeedVerify?()
+            return
+        }
+
+        if type == "jsonld" {
+            guard let blocks = dict["blocks"] as? [String] else { return }
+            var parsed: [AjkPublicHouse] = []
+            for b in blocks { parsed.append(contentsOf: AjkPublicParser.parseJSONLD(b)) }
+            if !parsed.isEmpty {
+                housesJSONLD = parsed
+                didConsumeJSONLD = true
             }
-            continuation = nil
-            userContentController.removeScriptMessageHandler(forName: "ajkPublicScrape")
-            webView?.stopLoading()
-            webView = nil
-            var result = FetchResult()
-            result.needCaptcha = true
-            c.resume(returning: result)
             return
         }
 
         if type == "page" {
             guard let arr = dict["cards"] as? [[String: Any]] else { return }
-            // v2.10：只保留目标小区（默认利保米兰公馆）卡片——关键词过滤在原始文本上做，
-            // 混入的其他小区房源（如「万科京都荟 950 元」同套重复多条）直接丢弃
             let token = AjkPublicStore.shared.filterToken
             for obj in arr {
                 guard let text = obj["text"] as? String,
                       let href = obj["href"] as? String else { continue }
                 if !token.isEmpty && !text.contains(token) { continue }
                 guard let house = AjkPublicParser.parse(text, href: href) else { continue }
-                if !pendingHouses.contains(where: { $0.href == house.href }) {
-                    pendingHouses.append(house)
+                if !housesDOM.contains(where: { $0.href == house.href }) {
+                    housesDOM.append(house)
                 }
             }
             return
         }
 
         if type == "done" {
-            guard let c = continuation else { return }
-            continuation = nil
-            userContentController.removeScriptMessageHandler(forName: "ajkPublicScrape")
-            webView?.stopLoading()
-            webView = nil
-            var result = FetchResult()
-            result.houses = pendingHouses
-            // v2.3：解析到 0 条时给出明确提示（可能是页面结构变化/需登录/被重定向），避免静默显示「还没有数据」；
-            // v2.10：文案带出关键词过滤信息，方便定位是「页面没按小区过滤」还是「页面结构变化」
-            if pendingHouses.isEmpty {
-                let kw = AjkPublicStore.shared.settingsKeyword
-                result.error = "未解析到「\(kw)」房源（页面未按小区过滤、结构变化、需登录或验证等）。可在设置里更换链接，或到手机上打开确认可访问后重试"
+            // JSON-LD 优先；没有结构化数据时用 DOM 兜底
+            var result = AjkFetchResult()
+            if didConsumeJSONLD && !housesJSONLD.isEmpty {
+                result.houses = housesJSONLD
+            } else {
+                result.houses = housesDOM
             }
-            c.resume(returning: result)
+            // 本地按关键词再过滤一遍（JSON-LD 来自搜索页，正常已只有目标小区）
+            let token = AjkPublicStore.shared.filterToken
+            if !token.isEmpty {
+                let filtered = result.houses.filter { ($0.loc + $0.title).contains(token) }
+                if !filtered.isEmpty { result.houses = filtered }
+            }
+            if result.houses.isEmpty {
+                result.error = "未解析到「\(AjkPublicStore.shared.settingsKeyword)」房源（页面可能是全城列表、结构变化或被风控拦截）。可在设置里更换链接后重试"
+            }
+            finish(result)
         }
     }
 }
 
-// MARK: - 宽松文本解析
-// 安居客前台页 DOM 未能在 VM 实证（云 IP 被反爬拦截），按文本模式解析：
-// 卡片文本形如「整租·1室1厅 40.69㎡ | 龙江-利保米兰公馆 1100元/月」，
-// 用价格锚点 + 关键词/区域模式提取，页面改版时也能兜底
+// MARK: - 解析
 
 enum AjkPublicParser {
 
+    /// 读取 JSON-LD（安居客 m 站列表页自带 ItemList 结构化清单，字段最全、页面改版也不容易崩）
+    static func parseJSONLD(_ raw: String) -> [AjkPublicHouse] {
+        guard let data = raw.data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let items = obj["itemListElement"] as? [[String: Any]] else { return [] }
+        var out: [AjkPublicHouse] = []
+        for it in items {
+            let name = (it["name"] as? String) ?? ""
+            let href = (it["url"] as? String) ?? ""
+            var cover = (it["image"] as? String) ?? ""
+            if cover.isEmpty, let imgs = it["image"] as? [Any] {
+                cover = (imgs.first as? String) ?? ""
+            }
+            var price = ""
+            if let offers = it["offers"] as? [String: Any] {
+                if let p = offers["price"] as? String { price = p.filter { $0.isNumber } }
+                else if let p = offers["price"] as? Int { price = String(p) }
+                else if let p = offers["price"] as? Double { price = String(Int(p)) }
+            }
+            guard !price.isEmpty, !href.isEmpty else { continue }
+            var props: [String: String] = [:]
+            if let arr = it["additionalProperty"] as? [[String: Any]] {
+                for p in arr {
+                    guard let k = p["name"] as? String else { continue }
+                    if let v = p["value"] as? String { props[k] = v }
+                    else if let v = p["value"] as? Int { props[k] = String(v) }
+                    else if let v = p["value"] as? Double { props[k] = String(v) }
+                }
+            }
+            let comm = props["小区"] ?? ""
+            let region = props["区域"] ?? props["商圈"] ?? ""
+            let loc = [region, comm].filter { !$0.isEmpty }.joined(separator: " ")
+            let infoid = firstCapture(href, pattern: #"/rent/(\d+)"#)
+                ?? firstCapture(href, pattern: #"(\d{8,})"#)
+                ?? href
+            out.append(AjkPublicHouse(
+                infoid: infoid,
+                title: name,
+                price: price,
+                room: props["户型"] ?? "",
+                size: (props["面积"] ?? "").replacingOccurrences(of: "平米", with: "㎡"),
+                loc: loc,
+                floor: props["楼层"] ?? "",
+                toward: props["朝向"] ?? "",
+                tag: props["出租方式"] ?? props["租赁方式"] ?? "",
+                coverURL: cover,
+                coverPath: nil,
+                href: href
+            ))
+        }
+        return out
+    }
+
+    /// DOM 卡片文本兜底解析（JSON-LD 缺失时用）
     static func parse(_ text: String, href: String) -> AjkPublicHouse? {
-        // 价格：首个「数字 元/月」
         guard let priceMatch = firstCapture(text, pattern: #"\d+\s*元/月"#),
               let priceDigits = firstCapture(priceMatch, pattern: #"\d+"#),
               Int(priceDigits) != nil else { return nil }
 
-        // 去掉价格段，得到其余文本
         var rest = text
         if let r = rest.range(of: #"\d+\s*元/月"#, options: .regularExpression) {
             rest = String(rest[..<r.lowerBound]) + " " + String(rest[r.upperBound...])
         }
 
-        // 位置：含小区/区域关键词的段（利保米兰公馆、X区-X公馆 等）
         var loc = ""
         for seg in rest.components(separatedBy: "|").map({ $0.trimmingCharacters(in: .whitespacesAndNewlines) }) {
-            if seg.contains("米兰公馆") || seg.contains("利保") {
+            if seg.contains("米兰") || seg.contains("公馆") || seg.contains("区") {
                 loc = seg
                 break
             }
         }
-        if loc.isEmpty {
-            if let m = firstCapture(rest, pattern: #"[\u4e00-\u9fa5]{2,}(?:区|公馆|公寓|花园|小区)[^\s，,。]{0,12}"#) {
-                loc = m
-            }
+        if loc.isEmpty, let m = firstCapture(rest, pattern: #"[\u4e00-\u9fa5]{2,}(?:区|公馆|公寓|花园|小区)[^\s，,。]{0,12}"#) {
+            loc = m
         }
 
-        // 户型/面积：如「整租·1室1厅 40.69㎡」
-        var area = ""
-        if let m = firstCapture(rest, pattern: #"整租[^\s|]{0,20}|合租[^\s|]{0,20}"#) {
-            area = m
-        } else if let m = firstCapture(rest, pattern: #"\d+\s*室[^\s|]{0,12}"#) {
-            area = m
-        }
-        if let m = firstCapture(rest, pattern: #"[\d.]+\s*㎡"#) {
-            area = area.isEmpty ? m : "\(area) \(m)"
-        }
+        var room = ""
+        if let m = firstCapture(rest, pattern: #"\d+\s*室\d*\s*厅?\d*\s*卫?"#) { room = m.replacingOccurrences(of: " ", with: "") }
+        var size = ""
+        if let m = firstCapture(rest, pattern: #"[\d.]+\s*(?:㎡|平米)"#) { size = m.replacingOccurrences(of: "平米", with: "㎡").replacingOccurrences(of: " ", with: "") }
 
-        // 标题：移掉价格/位置/面积段后的主文本；取第一个 ≥4 字且含中文的段
         var title = rest
-        for seg in [loc, area] where !seg.isEmpty {
+        for seg in [loc, room, size] where !seg.isEmpty {
             title = title.replacingOccurrences(of: seg, with: "")
         }
         title = title.components(separatedBy: " ")
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty && $0.count >= 4 && $0.contains("元") == false }
+            .filter { !$0.isEmpty && $0.count >= 4 && !$0.contains("元") }
             .prefix(2)
             .joined(separator: " ")
-        if title.isEmpty {
-            title = String(rest.prefix(30))
-        }
+        if title.isEmpty { title = String(rest.prefix(30)) }
 
-        // href 归一：相对路径补安居客域名
         var fullHref = href
-        if fullHref.hasPrefix("/") {
-            fullHref = "https://fs.zu.anjuke.com" + fullHref
-        }
-        return AjkPublicHouse(title: title, price: priceDigits, loc: loc, area: area, href: fullHref)
+        if fullHref.hasPrefix("/") { fullHref = "https://m.anjuke.com" + fullHref }
+        let infoid = firstCapture(fullHref, pattern: #"/rent/(\d+)"#)
+            ?? firstCapture(fullHref, pattern: #"(\d{8,})"#)
+            ?? fullHref
+        return AjkPublicHouse(
+            infoid: infoid, title: title, price: priceDigits,
+            room: room, size: size, loc: loc,
+            floor: "", toward: "", tag: "",
+            coverURL: "", coverPath: nil, href: fullHref
+        )
     }
 
-    private static func firstCapture(_ s: String, pattern: String) -> String? {
+    static func firstCapture(_ s: String, pattern: String) -> String? {
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
         let ns = s as NSString
         guard let m = regex.firstMatch(in: s, range: NSRange(location: 0, length: ns.length)) else { return nil }
-        return ns.substring(with: m.range(at: 0)).trimmingCharacters(in: .whitespacesAndNewlines)
+        return ns.substring(with: m.range(at: 1 <= m.numberOfRanges - 1 ? 1 : 0)).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
 

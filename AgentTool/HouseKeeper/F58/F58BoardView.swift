@@ -698,7 +698,7 @@ struct F58SettingsDetailView: View {
                         .font(.system(size: 13))
                         .autocapitalization(.none)
                         .keyboardType(.URL)
-                    Text("默认：fs.zu.anjuke.com 精选页（利保米兰公馆）。在 App 内用手机 UA 打开抓取第一页；如页面弹验证码请稍后再试，或到手机上打开该链接确认可访问后更换")
+                    Text("默认：m 站关键词搜索（利保米兰公馆，q 参数决定抓取范围）。旧的小区 ID 链接会退回全城房源，已自动换新；页面改版抓不到时可按手机上能正常打开的链接更换")
                         .font(.system(size: 11))
                         .foregroundColor(.themeText3)
                 }
