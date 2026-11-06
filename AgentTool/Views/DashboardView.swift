@@ -30,6 +30,9 @@ struct DashboardView: View {
     @State private var showRentStat = false // v1.99：单月收租统计
     @State private var showMoreActions = false  // v1.84：更多收纳面板
     @State private var showQuickActionEdit = false // v1.84：快捷操作自定义排序
+    // v2.21：在线更新——工作台显示当前版本号，有更新时后面跟橙色胶囊
+    @ObservedObject private var updateCenter = UpdateCenter.shared
+    @State private var showUpdateDetail = false
     @AppStorage("qa.dashboardOrder") private var qaDashOrder = ""
     @AppStorage("qa.moreOrder") private var qaMoreOrder = ""
     @State private var showAddDeal = false
@@ -482,16 +485,19 @@ struct DashboardView: View {
 
                 // 中间：标题+副标题
                 VStack(alignment: .leading, spacing: 8) {
-                    Button {
-                        editText = userTitle
-                        showEditTitle = true
-                    } label: {
-                        Text(userTitle)
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundColor(.themeText)
-                            .lineLimit(1)
+                    HStack(spacing: 6) {
+                        Button {
+                            editText = userTitle
+                            showEditTitle = true
+                        } label: {
+                            Text(userTitle)
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundColor(.themeText)
+                                .lineLimit(1)
+                        }
+                        .buttonStyle(.plain)
+                        versionBadge
                     }
-                    .buttonStyle(.plain)
 
                     // 副标题：X月还剩X天X小时，加油
                     HStack(spacing: 0) {
@@ -775,6 +781,9 @@ struct DashboardView: View {
             guard active else { return }
             currentTime = Date()
             refreshDashboard()
+        }
+        .sheet(isPresented: $showUpdateDetail) {
+            if let a = updateCenter.available { UpdateDetailView(update: a) }
         }
         .sheet(isPresented: $showImagePicker) {
             ImagePickerView { image in
@@ -1623,6 +1632,199 @@ struct AdminWebView: UIViewRepresentable {
         }
         func webView(_ webView: WKWebView, runJavaScriptTextInputPanelWithPrompt prompt: String, defaultText: String?, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping (String?) -> Void) {
             completionHandler(defaultText)
+        }
+    }
+}
+
+// MARK: - v2.21 在线更新（工作台徽章 + 更新详情页）
+
+extension DashboardView {
+    /// 当前版本号；云端有新版本时变橙色「↑ 2.21」胶囊，点开看更新说明
+    fileprivate var versionBadge: some View {
+        Group {
+            if let a = updateCenter.available {
+                Button {
+                    showUpdateDetail = true
+                } label: {
+                    HStack(spacing: 2) {
+                        Image(systemName: "arrow.up.circle.fill")
+                            .font(.system(size: 9))
+                        Text(a.version)
+                            .font(.system(size: 11, weight: .semibold))
+                    }
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.orange)
+                    .cornerRadius(6)
+                }
+                .buttonStyle(.plain)
+            } else {
+                Text("v\(UpdateCenter.appVersion)")
+                    .font(.system(size: 11))
+                    .foregroundColor(.themeText3)
+            }
+        }
+    }
+}
+
+struct UpdateDetailView: View {
+    let update: UpdateCenter.Available
+
+    @Environment(\.dismiss) private var dismiss
+    @StateObject private var downloader = UpdateDownloader()
+    @State private var showShareSheet = false
+
+    private var sizeText: String {
+        guard update.sizeBytes > 0 else { return "—" }
+        return String(format: "%.1f MB", Double(update.sizeBytes) / 1_048_576)
+    }
+
+    private var primaryTitle: String {
+        switch downloader.phase {
+        case .idle: return "立即更新（下载安装包）"
+        case .downloading: return "正在下载 \(Int(min(max(downloader.progress, 0), 1) * 100))%"
+        case .verifying: return "正在校验安装包…"
+        case .ready: return "保存 / 发送安装包"
+        case .failed: return "重新下载"
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(spacing: 8) {
+                            Text("v\(update.version)")
+                                .font(.system(size: 26, weight: .bold))
+                                .foregroundColor(.themeText)
+                            if update.build > 0 {
+                                Text("b\(update.build)")
+                                    .font(.system(size: 12, weight: .medium))
+                                    .foregroundColor(.themeText3)
+                            }
+                            Text("当前 v\(UpdateCenter.appVersion)")
+                                .font(.system(size: 12))
+                                .foregroundColor(.themeText3)
+                        }
+                        HStack(spacing: 10) {
+                            if !update.releasedAt.isEmpty { Text(update.releasedAt) }
+                            Text(sizeText)
+                        }
+                        .font(.system(size: 12))
+                        .foregroundColor(.themeText2)
+                    }
+
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("更新内容")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundColor(.themeText)
+                        if update.notes.isEmpty {
+                            Text("本次更新的说明还没填，后台补充后这里会显示。")
+                                .font(.system(size: 13))
+                                .foregroundColor(.themeText3)
+                        } else {
+                            ForEach(update.notes, id: \.self) { line in
+                                HStack(alignment: .top, spacing: 8) {
+                                    Image(systemName: "circle.fill")
+                                        .font(.system(size: 5))
+                                        .foregroundColor(.themeAccent)
+                                        .padding(.top, 6)
+                                    Text(line)
+                                        .font(.system(size: 14))
+                                        .foregroundColor(.themeText)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                            }
+                        }
+                    }
+                    .padding(16)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.themePanel)
+                    .cornerRadius(14)
+                    .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.themeBorder, lineWidth: 1))
+
+                    if case .downloading = downloader.phase {
+                        ProgressView(value: min(max(downloader.progress, 0), 1))
+                            .tint(AppTheme.primary)
+                    }
+                    if case let .failed(msg) = downloader.phase {
+                        Text(msg)
+                            .font(.system(size: 12))
+                            .foregroundColor(.themeRed)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    if case .ready = downloader.phase, let url = downloader.localURL {
+                        Text("已下载：\(url.lastPathComponent)")
+                            .font(.system(size: 12))
+                            .foregroundColor(.themeAccentDark)
+                    }
+
+                    Text("iOS 不允许 App 直接安装 IPA。下载完成后用你的签名工具（轻松签 / 爱思助手等）打开这个文件重签安装；下载好的包在「文件 App → 公寓管家 → Updates」里也能找到。")
+                        .font(.system(size: 12))
+                        .foregroundColor(.themeText3)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    VStack(spacing: 10) {
+                        Button {
+                            if case .ready = downloader.phase {
+                                showShareSheet = true
+                            } else {
+                                downloader.start(update)
+                            }
+                        } label: {
+                            HStack(spacing: 8) {
+                                if downloader.isBusy {
+                                    ProgressView().controlSize(.small).tint(.white)
+                                }
+                                Text(primaryTitle)
+                                    .font(.system(size: 16, weight: .semibold))
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 13)
+                            .background(AppTheme.primary)
+                            .foregroundColor(.white)
+                            .cornerRadius(12)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(downloader.isBusy)
+
+                        if !update.installPageURL.isEmpty {
+                            Button {
+                                if let url = URL(string: update.installPageURL),
+                                   let scheme = url.scheme?.lowercased(),
+                                   scheme == "http" || scheme == "https" {
+                                    UIApplication.shared.open(url)
+                                }
+                            } label: {
+                                Text("去安装页（第三方签名平台）")
+                                    .font(.system(size: 15, weight: .medium))
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 12)
+                                    .background(Color.themeAccentWeak)
+                                    .foregroundColor(.themeAccentDark)
+                                    .cornerRadius(12)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+                .padding(20)
+            }
+            .background(AppTheme.background)
+            .navigationTitle("发现新版本")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("稍后") { dismiss() }
+                }
+            }
+            .sheet(isPresented: $showShareSheet) {
+                if let url = downloader.localURL {
+                    ShareSheet(activityItems: [url])
+                }
+            }
         }
     }
 }

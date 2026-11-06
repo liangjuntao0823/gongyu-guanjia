@@ -56,6 +56,9 @@ struct SettingsView: View {
     @State private var showMigration = false
     @State private var showBillTemplate = false
     @State private var showTrash = false   // v1.3：回收站入口从工作台移至设置页
+    // v2.21：在线更新（检查 / 自动检查开关 / 更新详情）
+    @ObservedObject private var updateCenter = UpdateCenter.shared
+    @State private var showUpdateDetail = false
     // v1.12：备份体系重构——统一备份/恢复入口（替代旧分板块备份/恢复；旧 JSON 备份在查看器中保留）
     @State private var showBackupKindSheet = false   // 备份方式选择（快速/全量）
     @State private var showOfflineRestoreConfirm = false   // v1.75：离线重建房源二次确认
@@ -102,6 +105,16 @@ struct SettingsView: View {
 
     private var appVersion: String {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
+    }
+
+    /// v2.21：检查更新右侧状态文案
+    private func updateStatusText() -> String {
+        switch updateCenter.checkState {
+        case .checking: return "检查中…"
+        case .failed: return "连不上云端"
+        case .upToDate: return "已是最新"
+        case .idle: return updateCenter.available == nil ? "" : "有新版本"
+        }
     }
 
     /// v2.18：崩溃日志占用（入口右侧直接显示，不用点进去才知道占多大）
@@ -733,8 +746,49 @@ struct SettingsView: View {
             HStack {
                 Label("版本", systemImage: "number")
                 Spacer()
-                Text(appVersion)
+                Text("\(appVersion) (\(UpdateCenter.appBuild))")
                     .foregroundColor(.secondary)
+                if let a = updateCenter.available {
+                    Text("可更新 \(a.version)")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.orange)
+                        .cornerRadius(5)
+                }
+            }
+            Button {
+                Task { await updateCenter.checkManually() }
+            } label: {
+                HStack {
+                    Label("检查更新", systemImage: "arrow.down.circle")
+                    Spacer()
+                    Text(updateStatusText())
+                        .font(.footnote)
+                        .foregroundColor(updateCenter.checkState == .failed ? .red : .secondary)
+                }
+            }
+            .disabled(updateCenter.checkState == .checking)
+            if let a = updateCenter.available {
+                Button {
+                    showUpdateDetail = true
+                } label: {
+                    HStack {
+                        Label("发现新版本 v\(a.version)", systemImage: "sparkles")
+                            .foregroundColor(.orange)
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
+            Toggle(isOn: Binding(
+                get: { UpdateCenter.autoCheckEnabled },
+                set: { UpdateCenter.autoCheckEnabled = $0 }
+            )) {
+                Label("每次启动自动检查更新", systemImage: "arrow.triangle.2.circlepath")
             }
             HStack {
                 Label("开发者", systemImage: "person")
@@ -900,6 +954,9 @@ struct SettingsView: View {
     /// v1.12：挂载链拆分（避免单一表达式 type-check 超时）
     private var settingsFormFull: some View {
         settingsForm
+            .sheet(isPresented: $showUpdateDetail) {
+                if let a = updateCenter.available { UpdateDetailView(update: a) }
+            }
             .sheet(isPresented: $showVersionHistory) {
                 VersionHistoryView()
             }

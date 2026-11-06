@@ -19,6 +19,16 @@ struct RemoteConfigAdminView: View {
     /// v1.89：AI 模型清单（JSON 文本编辑）
     @State private var aiModelsJSON = ""
 
+    // v2.21：App 在线更新表单
+    @State private var updateVersion = ""
+    @State private var updateBuild = ""
+    @State private var updateObjectKey = ""
+    @State private var updateDownloadURL = ""
+    @State private var updateInstallPage = ""
+    @State private var updateSize = ""
+    @State private var updateSha = ""
+    @State private var updateNotes = ""
+
     var body: some View {
         Form {
             // ── 顶部：状态 + 操作 ──
@@ -106,15 +116,6 @@ struct RemoteConfigAdminView: View {
                     } label: {
                         Text("公告链接").foregroundStyle(.secondary)
                     }
-                }
-                LabeledContent {
-                    TextField("如 1.79", text: Binding(get: {
-                        config.minimumVersion ?? ""
-                    }, set: { config.minimumVersion = $0.isEmpty ? nil : $0 }))
-                    .keyboardType(.numbersAndPunctuation)
-                    .multilineTextAlignment(.trailing)
-                } label: {
-                    Text("最低版本").foregroundStyle(.secondary)
                 }
             } header: {
                 Label("基础设置", systemImage: "slider.horizontal.3")
@@ -205,6 +206,33 @@ struct RemoteConfigAdminView: View {
                 }
             } header: {
                 Label("帮助说明（设置页长文案）", systemImage: "questionmark.circle")
+            }
+
+            // ── App 在线更新（v2.21）──
+            Section {
+                TextField("最新版本号，如 2.21", text: $updateVersion)
+                TextField("Build 号，如 144", text: $updateBuild)
+                    .keyboardType(.numberPad)
+                TextField("桶内对象路径，如 update/公寓管家2.21-b144.ipa", text: $updateObjectKey)
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
+                TextField("备用直链 https（选填）", text: $updateDownloadURL)
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
+                TextField("第三方签名平台安装页（选填）", text: $updateInstallPage)
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
+                TextField("安装包大小（字节，选填）", text: $updateSize)
+                    .keyboardType(.numberPad)
+                TextField("SHA256（选填，填了下载后校验）", text: $updateSha)
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
+                TextField("更新内容，每行一条（留空自动取下方版本记录）", text: $updateNotes, axis: .vertical)
+                    .lineLimit(3...8)
+            } header: {
+                Label("App 在线更新（v2.21）", systemImage: "arrow.up.circle")
+            } footer: {
+                Text("最新版本号高于用户当前版本时，工作台版本号变橙色「↑」胶囊，设置页出现「发现新版本」。桶里只保留最新一个包：先删 update/ 下旧包再传新包，把对象路径填到第一栏。更新内容留空会自动取下方「版本更新记录」里对应版本的条目。")
             }
 
             // ── AI 模型清单（v1.89）──
@@ -313,6 +341,7 @@ struct RemoteConfigAdminView: View {
                     config = Self.defaultTemplate()
                     aiModelsJSON = ""
                 }
+                fillUpdateForm()
                 loaded = true
                 statusText = "已加载云端配置 v\(config.version)"
             }
@@ -336,6 +365,7 @@ struct RemoteConfigAdminView: View {
             statusText = "AI 模型清单 JSON 格式无效，请检查后重试"
             return
         }
+        applyUpdateForm()
         config.version = (config.version > 0 ? config.version : 0) + 1
         var body = config
         body.updatedBy = CloudUser.username
@@ -363,6 +393,45 @@ struct RemoteConfigAdminView: View {
                 statusText = "已保存 ✓ 配置版本 v\(obj.version ?? body.version)，App 下次启动/同步即生效"
             }
         }.resume()
+    }
+
+    private func fillUpdateForm() {
+        let u = config.update
+        updateVersion = u?.latestVersion ?? ""
+        updateBuild = u?.latestBuild.map { String($0) } ?? ""
+        updateObjectKey = u?.objectKey ?? ""
+        updateDownloadURL = u?.downloadURL ?? ""
+        updateInstallPage = u?.installPageURL ?? ""
+        updateSize = u?.sizeBytes.map { String($0) } ?? ""
+        updateSha = u?.sha256 ?? ""
+        updateNotes = (u?.notes ?? []).joined(separator: "\n")
+    }
+
+    private func applyUpdateForm() {
+        let v = updateVersion.trimmingCharacters(in: .whitespaces)
+        if v.isEmpty {
+            config.update = nil
+            return
+        }
+        var info = config.update ?? RemoteConfig.UpdateInfo()
+        info.latestVersion = v
+        info.latestBuild = Int(updateBuild.trimmingCharacters(in: .whitespaces))
+        info.objectKey = updateObjectKey.trimmingCharacters(in: .whitespaces)
+        info.downloadURL = updateDownloadURL.trimmingCharacters(in: .whitespaces)
+        info.installPageURL = updateInstallPage.trimmingCharacters(in: .whitespaces)
+        info.sizeBytes = Int(updateSize.trimmingCharacters(in: .whitespaces))
+        info.sha256 = updateSha.trimmingCharacters(in: .whitespaces)
+        info.notes = updateNotes.components(separatedBy: "\n")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        if let d = info.releasedAt, !d.isEmpty {
+            // 保留已有发布日期
+        } else {
+            let f = DateFormatter()
+            f.dateFormat = "yyyy-MM-dd"
+            info.releasedAt = f.string(from: Date())
+        }
+        config.update = info
     }
 
     private func addChangelog() {

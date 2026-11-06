@@ -336,8 +336,7 @@ struct MainTabView: View {
     @Environment(\.modelContext) private var modelContext
     // v1.12：自动备份快速备份需要房源容器（保存快照中的房源 JSON）
     @Environment(\.houseModelContext) private var houseModelContext
-    // v1.80：远程配置——最低版本提示（云端 minimumVersion 高于当前版本 → 弹窗引导更新）
-    @State private var showUpdateTip = false
+    // v2.21：在线更新状态统一由 UpdateCenter 管理（工作台版本号 + 设置页检查共用）
     // v1.83：上次异常退出提示（检测到崩溃日志时弹一次，设置页可查看/导出）
     @State private var showCrashTip = false
 
@@ -465,8 +464,10 @@ struct MainTabView: View {
         .onAppear {
             // v1.80：远程配置——先读本地缓存（断网可用），再异步拉取云端最新（联网更新缓存）
             RemoteConfig.loadCache()
-            Task { await RemoteConfig.refresh() }
-            checkMinimumVersion()
+            // v2.21：每次进 App 都检查一次更新——先按本地缓存判断（离线也能显示），
+            // 再复用同一次 config.json 拉取完成在线检查，不额外发请求。
+            UpdateCenter.shared.evaluate()
+            Task { await UpdateCenter.shared.checkOnLaunch() }
             // v1.83：上次异常退出提示（崩溃日志存在时弹一次；设置→崩溃日志可导出定位）
             // v1.95：改为只对【新增】的崩溃日志弹一次——用 UserDefaults 记录上次已提示的最新日志文件名，
             // 相同日志不再重复弹窗（此前每次启动只要有日志就弹，用户反馈每次打开都弹）
@@ -526,11 +527,6 @@ struct MainTabView: View {
         }
         .overlay {
             Color.clear.frame(width: 1, height: 1)
-                .alert("有新版本可用", isPresented: $showUpdateTip) {
-                    Button("知道了") { }
-                } message: {
-                    Text("当前版本低于云端要求的最低版本 \(RemoteConfig.minimumVersion ?? "")，请更新到最新版后使用。")
-                }
                 .alert("自动备份成功", isPresented: Binding(
                     get: { automaticBackupMessage != nil },
                     set: { if !$0 { automaticBackupMessage = nil } }
@@ -703,22 +699,6 @@ struct MainTabView: View {
     // 自动补偿备份：启动和回前台时检查最近一个计划时间槽（v1.12 改造：自动备份 = 快速备份 + 自动上传云端）。
     // D2 方案保留：到点 App 不在前台不备份，下次打开时按 latestDueSlot 自动补做；过点不丢。
 
-    /// v1.80：远程配置——最低版本检查（云端 minimumVersion 高于当前版本 → 提示更新）
-    private func checkMinimumVersion() {
-        guard let minVer = RemoteConfig.minimumVersion else { return }
-        let cur = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
-        func parts(_ v: String) -> [Int] { v.split(separator: ".").compactMap { Int($0) } }
-        let c = parts(cur), m = parts(minVer)
-        let isLower: Bool = {
-            for i in 0..<max(c.count, m.count) {
-                let a = i < c.count ? c[i] : 0
-                let b = i < m.count ? m[i] : 0
-                if a != b { return a < b }
-            }
-            return false
-        }()
-        if isLower { showUpdateTip = true }
-    }
 
     /// v2.9：按「设置 → 自动备份」开关创建或取消 2 分钟定时器（未启用自动备份则不启动定时器）
     private func refreshAutoBackupTimer() {
