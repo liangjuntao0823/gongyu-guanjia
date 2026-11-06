@@ -1236,6 +1236,7 @@ struct AddPropertyView: View {
                         try? modelContext.save()
                         // v1.19 补全 #9：新增/编辑收租房源（含水电结算计划）写操作日志
                         BackupLogStore.log(category: "收租", action: editingProperty == nil ? "新增收租房源" : "编辑收租房源", result: "成功", detail: "房号 \(roomNumber)（租期 \(leaseDuration)）")
+                        NotificationCenter.default.post(name: .dashboardDataChanged, object: nil)
                         dismiss()
                     }
                     .disabled(roomNumber.isEmpty)

@@ -982,6 +982,7 @@ struct EditDealView: View {
                         deal.manager = manager
                         deal.source = source
                         deal.notes = notes
+                        NotificationCenter.default.post(name: .dashboardDataChanged, object: nil)
                         dismiss()
                     }
                     .disabled(roomNumber.isEmpty)
@@ -1033,6 +1034,7 @@ struct AddMiscView: View {
                             // v1.19 补全 #9：新增杂项支出写操作日志
                             BackupLogStore.log(category: "杂项", action: "新增支出", result: "成功", detail: "\(item) ¥\(Int(amount))")
                         }
+                        NotificationCenter.default.post(name: .dashboardDataChanged, object: nil)
                         dismiss()
                     }
                     .disabled(item.isEmpty || amountText.isEmpty)
@@ -1100,6 +1102,7 @@ struct EditMiscView: View {
                         case .expense(let exp):
                             exp.date = date; exp.item = title; exp.amount = amount; exp.notes = notes
                         }
+                        NotificationCenter.default.post(name: .dashboardDataChanged, object: nil)
                         dismiss()
                     }
                     .disabled(title.isEmpty || amountText.isEmpty)

@@ -2,6 +2,12 @@ import SwiftUI
 import SwiftData
 import PhotosUI
 import WebKit
+import UIKit
+
+// v2.19：成交 / 杂项 / 收租合同保存后广播，工作台立即重算，不必切 tab 或下拉刷新。
+extension Notification.Name {
+    static let dashboardDataChanged = Notification.Name("dashboardDataChanged")
+}
 
 struct DashboardView: View {
     let isActive: Bool
@@ -44,6 +50,7 @@ struct DashboardView: View {
     @State private var quickCollectReminder: RentReminder?
     /// v1.98：快捷收租保存失败提示（修复"点收保存无效"无任何提示的问题）
     @State private var collectErrorText: String?
+    @State private var payErrorText: String?
     @State private var quickCollectRent = ""
     // 包租快捷付租
     @State private var quickPayPayout: PayoutRecord?
@@ -262,7 +269,14 @@ struct DashboardView: View {
             var dateComps = DateComponents()
             dateComps.year = targetYear
             dateComps.month = targetMonth
-            dateComps.day = dueDay
+            // v2.19：交租日 31 号遇到 30 天的月份会被落到次月 1 号，这里收敛到当月最后一天
+            var monthFirstComps = DateComponents()
+            monthFirstComps.year = targetYear
+            monthFirstComps.month = targetMonth
+            monthFirstComps.day = 1
+            let monthFirst = calendar.date(from: monthFirstComps) ?? now
+            let daysInMonth = calendar.range(of: .day, in: .month, for: monthFirst)?.count ?? 31
+            dateComps.day = min(max(dueDay, 1), daysInMonth)
             let dueDate = calendar.date(from: dateComps) ?? now
             let daysDiff = calendar.dateComponents([.day], from: now, to: dueDate).day ?? 0
             let isOverdue = daysDiff < 0
@@ -345,15 +359,21 @@ struct DashboardView: View {
 
                 let record = payout.monthlyPayouts.first(where: { $0.month == recordMonth })
                 if record == nil || !record!.isPaid {
-                    // 金额：优先用记录中的金额（如果>0），否则用默认的月租×期数月数
-                    let defaultAmount = (payout.monthlyRent ?? 0) * Double(periodMonths)
-                    let amount = (record?.amount ?? 0) > 0 ? record!.amount : defaultAmount
+                    // v2.19：金额优先用记录中的金额，否则直接取付租计划该期应付（已按免租期扣减）
+                    let amount = (record?.amount ?? 0) > 0 ? record!.amount : payout.plannedAmount(forPeriodIndex: i)
 
                     // 计算付款日期（用于判断逾期和天数差）
                     var dateComps = DateComponents()
                     dateComps.year = calendar.component(.year, from: startDate) + (startMonth + i * periodMonths - 1) / 12
                     dateComps.month = displayMonth
-                    dateComps.day = startDay
+                    // v2.19：付款日 31 号遇到 30 天的月份同样收敛到当月最后一天
+                    var monthFirstComps = DateComponents()
+                    monthFirstComps.year = dateComps.year
+                    monthFirstComps.month = displayMonth
+                    monthFirstComps.day = 1
+                    let monthFirst = calendar.date(from: monthFirstComps) ?? startDate
+                    let daysInMonth = calendar.range(of: .day, in: .month, for: monthFirst)?.count ?? 31
+                    dateComps.day = min(max(startDay, 1), daysInMonth)
                     let payDate = calendar.date(from: dateComps) ?? startDate
 
                     // 使用日历准确计算天数差
@@ -748,6 +768,9 @@ struct DashboardView: View {
             guard isActive else { return }
             currentTime = Date()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .dashboardDataChanged)) { _ in
+            refreshDashboard()
+        }
         .onChange(of: isActive) { _, active in
             guard active else { return }
             currentTime = Date()
@@ -858,7 +881,7 @@ struct DashboardView: View {
             Text(collectErrorText ?? "")
         }
         .sheet(item: $quickPayPayout) { payout in
-            QuickPaySheet(payout: payout, amountText: $quickPayAmount, payMonth: quickPayMonth, recordMonth: quickPayRecordMonth, onSave: {
+            QuickPaySheet(payout: payout, amountText: $quickPayAmount, payMonth: quickPayMonth, recordMonth: quickPayRecordMonth, errorText: $payErrorText, onSave: {
                 let record = payout.monthlyPayouts.first(where: { $0.month == quickPayRecordMonth })
                 if let r = record {
                     r.isPaid = true
@@ -870,9 +893,17 @@ struct DashboardView: View {
                     modelContext.insert(newRecord)
                     payout.monthlyPayouts.append(newRecord)
                 }
-                try? modelContext.save()
+                // v2.19：付租保存失败不再静默，弹窗内红字提示并允许重试
+                do {
+                    try modelContext.save()
+                } catch {
+                    payErrorText = "保存失败：\(error.localizedDescription)"
+                    return false
+                }
+                payErrorText = nil
                 refreshDashboard()
                 quickPayPayout = nil
+                return true
             })
         }
         .sheet(item: $viewingProperty) { prop in
@@ -981,7 +1012,7 @@ private struct DashboardTodoSection: View {
                 .listStyle(.plain)
                 .scrollDisabled(true)
                 .frame(height: pending.reduce(CGFloat(0)) { total, item in
-                    total + (item.content.count > 22 ? 82 : 62)
+                    total + Self.rowHeight(for: item.content)
                 })
             }
         }
@@ -989,6 +1020,21 @@ private struct DashboardTodoSection: View {
     private func move(from source: IndexSet, to destination: Int) {
         var ordered = pending; ordered.move(fromOffsets: source, toOffset: destination)
         for (index, item) in ordered.enumerated() { item.sortOrder = index }; try? modelContext.save()
+    }
+
+    /// v2.19：按真实文本宽度测行高（原来按 22 字两档硬算，长待办会被裁半行）。
+    /// 宽度取保守值，宁可多留 4pt 也不裁字。
+    fileprivate static func rowHeight(for content: String) -> CGFloat {
+        let textWidth: CGFloat = 250
+        let font = UIFont.systemFont(ofSize: 15, weight: .semibold)
+        let rect = (content as NSString).boundingRect(
+            with: CGSize(width: textWidth, height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: [.font: font],
+            context: nil
+        )
+        // 内容行 + 间距5 + 日期行17 + 行内上下8 + listRowInsets上下8 + 余量4
+        return ceil(rect.height) + 42
     }
 }
 
@@ -1033,7 +1079,7 @@ private struct DashboardExpirySection: View {
     let properties: [Property]; @Binding var isCollapsed: Bool; @Binding var viewingProperty: Property?
     var body: some View {
         DashboardSectionCard(title: "即将到期", subtitle: "\(properties.count)套", isCollapsed: $isCollapsed) {
-            ForEach(properties.prefix(3), id: \.id) { prop in
+            ForEach(properties, id: \.id) { prop in
                 HStack(spacing: 10) {
                     VStack(alignment: .leading, spacing: 6) {
                         HStack(spacing: 8) {
@@ -1281,7 +1327,8 @@ struct QuickPaySheet: View {
     @Binding var amountText: String
     let payMonth: Int
     let recordMonth: Int
-    let onSave: () -> Void
+    @Binding var errorText: String?
+    let onSave: () -> Bool
 
     var body: some View {
         NavigationStack {
@@ -1293,6 +1340,11 @@ struct QuickPaySheet: View {
                 Section("付租金额") {
                     TextField("实付金额", text: $amountText)
                         .keyboardType(.decimalPad)
+                    if let errorText {
+                        Text(errorText)
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(.red)
+                    }
                 }
             }
             .scrollContentBackground(.hidden)
@@ -1304,8 +1356,8 @@ struct QuickPaySheet: View {
                 ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("保存") {
-                        onSave()
-                        dismiss()
+                        // v2.19：保存成功才关弹窗；失败保留弹窗并显示红字
+                        if onSave() { dismiss() }
                     }
                     .foregroundColor(.themeAccent)
                 }

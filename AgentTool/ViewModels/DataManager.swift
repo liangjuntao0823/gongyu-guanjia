@@ -59,23 +59,7 @@ final class DataManager: ObservableObject {
         // “管理”与“托管包租”分别按房源类型统计；兼容旧数据中的“普通”类型。
         let activeProperties = activeRentalProperties.filter { $0.typeDisplayName == "管理" }
 
-        // 本月应收租金
-        var monthlyRentReceivable: Double = 0
-        var monthlyRentCollected: Double = 0
-        for prop in activeRentalProperties {
-            for record in prop.monthlyRentRecords {
-                if record.year == currentYear && record.month == currentMonth {
-                    monthlyRentReceivable += record.amount > 0 ? record.amount : prop.rent
-                    if record.isPaid {
-                        monthlyRentCollected += record.amount > 0 ? record.amount : prop.rent
-                    }
-                }
-            }
-            // 如果没有当月记录，按租金计入应收
-            if !prop.monthlyRentRecords.contains(where: { $0.year == currentYear && $0.month == currentMonth }) {
-                monthlyRentReceivable += prop.rent
-            }
-        }
+        // v2.19：工作台不再展示“本月应收/已收租金”，该统计随之移除（避免算了不用）。
 
         // 本月成交中介费
         var monthlyDealFee: Double = 0
@@ -128,8 +112,6 @@ final class DataManager: ObservableObject {
             totalProperties: activeRentalProperties.count,
             activeProperties: activeProperties.count,
             managedProperties: activeRentalProperties.filter { $0.isManaged }.count,
-            monthlyRentReceivable: monthlyRentReceivable,
-            monthlyRentCollected: monthlyRentCollected,
             monthlyDealFee: monthlyDealFee,
             totalDeals: totalDeals,
             monthlyDeals: monthlyDeals,
@@ -147,8 +129,6 @@ struct DashboardStats {
     var totalProperties: Int
     var activeProperties: Int
     var managedProperties: Int
-    var monthlyRentReceivable: Double
-    var monthlyRentCollected: Double
     var monthlyDealFee: Double
     var totalDeals: Int
     var monthlyDeals: Int

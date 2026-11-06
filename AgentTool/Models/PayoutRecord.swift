@@ -85,3 +85,34 @@ final class PayoutUtilityRecord {
         self.isSettled = isSettled
     }
 }
+
+// v2.19：付租计划金额（与包租板块付租计划同口径，含免租期按天扣减）。
+// 工作台提醒、付租计划展示统一走这里，避免“月租×期数月”与实际应付不一致。
+extension PayoutRecord {
+    var planPeriodCount: Int {
+        switch paymentMethod {
+        case "季付": return 4
+        case "半年付": return 2
+        case "年付": return 1
+        default: return 12
+        }
+    }
+
+    /// 第 index 期（0 起）应付金额：月租按 30 天折算，免租期从第一期起逐期扣减。
+    func plannedAmount(forPeriodIndex index: Int) -> Double {
+        let periodCount = planPeriodCount
+        let periodMonths = 12 / periodCount
+        let monthlyRent = (monthlyRent ?? 0) > 0 ? (monthlyRent ?? 0) : annualRent / 12.0
+        let dailyRent = monthlyRent / 30.0
+        var remainingFreeDays = max(rentFreeDays, 0)
+        var amount = monthlyRent * Double(periodMonths)
+
+        for _ in 0...max(index, 0) {
+            let totalDays = periodMonths * 30
+            let freeDays = min(remainingFreeDays, totalDays)
+            amount = dailyRent * Double(totalDays - freeDays)
+            remainingFreeDays -= freeDays
+        }
+        return amount
+    }
+}

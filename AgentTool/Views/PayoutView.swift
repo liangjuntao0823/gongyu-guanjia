@@ -237,6 +237,7 @@ struct PayoutView: View {
                     payout.isDeleted = true; payout.deletedAt = Date()
                 }
                 try? modelContext.save()
+                NotificationCenter.default.post(name: .dashboardDataChanged, object: nil)
                 payoutToDelete = nil
             }
         } message: {
@@ -261,6 +262,7 @@ struct PayoutView: View {
     private func deletePayout(at offsets: IndexSet) {
         for index in offsets { payouts[index].isDeleted = true; payouts[index].deletedAt = Date() }
         try? modelContext.save()
+        NotificationCenter.default.post(name: .dashboardDataChanged, object: nil)
         // v1.19 补全 #9：删除包租记录写操作日志
         BackupLogStore.log(category: "包租", action: "删除包租记录", result: "成功", detail: "删除 \(offsets.count) 条（移入回收站）")
     }
@@ -991,6 +993,7 @@ struct MonthPayoutRow: View {
             payout.monthlyPayouts.append(record)
         }
         try? modelContext.save()
+        NotificationCenter.default.post(name: .dashboardDataChanged, object: nil)
     }
 }
 
