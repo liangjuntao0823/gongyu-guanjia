@@ -5,6 +5,39 @@ import AVFoundation
 import UniformTypeIdentifiers
 import Photos
 
+// MARK: - v2.20 云端同步未读标记
+
+/// 云端同步把房源「新增」或「被云端覆盖修改」后，卡片画红框提示；打开一次详情页即清除。
+/// 存 UserDefaults（房号 key 数组），不占 SwiftData schema，升级无需迁移。
+enum UnreadCloudHouseStore {
+    private static let storageKey = "unread_cloud_house_keys"
+    static let didChange = Notification.Name("unreadCloudHouseKeysChanged")
+
+    static func all() -> Set<String> {
+        Set(UserDefaults.standard.stringArray(forKey: storageKey) ?? [])
+    }
+
+    static func isUnread(_ roomKey: String) -> Bool {
+        all().contains(roomKey)
+    }
+
+    static func mark(_ roomKeys: [String]) {
+        guard !roomKeys.isEmpty else { return }
+        var set = all()
+        for key in roomKeys where !key.isEmpty { set.insert(key) }
+        UserDefaults.standard.set(Array(set), forKey: storageKey)
+        NotificationCenter.default.post(name: didChange, object: nil)
+    }
+
+    static func clear(_ roomKey: String) {
+        var set = all()
+        guard set.contains(roomKey) else { return }
+        set.remove(roomKey)
+        UserDefaults.standard.set(Array(set), forKey: storageKey)
+        NotificationCenter.default.post(name: didChange, object: nil)
+    }
+}
+
 // MARK: - 主题色（合体后统一跟随主 App 深绿主题：主题绿主色 + 主题绿强调 + 统一底色）
 
 enum AppTheme {
@@ -193,6 +226,8 @@ struct HouseCardView: View {
 
     @State private var previewRoute: PhotoPreviewRoute? = nil
     @State private var playingVideo: MediaItem? = nil
+    // v2.20：云端同步新增/修改过、还没点开详情 → 红框
+    @State private var isUnread = false
 
     /// 本房源是否正在上传/同步（匹配房号）
     private var isSyncingThis: Bool {
@@ -301,6 +336,18 @@ struct HouseCardView: View {
         .background(Color.white)
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .shadow(color: .black.opacity(0.05), radius: 3, x: 0, y: 1)
+        // v2.20：云端同步带来过变更、还没点开详情 → 红框提示（点开详情后自动消失）
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Color.red.opacity(0.85), lineWidth: isUnread ? 2 : 0)
+        )
+        .onAppear { isUnread = UnreadCloudHouseStore.isUnread(house.mediaRoomKey) }
+        .onChange(of: house.mediaRoomKey) { _, newKey in
+            isUnread = UnreadCloudHouseStore.isUnread(newKey)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UnreadCloudHouseStore.didChange)) { _ in
+            isUnread = UnreadCloudHouseStore.isUnread(house.mediaRoomKey)
+        }
         .fullScreenCover(item: $previewRoute) { route in
             PhotoPreviewView(photos: house.photos, startIndex: route.index, roomKey: house.mediaRoomKey)
         }

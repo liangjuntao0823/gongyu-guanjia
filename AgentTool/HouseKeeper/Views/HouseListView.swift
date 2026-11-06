@@ -1630,6 +1630,7 @@ struct HouseListView: View {
         do {
             var addedCount = 0, updatedCount = 0, deletedCount = 0, pushedCount = 0
             var removedMediaCount = 0
+            var unreadRoomKeys: [String] = []   // v2.20：本次同步新增/被云端覆盖的房源，标红待看
             var addedRoomNo: [String] = []
             var updatedRoomNo: [String] = []
             var deletedRoomNo: [String] = []
@@ -1655,6 +1656,7 @@ struct HouseListView: View {
                             h.lastUpdatedAt = rec.updatedAt
                             updatedCount += 1
                             updatedRoomNo.append(rec.roomKey)   // v1.69：带前缀真实引用
+                            unreadRoomKeys.append(h.mediaRoomKey)   // v2.20：被云端覆盖 → 标红
                             LocalHouseLedger.save(h)   // v1.72（#6）：本地一房一账本镜像随更新同步
                         }
                         // v1.43：媒体差异双向 reconcile（归一化等价，.mov/.mp4 视为同一文件）——
@@ -1695,6 +1697,7 @@ struct HouseListView: View {
                         LocalHouseLedger.save(h)   // v1.72（#6）：本地一房一账本镜像
                         addedCount += 1
                         addedRoomNo.append(rec.roomKey)   // v1.69：带前缀真实引用
+                        unreadRoomKeys.append(h.mediaRoomKey)   // v2.20：新增 → 标红
                         if !rec.mediaNames.isEmpty {
                             mediaRoomKeys.append((h.mediaRoomKey, rec.roomKey))
                             mediaDiffRoomNo.append(rec.roomKey)
@@ -1717,6 +1720,7 @@ struct HouseListView: View {
                 }
                 try? ctx.save()
                 reloadHouses()
+                UnreadCloudHouseStore.mark(unreadRoomKeys)   // v2.20：同步新增/修改的房源标红，点开详情后消失
             }
             // v1.64：本地补传聚合为一次全量账本写入（串行）——此前 7 个异步 Task 并发对 h/_houses.json
             // 做「读改写」，最后一次写回会覆盖其他并发任务的结果，导致云端只剩最后一条（实测只剩 2309）。

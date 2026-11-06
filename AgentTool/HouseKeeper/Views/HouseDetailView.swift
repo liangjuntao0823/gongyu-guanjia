@@ -225,7 +225,11 @@ struct HouseDetailView: View {
     var body: some View {
         dialogLayer
         // v1.43：打开详情自动补缺——记录在但磁盘文件缺失且云端有 → 自动下载回补（用户手删 media 文件夹后重开不再空白）
-        .onAppear { repairMissingMediaIfNeeded() }
+        .onAppear {
+            repairMissingMediaIfNeeded()
+            // v2.20：进来一次就算已读，房源卡片红框消失
+            UnreadCloudHouseStore.clear(house.mediaRoomKey)
+        }
         // v1.44：收到房源数据变更通知（下载完成/编辑保存等）→ 触发媒体区重建，下载后立即显示
         .onReceive(NotificationCenter.default.publisher(for: HouseListView.houseStoreChanged)) { _ in
             mediaRefreshTick += 1
