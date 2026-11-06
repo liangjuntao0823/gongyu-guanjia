@@ -774,7 +774,82 @@ struct SettingsView: View {
 
     /// v1.6：设置页主体拆为独立属性（避免 body 表达式 type-check 超时）
     /// v1.7：tint 改为 iOS 原生蓝（房源管家风格设置页配色）；顶部横线随滚动动态显示
+    /// v2.18：再拆三层——分组 / 视觉层 / 导航与弹窗。7 组内容叠在一条表达式上会让编译器 type-check 超时
     private var settingsForm: some View {
+        settingsFormChrome
+            .alert("提示", isPresented: $showAlert) {
+                Button("确定", role: .cancel) { }
+            } message: {
+                Text(showMessage)
+            }
+            // v1.12：备份方式选择（快速备份=账本+媒体清单自动传云端；全量备份=含照片视频）
+            .confirmationDialog("选择备份方式", isPresented: $showBackupKindSheet, titleVisibility: .visible) {
+                Button("快速备份（推荐）") { performNewBackup(kind: .fast) }
+                Button("全量备份（含照片视频）") { performNewBackup(kind: .full) }
+                Button("取消", role: .cancel) { }
+            } message: {
+                Text("快速备份：账本 + 媒体清单（不含房源与照片视频文件），备份后自动上传云端；房源从云端同步恢复。\n全量备份：账本 + 房源 + 全部照片视频，备份后可在「备份文件管理」中手动上传云端。")
+            }
+            .alert("离线重建房源", isPresented: $showOfflineRestoreConfirm) {
+                Button("取消", role: .cancel) { }
+                Button("开始重建") { runOfflineRestore() }
+            } message: {
+                Text("将扫描本机 media 文件夹中的所有账本（每套 info.json）并重建房源记录。无需联网；已有房源按账本刷新，缺失房源自动补齐，不删除任何现有数据。")
+            }
+            .confirmationDialog("选择要清空的板块", isPresented: $showClearSheet, titleVisibility: .visible) {
+                Button("清空成交数据") { clearType = .deals; showClearConfirm = true }
+                Button("清空收租数据") { clearType = .properties; showClearConfirm = true }
+                Button("清空包租数据") { clearType = .payouts; showClearConfirm = true }
+                Button("清空全部数据", role: .destructive) { clearType = .total; showClearConfirm = true }
+                Button("取消", role: .cancel) { }
+            }
+            .alert("确认清空", isPresented: $showClearConfirm) {
+                Button("取消", role: .cancel) { clearType = nil }
+                Button("确定清空", role: .destructive) {
+                    if let type = clearType {
+                        clearData(type: type)
+                    }
+                    clearType = nil
+                }
+            } message: {
+                if let type = clearType {
+                    Text(type == .total ? "确定要清空所有数据吗？此操作不可恢复，建议先备份数据。" : "确定要清空\(type == .deals ? "成交数据" : type == .properties ? "收租数据" : "包租数据")吗？此操作不可恢复。")
+                } else {
+                    Text("")
+                }
+            }
+    }
+
+    /// 导航栏（回收站入口）与进入页面时的初始化
+    private var settingsFormChrome: some View {
+        settingsFormVisual
+            .navigationTitle("设置")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                // v1.3：回收站入口在设置页右上角（图标+文字）
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        showTrash = true
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "trash.fill")
+                            Text("回收站")
+                        }
+                        .font(.subheadline)
+                    }
+                }
+            }
+            .onAppear {
+                loadAutoSettings()
+                backupProgress.value = nil   // v2.18：进页面时进度 HUD 一定不残留
+                // v1.55：读取选房链接有效期设置（默认 2 天）
+                let d = UserDefaults.standard.integer(forKey: "roomsLinkExpiryDays")
+                roomsLinkExpiry = d > 0 ? d : Int(RemoteConfig.param("roomsLinkExpiryDays", 2))
+            }
+    }
+
+    /// 表单本体（7 组）+ 滚动监听 + 主题色 + 顶部两条 overlay
+    private var settingsFormVisual: some View {
         Form {
                 accountSection
                 shareSection
@@ -813,70 +888,6 @@ struct SettingsView: View {
                     .overlay(Capsule().stroke(Color.themeBorder, lineWidth: 0.5))
                     .padding(.top, 10)
                     .allowsHitTesting(false)
-                }
-            }
-            .navigationTitle("设置")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                // v1.3：回收站入口在设置页右上角（图标+文字）
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        showTrash = true
-                    } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: "trash.fill")
-                            Text("回收站")
-                        }
-                        .font(.subheadline)
-                    }
-                }
-            }
-            .onAppear {
-                loadAutoSettings()
-                backupProgress.value = nil   // v2.18：进页面时进度 HUD 一定不残留
-                // v1.55：读取选房链接有效期设置（默认 2 天）
-                let d = UserDefaults.standard.integer(forKey: "roomsLinkExpiryDays")
-                roomsLinkExpiry = d > 0 ? d : Int(RemoteConfig.param("roomsLinkExpiryDays", 2))
-            }
-            .alert("提示", isPresented: $showAlert) {
-                Button("确定", role: .cancel) { }
-            } message: {
-                Text(showMessage)
-            }
-            // v1.12：备份方式选择（快速备份=账本+房源+清单自动传云端；全量备份=含照片视频）
-            .confirmationDialog("选择备份方式", isPresented: $showBackupKindSheet, titleVisibility: .visible) {
-                Button("快速备份（推荐）") { performNewBackup(kind: .fast) }
-                Button("全量备份（含照片视频）") { performNewBackup(kind: .full) }
-                Button("取消", role: .cancel) { }
-            } message: {
-                Text("快速备份：账本 + 媒体清单（不含房源与照片视频文件），备份后自动上传云端；房源从云端同步恢复。\n全量备份：账本 + 房源 + 全部照片视频，备份后可在「查看备份文件」中手动上传云端。")
-            }
-            .alert("离线重建房源", isPresented: $showOfflineRestoreConfirm) {
-                Button("取消", role: .cancel) { }
-                Button("开始重建") { runOfflineRestore() }
-            } message: {
-                Text("将扫描本机 media 文件夹中的所有账本（每套 info.json）并重建房源记录。无需联网；已有房源按账本刷新，缺失房源自动补齐，不删除任何现有数据。")
-            }
-            .confirmationDialog("选择要清空的板块", isPresented: $showClearSheet, titleVisibility: .visible) {
-                Button("清空成交数据") { clearType = .deals; showClearConfirm = true }
-                Button("清空收租数据") { clearType = .properties; showClearConfirm = true }
-                Button("清空包租数据") { clearType = .payouts; showClearConfirm = true }
-                Button("清空全部数据", role: .destructive) { clearType = .total; showClearConfirm = true }
-                Button("取消", role: .cancel) { }
-            }
-            .alert("确认清空", isPresented: $showClearConfirm) {
-                Button("取消", role: .cancel) { clearType = nil }
-                Button("确定清空", role: .destructive) {
-                    if let type = clearType {
-                        clearData(type: type)
-                    }
-                    clearType = nil
-                }
-            } message: {
-                if let type = clearType {
-                    Text(type == .total ? "确定要清空所有数据吗？此操作不可恢复，建议先备份数据。" : "确定要清空\(type == .deals ? "成交数据" : type == .properties ? "收租数据" : "包租数据")吗？此操作不可恢复。")
-                } else {
-                    Text("")
                 }
             }
     }
