@@ -178,4 +178,20 @@ enum CrashLogCollector {
 
     /// 崩溃日志是否存在
     static func hasLogs() -> Bool { !logFiles().isEmpty }
+
+    /// v2.18：崩溃日志总占用（设置页入口右侧显示，不用进去才知道占多大）
+    static func totalBytes() -> Int {
+        logFiles().reduce(0) { sum, url in
+            let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+            return sum + size
+        }
+    }
+
+    /// v2.18：清空全部崩溃日志（只删 Documents/备份/Logs/Crash*.txt，不动操作日志与其他文件）
+    @discardableResult
+    static func deleteAll() -> Int {
+        let files = logFiles()
+        for url in files { try? FileManager.default.removeItem(at: url) }
+        return files.count
+    }
 }

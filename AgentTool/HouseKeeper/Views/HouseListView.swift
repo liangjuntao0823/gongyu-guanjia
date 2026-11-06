@@ -38,6 +38,8 @@ struct HouseListView: View {
     }
 
     @State private var searchText = ""
+    /// v2.18：房源顶栏「操作日志」入口（批量导入旁边），不用再进设置页才能看日志
+    @State private var showLogs = false
     /// v2.16：订阅卡片进度条——正在上传/同步的那套临时置顶，让高楼层的房源不用下滑才看到进度
     @ObservedObject private var syncProgress = HouseSyncProgress.shared
     @State private var towerFilter: Int? = nil      // nil = 全部
@@ -280,6 +282,12 @@ struct HouseListView: View {
                         Button("取消") { exitMultiSelect() }
                     } else {
                         HStack(spacing: 14) {
+                            // v2.18：操作日志入口（批量导入旁边；原来只能进设置页才能看日志）
+                            Button {
+                                showLogs = true
+                            } label: {
+                                Image(systemName: "list.bullet.rectangle")
+                            }
                             // v1.58：批量录入入口（清单导入 / 媒体包导入 / 扫描补录）
                             Button {
                                 showBatchImport = true
@@ -302,6 +310,10 @@ struct HouseListView: View {
             }
             .sheet(isPresented: $showBatchImport) {
                 HouseBatchImportView()
+            }
+            // v2.18：顶栏操作日志（本机区 + 云端区，与设置页同一个查看器）
+            .sheet(isPresented: $showLogs) {
+                BackupLogsView()
             }
             .sheet(item: $showEditHouse) { house in
                 HouseEditView(house: house)
@@ -664,6 +676,13 @@ struct HouseListView: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel(showOnlyNoMedia ? "仅看无媒体（已开启）" : "仅看无媒体")
+
+            // v2.18：已收录总数（从设置页移来）——固定显示全量套数，不随筛选变化
+            Text("共 \(houses.count) 套")
+                .font(.caption2)
+                .foregroundColor(.secondary)
+                .lineLimit(1)
+                .fixedSize()
 
             Spacer()
 

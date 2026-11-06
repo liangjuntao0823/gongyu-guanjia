@@ -18,10 +18,11 @@ final class LocalNotificationManager: NSObject, UNUserNotificationCenterDelegate
     private let ledgerKey = "localNotificationLedger"
     private var rebuildGeneration = 0
 
+    /// v2.18：移除「自定义音」选项——四个场景原本共用一个 custom-notification.caf，
+    /// 工程内从未打包该音频文件，选它永远回落系统音（形同虚设）。现统一使用系统默认提示音。
     private func sound(for category: String) -> UNNotificationSound {
-        let key = "notificationSound_\(category)"
-        let value = UserDefaults.standard.string(forKey: key) ?? "system"
-        return value == "custom" ? UNNotificationSound(named: UNNotificationSoundName("custom-notification.caf")) : .default
+        _ = category
+        return .default
     }
 
     func configure() {

@@ -674,7 +674,7 @@ struct AjkSettingsDetailView: View {
                         .font(.system(size: 13))
                         .autocapitalization(.none)
                         .keyboardType(.URL)
-                    Text("默认：经纪人后台全部房源页（vip.anjuke.com … allHouse）。读取后自动只保留利保米兰公馆房源；如你在其他小区也发布房源，可在这里更换页面 URL")
+                    Text("只影响「安居客后台」板块的列表抓取（默认经纪人后台全部房源页）。「房源排名 → 安居客」是另一套前台关键词抓取，固定「利保米兰公馆」，不受这里影响。读取后自动只保留利保米兰公馆房源。")
                         .font(.system(size: 11))
                         .foregroundColor(.themeText3)
                 }

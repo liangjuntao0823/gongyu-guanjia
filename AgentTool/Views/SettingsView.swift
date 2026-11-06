@@ -85,45 +85,227 @@ struct SettingsView: View {
     @EnvironmentObject private var meterStore: MeterStore
     @State private var meterLinkInput = ""
     @State private var meterLinkTip: String?
+    /// v2.18：全量备份进度（0~1）；nil = 没在跑。此前只有一句「正在生成全量备份…」，几十秒没反馈像卡死
+    @ObservedObject private var backupProgress = FullBackupProgressHub.shared
 
     /// v1.41：刷新分享水印入口副标题（返回设置页 / 页面出现时读取最新 store，立即反映开关状态）
     private func refreshWatermarkSubtitle() {
         let wm = WatermarkSettingsStore.current
         watermarkSubtitle = wm.enabled ? "已开启 · \(wm.text)" : "已关闭"
     }
-    @AppStorage("notificationSound_rent") private var rentSound = "system"
-    @AppStorage("notificationSound_expiry") private var expirySound = "system"
-    @AppStorage("notificationSound_payout") private var payoutSound = "system"
-    @AppStorage("notificationSound_todo") private var todoSound = "system"
     @AppStorage("defaultElectricPrice") private var defaultElectricPrice = "0.8"
     @AppStorage("defaultWaterPrice") private var defaultWaterPrice = "5.5"
     @AppStorage("defaultUtilityPrepayment") private var defaultUtilityPrepayment = "0"
 
     private let backupManager = DataBackupManager.shared
 
-    /// v1.12：已收录房源统计口径——以房源库为准（排除回收站）；容器不可用时回退目录计数
-    private var houseCountText: Int {
-        if let ctx = houseModelContext,
-           let all = try? ctx.fetch(FetchDescriptor<House>()) {
-            return all.filter { !($0.isDeleted ?? false) }.count
-        }
-        return MediaStore.houseCount()
-    }
-
     private var appVersion: String {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
     }
 
-    /// v1.6：房源分享设置（合并自原房源板块独立设置页）
-    /// v1.70：小字说明恢复为仅讲云端配置口径——不再掺入版本更新/同步机制等内容
-    /// （v1.69 曾误并入同步机制、待补传媒体、房号前缀规范等版本更新内容，已还原）
-    private static let houseShareFooter = "云端配置：腾讯云 COS 存储桶、密钥、自定义域名与云函数地址（后台网址），用于上传房源图片/视频生成微信分享卡片链接，以及打开云端管理后台；可导出部署包给别的房东自建后台。名片信息：分享 H5 页面和微信卡片上显示的姓名与电话。压缩上传开启后，新增/编辑房源的图片视频上传云端与分享 H5 都会压缩（视频压到 720p、图片轻压缩），上传更快更省流量。房源数据（数据库、图片视频、二维码）默认存放在「公寓管家」文件夹内的「备份」「media」两个子文件夹（v1.40 起重建），长按拷贝/共享即为备份，重装后放回原位即可还原。"
-    private var houseShareSection: some View {
+    /// v2.18：崩溃日志占用（入口右侧直接显示，不用点进去才知道占多大）
+    private var crashLogBytes: Int {
+        CrashLogCollector.totalBytes()
+    }
+
+    // MARK: - 组 1：账号与云端（v2.18 设置页重排）
+
+    private var accountSection: some View {
         Section {
+            HStack {
+                Label {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("我的用户名")
+                        Text("操作日志 / 分享 / 统计都带这个名字；在「云端配置」里可下拉选云端已有的用户名")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                } icon: {
+                    Image(systemName: "person.fill")
+                }
+                Spacer()
+                Text(CloudUser.username.isEmpty ? "未设置" : CloudUser.username)
+                    .font(.footnote)
+                    .foregroundColor(CloudUser.username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? .red : .secondary)
+            }
             NavigationLink {
                 CosConfigView()
             } label: {
-                Label("云端配置", systemImage: "server.rack")
+                Label {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("云端配置")
+                        Text("COS 存储桶 / 密钥 / 自定义域名 / 云函数地址")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                } icon: {
+                    Image(systemName: "server.rack")
+                }
+            }
+            NavigationLink {
+                AdminPasswordView()
+            } label: {
+                Label {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("管理后台口令")
+                        Text("网页版登录用 · App 内自动免登录")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                } icon: {
+                    Image(systemName: "lock.shield")
+                }
+            }
+        } header: {
+            Text("账号与云端")
+        } footer: {
+            Text("云端配置决定房源图片/视频传到哪个桶、分享卡片用哪个域名；配好后可导出部署包给别的房东自建后台。")
+        }
+    }
+
+    // MARK: - 组 2：分享与展示
+
+    private static let shareSectionFooter = "这一组只决定「分享出去的东西长什么样、有效期多久、要不要水印和压缩」。桶、密钥、域名在上一组「账号与云端」里。"
+    private var shareSection: some View {
+        Section {
+            NavigationLink {
+                ShareProfileView()
+            } label: {
+                Label("名片信息", systemImage: "person.crop.circle")
+            }
+            // v1.47：公开选房 H5——复制/分享给租客的实时选房链接（只显示户型，实时读云端账本）
+            NavigationLink {
+                RoomsShareView()
+            } label: {
+                Label {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("公开选房链接")
+                        Text("实时读云端账本，租客自己挑房；有效期在下一行设")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                } icon: {
+                    Image(systemName: "globe.asia.australia")
+                }
+            }
+            // v1.55：选房链接有效期（默认 2 天，可动态调整）——到期后旧链接失效，需重新生成
+            HStack {
+                Label {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("选房链接有效期")
+                        Text("只管「公开选房链接」；到期后旧链接失效，要重新生成")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                } icon: {
+                    Image(systemName: "clock.badge.xmark")
+                }
+                Spacer()
+                Picker("", selection: $roomsLinkExpiry) {
+                    Text("1 天").tag(1)
+                    Text("2 天").tag(2)
+                    Text("3 天").tag(3)
+                    Text("7 天").tag(7)
+                    Text("15 天").tag(15)
+                    Text("30 天").tag(30)
+                }
+                .pickerStyle(.menu)
+                .labelsHidden()
+                .onChange(of: roomsLinkExpiry) { _, newValue in
+                    UserDefaults.standard.set(newValue, forKey: "roomsLinkExpiryDays")
+                    showMessage = "已设为 \(newValue) 天：下次「重新生成链接」按新有效期生效"
+                    showAlert = true
+                }
+            }
+            // v1.36 需求3：分享水印设置（开关/文本/字号/透明度/位置/预览/保存/清除）
+            // v1.41：入口副标题改为 onAppear 刷新——从水印页返回设置页时立即显示最新开关状态
+            NavigationLink {
+                WatermarkSettingsView()
+            } label: {
+                Label {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("分享水印")
+                        Text(watermarkSubtitle)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                } icon: {
+                    Image(systemName: "camera.aperture")
+                }
+            }
+            .onAppear { refreshWatermarkSubtitle() }
+            // v2.18：压缩参数与实现对齐——图片长边 1600 + JPEG 0.8；视频长边 960、约 1 Mbps（v2.15 起）
+            Toggle(isOn: Binding(
+                get: { shareCompressionEnabled },
+                set: { UserDefaults.standard.set($0, forKey: "compressOnShare") }
+            )) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("压缩上传媒体（房源+分享）")
+                    Text("图片长边压到 1600（JPEG 0.8）；视频长边压到 960、约 1 Mbps。只影响之后新上传的文件，已上传的不变。")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            // v2.18：从「刷新分享缓存」改名——实际是全量删除云端分享页后逐间重建
+            Button {
+                showHouseCacheConfirm = true
+            } label: {
+                Label {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("重建全部分享链接")
+                        Text("清掉云端旧分享页后逐间重建；已经发出去的旧链接会立即失效")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                } icon: {
+                    Image(systemName: "arrow.clockwise.circle")
+                }
+            }
+        } header: {
+            Text("分享与展示")
+        } footer: {
+            Text(RemoteConfig.help("shareSectionFooter2", Self.shareSectionFooter))
+        }
+    }
+
+    // MARK: - 组 6：存储与清理
+
+    private var storageSection: some View {
+        Section {
+            HStack {
+                Label {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("数据文件夹大小")
+                        Text("房源照片视频与备份都在这；整个文件夹拷走就是一份完整备份")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                } icon: {
+                    Image(systemName: "externaldrive")
+                }
+                Spacer()
+                Text(houseDocumentsSizeText())
+                    .foregroundColor(.secondary)
+            }
+            // v1.98：AI 产物统一存沙盒根目录「AI产物」文件夹；单击二级确认后清空
+            Button {
+                showAICacheConfirm = true
+            } label: {
+                HStack {
+                    Label {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("AI 产物（可清理）")
+                            Text("AI 生成的账单图片、导出表格等；清空不影响对话记录与 App 数据")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    } icon: {
+                        Image(systemName: "sparkles.rectangle.stack")
+                    }
+                    Spacer()
+                    Text(aiCacheSizeText())
+                        .foregroundColor(.secondary)
+                }
             }
             // v2.7（P2⑯）：手动触发桶孤儿媒体清理——b117：先扫描列清单，用户确认后再删
             Button {
@@ -197,126 +379,15 @@ struct SettingsView: View {
             } message: {
                 Text(orphanCleanResult ?? "")
             }
-            NavigationLink {
-                ShareProfileView()
-            } label: {
-                Label("名片信息", systemImage: "person.crop.circle")
-            }
-            // v1.47：公开选房 H5——复制/分享给租客的实时选房链接（只显示户型，实时读云端账本）
-            NavigationLink {
-                RoomsShareView()
-            } label: {
-                Label("公开选房链接", systemImage: "globe.asia.australia")
-            }
-            // v1.55：选房链接有效期（默认 2 天，可动态调整）——到期后旧链接失效，需重新生成
-            HStack {
-                Label {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("选房链接有效期")
-                        Text("到期后旧链接失效，需重新生成")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                } icon: {
-                    Image(systemName: "clock.badge.xmark")
-                }
-                Spacer()
-                Picker("", selection: $roomsLinkExpiry) {
-                    Text("1 天").tag(1)
-                    Text("2 天").tag(2)
-                    Text("3 天").tag(3)
-                    Text("7 天").tag(7)
-                    Text("15 天").tag(15)
-                    Text("30 天").tag(30)
-                }
-                .pickerStyle(.menu)
-                .labelsHidden()
-                .onChange(of: roomsLinkExpiry) { _, newValue in
-                    UserDefaults.standard.set(newValue, forKey: "roomsLinkExpiryDays")
-                    showMessage = "已设为 \(newValue) 天：下次「重新生成链接」按新有效期生效"
-                    showAlert = true
-                }
-            }
-            // v1.36 需求3：分享水印设置（开关/文本/字号/透明度/位置/预览/保存/清除）
-            // v1.41：入口副标题改为 onAppear 刷新——从水印页返回设置页时立即显示最新开关状态（此前静态文本可能不重算）
-            NavigationLink {
-                WatermarkSettingsView()
-            } label: {
-                Label {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("分享水印")
-                        Text(watermarkSubtitle)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                } icon: {
-                    Image(systemName: "camera.aperture")
-                }
-            }
-            .onAppear { refreshWatermarkSubtitle() }
-            // v1.36 需求7：管理后台口令（网页版登录；App 内免登录）
-            NavigationLink {
-                AdminPasswordView()
-            } label: {
-                Label {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("管理后台口令")
-                        Text("网页版登录用 · App 内自动免登录")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                } icon: {
-                    Image(systemName: "lock.shield")
-                }
-            }
-            // v1.51：压缩开关同时作用于「房源媒体上传云端」与「分享 H5」，文案明确（默认开启：图片压到长边≤1600、视频压到 720p，上传更快更省流量）
-            Toggle("压缩上传媒体（房源+分享）", isOn: Binding(
-                get: { shareCompressionEnabled },
-                set: { UserDefaults.standard.set($0, forKey: "compressOnShare") }
-            ))
-            Button {
-                showHouseCacheConfirm = true
-            } label: {
-                Label("刷新分享缓存", systemImage: "arrow.clockwise.circle")
-            }
-            HStack {
-                Label("数据文件夹大小", systemImage: "externaldrive")
-                Spacer()
-                Text(houseDocumentsSizeText())
-                    .foregroundColor(.secondary)
-            }
-            // v1.98：AI 产物统一存沙盒根目录「AI产物」文件夹；此处仿「数据文件夹大小」展示占用，单击二级确认后清空
-            Button {
-                showAICacheConfirm = true
-            } label: {
-                HStack {
-                    Label("AI对话缓存", systemImage: "bubble.left.and.bubble.right")
-                    Spacer()
-                    Text(aiCacheSizeText())
-                        .foregroundColor(.secondary)
-                }
-            }
-            Text("AI 生成的账单图片、导出表格等产物统一存放于沙盒根目录「AI产物」文件夹，点上方可查看占用并一键清空（清空不影响对话记录与 App 数据）")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-            HStack {
-                Label {
-                    Text(verbatim: "已收录房源")
-                } icon: {
-                    Image(systemName: "building.2")
-                }
-                Spacer()
-                // v1.12：统计口径统一——以房源库为准（排除回收站），不再用 Media 目录计数（删进回收站的房子不再计入）
-                Text("\(houseCountText) 套")
-                    .foregroundColor(.secondary)
-            }
             Button {
                 openHouseDataFolder()
             } label: {
                 Label("打开「文件」App 查看数据文件夹", systemImage: "folder")
             }
+        } header: {
+            Text("存储与清理")
         } footer: {
-            Text(RemoteConfig.help("houseShareFooter", Self.houseShareFooter))
+            Text("数据存放在「公寓管家」文件夹内的 backups / media 两个子文件夹；换机或重装时整个文件夹拷回原位即可还原。")
         }
     }
 
@@ -333,85 +404,47 @@ struct SettingsView: View {
             }
         }
     }
-    // v1.12：数据管理统一为「快速/全量」备份体系（替代旧分板块备份/恢复）；
-    // 旧版分板块 JSON 备份在「查看备份文件 → 旧版备份（JSON）」分组里保留查看/恢复/删除，数据不丢失。
-    private var dataSection: some View {
+    // MARK: - 组 3：备份与安全（v2.18 重排：备份/恢复/自动备份/迁移/日志/清空 归一处）
+
+    private var backupSection: some View {
         Section {
             Button { showBackupKindSheet = true } label: {
-                Label("备份数据", systemImage: "square.and.arrow.down")
+                Label {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("备份数据")
+                        Text("快速 = 账本 + 媒体清单（自动传云端）；全量 = 额外含全部房源与照片视频")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                } icon: {
+                    Image(systemName: "square.and.arrow.down")
+                }
             }
             Button { showBackupCenterRestore = true } label: {
-                Label("恢复数据", systemImage: "square.and.arrow.up")
-            }
-            // v1.75：离线重建房源——无需联网，从本地账本（media/<房号>/info.json）重建房源记录
-            // v1.80：入口显隐由云端远程配置控制（features.showOfflineRestore），小字说明也可云端改
-            if RemoteConfig.feature("showOfflineRestore", true) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Button { showOfflineRestoreConfirm = true } label: {
-                        Label("离线重建房源", systemImage: "arrow.clockwise.circle")
+                Label {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("恢复数据")
+                        Text("从本机或云端备份还原，会覆盖当前数据；恢复前自动留一份安全备份")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
                     }
-                    Text(RemoteConfig.help("offlineRestoreIntro", "无需联网：从本机 media 文件夹的账本（每套 info.json）重建房源记录，数据库丢失或断网时可用，不删除现有数据。"))
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                } icon: {
+                    Image(systemName: "square.and.arrow.up")
                 }
             }
-            // v1.12：备份文件查看器（快速/全量 zip + 云端 + 旧版 JSON）
-            Button { showBackupCenterBrowse = true } label: {
-                Label("查看备份文件", systemImage: "folder")
-            }
-            // v1.12：操作日志（备份/恢复/上传/删除/同步）
-            Button { showLogsView = true } label: {
-                HStack {
-                    Label("操作日志", systemImage: "list.bullet.rectangle")
-                    Spacer()
-                    // v1.19 补全 #7：日志占用显示在入口右侧
-                    Text(ByteCountFormatter.string(fromByteCount: Int64(BackupLogStore.sizeBytes()), countStyle: .file))
-                        .font(.footnote)
-                        .foregroundColor(.secondary)
-                }
-            }
-            // v1.12：崩溃日志（自建日志文件，不依赖第三方）v1.17 需求2：内置查看器 + 右上角导出（App 根目录生成 txt）
-            Button { showCrashLogsView = true } label: {
-                Label("查看 / 导出崩溃日志", systemImage: "ladybug")
-            }
-            // v1.14 需求7：清空数据移到导出崩溃日志下方（板块末位）
-            Button { showClearSheet = true } label: {
-                HStack {
-                    Label("清空数据", systemImage: "trash")
-                        .foregroundColor(.red)
-                    Spacer()
-                    Text("按板块清空")
-                        .font(.footnote)
-                        .foregroundColor(.secondary)
-                }
-            }
-        } footer: {
-            Text(RemoteConfig.help("backupIntro", "备份数据 = 快速备份（账本 + 媒体清单，不含房源与照片视频，自动上传云端；房源统一从云端同步恢复）或全量备份（额外含全部房源与照片视频）。恢复会覆盖当前数据，恢复前自动打包当前数据做安全备份，失败自动还原。v5 起备份/恢复统一走 zip 格式。"))
-        }
-    }
-
-    private var syncSection: some View {
-        Section {
-            Button { showMigration = true } label: {
-                Label("备份与迁移", systemImage: "iphone.and.arrow.forward")
-            }
-            NavigationLink {
-                MediaPendingView()
-            } label: {
-                Label("待补传媒体", systemImage: "arrow.clockwise.icloud")
-            }
-        } footer: {
-            Text("跨端同步和迁移只会在你主动操作后执行，不会自动联网。")
-        }
-    }
-
-    private var autoBackupSection: some View {
-        Section {
             HStack {
-                Label("启用自动备份", systemImage: "clock")
+                Label {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("启用自动备份")
+                        Text("到点自动存一份快速备份并传云端；错过会等下次打开 App 补做")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                } icon: {
+                    Image(systemName: "clock")
+                }
                 Spacer()
-                // v1.42：显式 Binding——set 时立即更新 @State 并落盘（不依赖 onChange 闭包捕获时序），
-                //        与分享水印开关同款修法，拨动即保存、返回再进入即显示最新状态
+                // v1.42：显式 Binding——set 时立即更新 @State 并落盘（与分享水印开关同款修法）
                 Toggle("", isOn: Binding(
                     get: { autoBackupEnabled },
                     set: { newValue in
@@ -456,8 +489,7 @@ struct SettingsView: View {
                     .buttonStyle(.plain)
                 }
                 .onChange(of: backupHour) { _, _ in saveAutoSettings() }
-                // v1.12：自动备份保留天数可配置（默认 7 天）
-                // v1.13 需求9：天数放在 - + 号中间（与备份时间行同款布局）
+                // v1.12：自动备份保留天数可配置（默认 7 天）；v1.13 需求9：天数放在 - + 号中间
                 HStack {
                     Label("保留天数", systemImage: "archivebox")
                     Spacer()
@@ -480,12 +512,117 @@ struct SettingsView: View {
                 }
                 .onChange(of: backupRetentionDays) { _, _ in saveAutoSettings() }
             }
+            // v1.12：备份文件查看器（快速/全量 zip + 云端 + 旧版 JSON）
+            Button { showBackupCenterBrowse = true } label: {
+                Label {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("备份文件管理")
+                        Text("查看本机 / 云端备份，可单条上传、恢复、删除；旧版 JSON 备份也在里面")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                } icon: {
+                    Image(systemName: "folder")
+                }
+            }
+            Button { showMigration = true } label: {
+                Label {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("换机迁移")
+                        Text("导出 .zfgj 迁移包拷到新手机，一次性复制；不是日常同步")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                } icon: {
+                    Image(systemName: "iphone.and.arrow.forward")
+                }
+            }
+            NavigationLink {
+                MediaPendingView()
+            } label: {
+                Label {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("待补传媒体")
+                        Text("上传失败的图片视频排在这里，逐个重试")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                } icon: {
+                    Image(systemName: "arrow.clockwise.icloud")
+                }
+            }
+            // v1.75：离线重建房源——无需联网，从本地账本（media/<房号>/info.json）重建房源记录
+            // v1.80：入口显隐由云端远程配置控制（features.showOfflineRestore），小字说明也可云端改
+            if RemoteConfig.feature("showOfflineRestore", true) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Button { showOfflineRestoreConfirm = true } label: {
+                        Label("离线重建房源", systemImage: "arrow.clockwise.circle")
+                    }
+                    Text(RemoteConfig.help("offlineRestoreIntro", "无需联网：从本机 media 文件夹的账本（每套 info.json）重建房源记录，数据库丢失或断网时可用，不删除现有数据。"))
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+            // v1.12：操作日志（备份/恢复/上传/删除/同步）
+            Button { showLogsView = true } label: {
+                HStack {
+                    Label {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("操作日志")
+                            Text("备份 / 恢复 / 上传 / 删除 / 同步的流水，本机区 + 云端区")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    } icon: {
+                        Image(systemName: "list.bullet.rectangle")
+                    }
+                    Spacer()
+                    Text(ByteCountFormatter.string(fromByteCount: Int64(BackupLogStore.sizeBytes()), countStyle: .file))
+                        .font(.footnote)
+                        .foregroundColor(.secondary)
+                }
+            }
+            // v1.12：崩溃日志（自建日志文件，不依赖第三方）v1.17 需求2：内置查看器 + 右上角导出
+            // v2.18：入口右侧显示占用；查看器里新增「清理全部」
+            Button { showCrashLogsView = true } label: {
+                HStack {
+                    Label {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("崩溃日志")
+                            Text("App 异常退出时自动记录，可查看、导出、清理")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    } icon: {
+                        Image(systemName: "ladybug")
+                    }
+                    Spacer()
+                    Text(ByteCountFormatter.string(fromByteCount: Int64(crashLogBytes), countStyle: .file))
+                        .font(.footnote)
+                        .foregroundColor(.secondary)
+                }
+            }
+            // v1.14 需求7：清空数据放在本组末位（危险操作始终在组末、红字）
+            Button { showClearSheet = true } label: {
+                HStack {
+                    Label("清空数据", systemImage: "trash")
+                        .foregroundColor(.red)
+                    Spacer()
+                    Text("按板块清空")
+                        .font(.footnote)
+                        .foregroundColor(.secondary)
+                }
+            }
+        } header: {
+            Text("备份与安全")
         } footer: {
-            Text(RemoteConfig.help("autoBackupIntro", "自动备份 = 快速备份（账本 + 房源 + 清单），备份成功后自动上传云端；超过保留天数（默认 7 天）的自动备份会自动清理，手动备份不会被删除。若到点 App 未在前台，会等下次打开 App 时自动补做。"))
+            Text(RemoteConfig.help("backupIntro2", "快速备份只含账本 + 媒体清单（不含房源记录与照片视频文件，自动传云端）；全量备份才含全部房源与照片视频（体积大，需在备份文件管理里手动传云端）。恢复会覆盖当前数据，恢复前自动打包当前数据做安全备份，失败自动还原。自动备份固定走快速备份。"))
         }
     }
 
-    private var utilitySection: some View {
+    // MARK: - 组 4：账单与默认值
+
+    private var defaultsSection: some View {
         Section {
             HStack {
                 Label("电费单价", systemImage: "bolt")
@@ -511,83 +648,6 @@ struct SettingsView: View {
                     .multilineTextAlignment(.trailing)
                     .frame(width: 90)
             }
-        } footer: {
-            Text("默认单价和预存仅用于新增房源，不影响已生成的结算记录。")
-        }
-    }
-
-    // MARK: - v1.84 电表监控设置
-
-    private var meterSection: some View {
-        Section {
-            NavigationLink {
-                MeterSettingsDetailView()
-            } label: {
-                Label("电表监控", systemImage: "bolt.batteryblock.fill")
-                Spacer()
-                if meterStore.settings.openId.isEmpty {
-                    Text("未配置链接")
-                        .font(.system(size: 12))
-                        .foregroundColor(.red)
-                } else {
-                    Text(meterStore.settings.provider == .webView ? "网页抓取" : "直连接口")
-                        .font(.system(size: 12))
-                        .foregroundColor(.themeText3)
-                }
-            }
-        } header: {
-            Text("电表监控")
-        } footer: {
-            Text("设置官方电表查询链接、数据源方案、低电量阈值与定时刷新。仅读取展示电量数据，充值仍走官方页面。")
-        }
-    }
-
-    // MARK: - v1.86 安居客后台 + AI 助手设置
-
-    private var ajkSection: some View {
-        Section {
-            NavigationLink {
-                AjkSettingsDetailView()
-            } label: {
-                Label("安居客后台", systemImage: "building.2.fill")
-                Spacer()
-                Text("预警/抓取")
-                    .font(.system(size: 12))
-                    .foregroundColor(.themeText3)
-            }
-        } header: {
-            Text("安居客后台")
-        } footer: {
-            Text("推广房源数据抓取：登录一次持久、房态≥N天实地核验预警、已编辑≥N天下架预警、翻页数与历史快照。只读展示，不做发布操作。")
-        }
-    }
-
-    private var aiSection: some View {
-        Section {
-            NavigationLink {
-                AIAssistantSettingsView()
-            } label: {
-                Label("AI 助手", systemImage: "sparkles")
-                Spacer()
-                if KeychainHelper.exists(key: "ai.volcengine.apiKey") {
-                    Text("已配置")
-                        .font(.system(size: 12))
-                        .foregroundColor(.themeAccent)
-                } else {
-                    Text("未配置 Key")
-                        .font(.system(size: 12))
-                        .foregroundColor(.red)
-                }
-            }
-        } header: {
-            Text("AI 助手")
-        } footer: {
-            Text("火山方舟豆包对话。API Key 只存本机钥匙串（Keychain），不上传不备份；模型、接口端点、偏好模板均可修改，不做死。")
-        }
-    }
-
-    private var billSection: some View {
-        Section {
             Button { showBillTemplate = true } label: {
                 HStack {
                     Label("账单模板设置", systemImage: "textformat.alt")
@@ -597,59 +657,66 @@ struct SettingsView: View {
                         .foregroundColor(.secondary)
                 }
             }
+        } header: {
+            Text("账单与默认值")
+        } footer: {
+            Text("三个默认值只用于「账单」板块生成新账单时的预填，房源本身的租金不读这里；改了不影响任何已生成的账单。")
         }
     }
 
-    private var ringtoneSection: some View {
+    // MARK: - 组 5：外部服务（电表监控 / 安居客后台 / AI 助手）
+
+    private var servicesSection: some View {
         Section {
-            HStack {
-                Label("收租提醒", systemImage: "bell")
-                Spacer()
-                Picker("", selection: $rentSound) {
-                    Text("系统音").tag("system")
-                    Text("自定义音").tag("custom")
+            NavigationLink {
+                MeterSettingsDetailView()
+            } label: {
+                Label {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("电表监控")
+                        Text(meterStore.settings.openId.isEmpty ? "未配置链接" : (meterStore.settings.provider == .webView ? "网页抓取" : "直连接口"))
+                            .font(.caption2)
+                            .foregroundStyle(meterStore.settings.openId.isEmpty ? Color.red : Color.secondary)
+                    }
+                } icon: {
+                    Image(systemName: "bolt.batteryblock.fill")
                 }
-                .pickerStyle(.menu)
-                .tint(.secondary)
-                .labelsHidden()
             }
-            HStack {
-                Label("到期提醒", systemImage: "alarm")
-                Spacer()
-                Picker("", selection: $expirySound) {
-                    Text("系统音").tag("system")
-                    Text("自定义音").tag("custom")
+            NavigationLink {
+                AjkSettingsDetailView()
+            } label: {
+                Label {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("安居客后台")
+                        Text("推广房源抓取 · 实地核验 / 下架预警")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                } icon: {
+                    Image(systemName: "building.2.fill")
                 }
-                .pickerStyle(.menu)
-                .tint(.secondary)
-                .labelsHidden()
             }
-            HStack {
-                Label("包租提醒", systemImage: "bell.badge")
-                Spacer()
-                Picker("", selection: $payoutSound) {
-                    Text("系统音").tag("system")
-                    Text("自定义音").tag("custom")
+            NavigationLink {
+                AIAssistantSettingsView()
+            } label: {
+                Label {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("AI 助手")
+                        Text(KeychainHelper.exists(key: "ai.volcengine.apiKey") ? "已配置 API Key" : "未配置 Key")
+                            .font(.caption2)
+                            .foregroundStyle(KeychainHelper.exists(key: "ai.volcengine.apiKey") ? Color.secondary : Color.red)
+                    }
+                } icon: {
+                    Image(systemName: "sparkles")
                 }
-                .pickerStyle(.menu)
-                .tint(.secondary)
-                .labelsHidden()
             }
-            HStack {
-                Label("待办提醒", systemImage: "list.bullet.clipboard")
-                Spacer()
-                Picker("", selection: $todoSound) {
-                    Text("系统音").tag("system")
-                    Text("自定义音").tag("custom")
-                }
-                .pickerStyle(.menu)
-                .tint(.secondary)
-                .labelsHidden()
-            }
+        } header: {
+            Text("外部服务")
         } footer: {
-            Text("自定义音使用APP内置铃声；文件不可用时iOS会自动使用系统音。")
+            Text("电表监控只读取展示电量（充值仍走官方页面）；安居客后台只读抓取推广房源、不做发布；AI 助手走你自己的火山方舟 Key——Key 只存本机钥匙串，不上传、不随备份上传。")
         }
     }
+
 
     private var aboutSection: some View {
         Section {
@@ -674,7 +741,7 @@ struct SettingsView: View {
             HStack {
                 Label("软件说明", systemImage: "doc.text")
                 Spacer()
-                Text("米兰公馆中介和二房东工作平台")
+                Text("米兰公馆公寓出租管理工具 · 中介与二房东工作台")
                     .font(.footnote)
                     .foregroundColor(.secondary)
                     .multilineTextAlignment(.trailing)
@@ -682,7 +749,7 @@ struct SettingsView: View {
             HStack {
                 Label("数据安全", systemImage: "lock.shield")
                 Spacer()
-                Text("本机加密存储；跨端操作仅手动触发")
+                Text("房源与账本默认只在本机；只有你主动同步、备份、生成分享链接时才联网")
                     .font(.footnote)
                     .foregroundColor(.secondary)
                     .multilineTextAlignment(.trailing)
@@ -709,16 +776,12 @@ struct SettingsView: View {
     /// v1.7：tint 改为 iOS 原生蓝（房源管家风格设置页配色）；顶部横线随滚动动态显示
     private var settingsForm: some View {
         Form {
-                dataSection
-                syncSection
-                autoBackupSection
-                utilitySection
-                meterSection
-                ajkSection
-                aiSection
-                billSection
-                houseShareSection
-                ringtoneSection
+                accountSection
+                shareSection
+                backupSection
+                defaultsSection
+                servicesSection
+                storageSection
                 aboutSection
             }
             // v1.9：背景挂载滚动监听（不占任何 Form 行/间距，顶部不再有空白行）
@@ -735,6 +798,22 @@ struct SettingsView: View {
                     .frame(height: 0.5)
                     .opacity(settingsScrollY < -1 ? 1 : 0)
                     .animation(.easeOut(duration: 0.15), value: settingsScrollY < -1)
+            }
+            // v2.18：全量备份进度胶囊（顶部悬浮，百分比实时刷新；结束自动消失）
+            .overlay(alignment: .top) {
+                if let p = backupProgress.value {
+                    HStack(spacing: 8) {
+                        ProgressView().controlSize(.small)
+                        Text("正在生成全量备份 \(Int(min(max(p, 0), 1) * 100))%")
+                            .font(.footnote.weight(.medium))
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .background(.ultraThinMaterial, in: Capsule())
+                    .overlay(Capsule().stroke(Color.themeBorder, lineWidth: 0.5))
+                    .padding(.top, 10)
+                    .allowsHitTesting(false)
+                }
             }
             .navigationTitle("设置")
             .navigationBarTitleDisplayMode(.inline)
@@ -754,6 +833,7 @@ struct SettingsView: View {
             }
             .onAppear {
                 loadAutoSettings()
+                backupProgress.value = nil   // v2.18：进页面时进度 HUD 一定不残留
                 // v1.55：读取选房链接有效期设置（默认 2 天）
                 let d = UserDefaults.standard.integer(forKey: "roomsLinkExpiryDays")
                 roomsLinkExpiry = d > 0 ? d : Int(RemoteConfig.param("roomsLinkExpiryDays", 2))
@@ -962,11 +1042,14 @@ struct SettingsView: View {
                 showAlert = true
                 return
             }
-            showMessage = "正在生成全量备份…"
-            showAlert = true
+            backupProgress.value = 0
             Task {
-                let url = await BackupV5Manager.createFullBackup(mainContext: modelContext, houseContext: houseCtx) { _ in }
+                let url = await BackupV5Manager.createFullBackup(mainContext: modelContext, houseContext: houseCtx) { p in
+                    // createFullBackup 内部已切回主线程回调，这里直接写进度枢纽
+                    FullBackupProgressHub.shared.value = p
+                }
                 await MainActor.run {
+                    backupProgress.value = nil
                     if let url = url {
                         BackupLogStore.log(category: "备份", action: "全量备份", result: "成功", detail: url.lastPathComponent, checksum: BackupV5Manager.sha1OfFile(at: url) ?? "")
                         showMessage = RemoteConfig.tip("fullBackupOk", "全量备份成功：{file}\n可在「查看备份文件」中手动上传到云端").replacingOccurrences(of: "{file}", with: url.lastPathComponent)
@@ -1022,6 +1105,8 @@ struct CrashLogsView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var files = CrashLogCollector.logFiles()
     @State private var exportTip: String?
+    /// v2.18：清理功能（此前只增不删，日志会一直堆着）
+    @State private var showClearConfirm = false
 
     var body: some View {
         NavigationStack {
@@ -1030,6 +1115,16 @@ struct CrashLogsView: View {
                     Text("暂无崩溃日志")
                         .foregroundColor(.secondary)
                 } else {
+                    // v2.18：顶部显示条数与总占用，清理前心里有数
+                    Section {
+                        HStack {
+                            Text("共 \(files.count) 个")
+                            Spacer()
+                            Text(ByteCountFormatter.string(fromByteCount: Int64(CrashLogCollector.totalBytes()), countStyle: .file))
+                                .foregroundColor(.secondary)
+                        }
+                        .font(.footnote)
+                    }
                     ForEach(files, id: \.self) { file in
                         NavigationLink {
                             CrashLogDetailView(fileURL: file)
@@ -1054,9 +1149,28 @@ struct CrashLogsView: View {
                 }
                 // v1.17 需求2：右上角「导出」→ 直接生成崩溃日志 txt 到 App 根目录（Documents）
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("导出") { exportAll() }
+                    HStack(spacing: 14) {
+                        // v2.18：清理全部（二次确认，只删 Crash*.txt，不动操作日志与备份）
+                        Button(role: .destructive) {
+                            showClearConfirm = true
+                        } label: {
+                            Image(systemName: "trash")
+                        }
                         .disabled(files.isEmpty)
+                        Button("导出") { exportAll() }
+                            .disabled(files.isEmpty)
+                    }
                 }
+            }
+            .alert("清理全部崩溃日志？", isPresented: $showClearConfirm) {
+                Button("取消", role: .cancel) {}
+                Button("全部清除", role: .destructive) {
+                    let removed = CrashLogCollector.deleteAll()
+                    files = CrashLogCollector.logFiles()
+                    exportTip = "已清除 \(removed) 个崩溃日志"
+                }
+            } message: {
+                Text("将删除本机全部崩溃日志（\(files.count) 个），不影响操作日志、备份与房源数据。删除后不可恢复。")
             }
             .alert("导出崩溃日志", isPresented: Binding(
                 get: { exportTip != nil },
@@ -1189,6 +1303,10 @@ struct InterconnectionInfoView: View {
 // MARK: - 版本更新介绍
 struct VersionHistoryView: View {
     let versions: [(version: String, date: String, changes: [String])] = [
+        ("v2.18", "2026-11-06", ["调整：设置页重排为 7 组 —— 账号与云端 / 分享与展示 / 备份与安全 / 账单与默认值 / 外部服务 / 存储与清理 / 关于，11 节打散重组，功能入口一个不少", "修正：文案与实现对齐（自动备份明说只含账本+媒体清单、不含房源；跨端操作会联网；单价只预填账单、房源租金不读这里；压缩写明图片长边1600、视频长边960约1Mbps；选房链接与分享卡片是两套有效期）", "删除：提醒铃声的「自定义音」四个选项 —— 工程内从未打包该音频文件，选它永远回落系统音，等于没功能", "新增：崩溃日志「清理全部」（查看器右上角，二次确认后只删 Crash*.txt）+ 入口右侧显示占用", "新增：全量备份进度（顶部进度胶囊实时显示百分比，此前只有一句「正在生成…」）", "新增：云端配置里的用户名支持下拉选择云端已有的用户名（列 users/ 目录）", "新增：房源管理顶栏加「操作日志」按钮（批量导入旁）；「已收录 N 套」从设置页移到房源统计栏", "改名：「刷新分享缓存」→「重建全部分享链接」，「查看备份文件」→「备份文件管理」，「备份与迁移」→「换机迁移」，AI对话缓存 → AI 产物（可清理）"]),
+        ("v2.17", "2026-11-05", ["新增：品牌启动图 —— 系统 LaunchScreen 换成象牙白底 + 墨绿线稿楼宇 + 「公寓管家」，首帧叠同一张图并动态显示版本号（读 CFBundleShortVersionString，以后升版不用重做图），0.5 秒内淡出", "调整：安居客板块改成 58 那种排名看板 —— 概览从「房源/均价/最高」换成「房源(套)/经纪人(位)/上榜经纪人」+ 经纪人 Top5 排名（第一名琥珀色），排序菜单补「按经纪人」", "新增：安居客房源卡片补经纪人姓名 —— 列表先出来、后台逐个打开详情页取经纪人，进度显示「正在补抓经纪人 n/28」，没取到显示「—」", "修复：安居客找房抓不到利保米兰公馆 —— 默认链接从失效的小区精选页换成 m 站关键词搜索，改为优先读 JSON-LD；旧链接自动迁移", "新增：安居客验证码弹窗人工过验证 —— 读取中弹验证码时 App 内弹出可交互窗口，当场点完继续抓", "新增：只分享视频 —— 直接把视频当视频消息发给微信（有缩略图、点开即播），不走云端卡片、不需要备案域名"]),
+        ("v2.16", "2026-11-05", ["调整：补齐云端媒体（本地→云端）的成功/失败记录改记到云端操作日志，本机区不再出现这几条；其余同步类日志仍在本机区", "优化：上传中的房源临时置顶 —— 正在上传/云端同步的那套临时排到第一位，进度结束立即回落原排序，批量导入顶部总进度条不受影响"]),
+        ("v2.15", "2026-11-05", ["优化：两处分享页图片懒加载 —— 首屏前 3 张 eager、其余 lazy + decoding=async，微信里滚到才下载", "优化：视频压缩改 AVAssetWriter 控码率 —— 旧实现 1280×720 预设只降分辨率不控码率（28 秒素材仍 9.6 Mbps / 34MB）；改为长边 960（横屏 960×540、竖屏 540×960）、H.264 平均码率 1.0 Mbps、AAC 96 kbps、faststart，同素材实测 3.9MB 约原来 1/9；源片不足 960 不放大，失败回退原文件"]),
         ("v2.14", "2026-11-05", ["修复：安居客后台只能读取到第一页 —— 已登录真实经纪人后台抓取分页 DOM 确认：分页是 Ant Design 组件 li.ant-pagination-next > button > span「下一页」，其中 span 的 pointer-events 是 none，真正可点的是上层 button。上一版把 span 判成不可点/最后一页，所以第 1 页之后直接停手。现改为向上找到 button/li 再点；是否最后一页只认 aria-disabled=true 与 ant-pagination-disabled 类，不再用 pointer-events 判定；总页数改从分页器页码读取，避免正文里的“N页”误判。真实页面实测：第 1 页 20 条 + 第 2 页 16 条 = 36 条，与页面「共找到 36 套房源」一致，第 2 页后按钮置灰不再多翻"]),
         ("v2.13", "2026-11-05", ["修复：【安居客后台「正在读取第三页」网络超时】（① 续修）——按 1.98 原文逐行核对后确认代码与 1.98 完全一致，问题在 1.98 自带的翻页判定：它只要页面上有文字为「下一页」的元素就直接点，只有该元素自身 class 含 disabled 才算到底。安居客新版分页把置灰状态放在外层容器/aria-disabled 上，而当前小区列表只有 2 页（约 30 套），第 2 页那次点击等于点了不存在的第 3 页，列表整页跳转把抓取脚本上下文销毁，脚本再也发不出结束信号，只能干等 75 秒后弹「网络超时」。现改为：①点击前检查「下一页」自身及上 6 层祖先的 disabled / aria-disabled / pointer-events:none / 不可见，置灰即视为最后一页不点；②页面出现「共 N 页」或「x/y 页」时按总数到最后一页就停；③只认可见的最内层节点，隐藏模板不算；④万一仍跳到不存在的页导致列表重载，已收集的页面直接正常收尾，不再等 75 秒误报超时。抓取其余逻辑仍与 1.98 一致，逐步进度提示保留"]),
         ("v2.12", "2026-11-05", ["修复：【安居客后台读取】整体恢复 1.98 原实现（b125）——后台抓取这段代码在 1.98 之后被 v2.9/v2.10/v2.11 三次整改误改（加了只留「米兰」的卡片过滤、加了 30 秒看门狗、把页面内点击翻页改成只探测链接），才出现「第 3 页超时」和「能读但没读全」。现按 1.98 的代码逐行恢复：工作台概览 → 房源列表 → 脚本内点击「下一页」连续收集第 1/2/3…页（最多 5 页，每页等 2.5 秒），卡片全量入账不过滤，兜底超时 75 秒；仅保留刷新时的逐步进度提示（打开后台 / 读取概览 / 读取列表 / 正在解析第 N 页）"]),
@@ -2001,3 +2119,11 @@ struct AdminPasswordView: View {
     }
 }
 
+
+// MARK: - v2.18：全量备份进度枢纽
+/// 全量备份打包耗时可达几十秒（含照片视频），进度只在这里写、View 只读。
+/// 写入口径：BackupV5Manager.createFullBackup 的 progress 回调本身已切回主线程。
+final class FullBackupProgressHub: ObservableObject {
+    nonisolated(unsafe) static let shared = FullBackupProgressHub()
+    @Published var value: Double?
+}

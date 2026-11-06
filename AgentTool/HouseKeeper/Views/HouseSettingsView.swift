@@ -196,6 +196,9 @@ struct CosConfigView: View {
     @State private var customDomain = ""
     @State private var functionURL = ""   // v1.18：云函数地址（后台网址），管理后台入口走此地址
     @State private var username = ""      // v1.19：多用户——本机用户名（共享房源时区分是谁的操作）
+    // v2.18：用户名下拉——云端 users/ 目录下已有的用户名，避免同一人不同设备叫法不一致
+    @State private var cloudUsernames: [String] = []
+    @State private var loadingCloudUsers = false
     @State private var savedTip: String?
     @State private var webCacheTip: String?   // v1.38：刷新网页后台缓存的提示
     @State private var isVerifying = false
@@ -324,9 +327,44 @@ struct CosConfigView: View {
 
             // v1.19：多用户——每台设备一个用户名，共享房源、其他数据按用户名隔离
             Section {
-                TextField("我的用户名（如：涛）", text: $username)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
+                HStack(spacing: 8) {
+                    TextField("我的用户名（如：涛）", text: $username)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    // v2.18：用户名可下拉选云端已有的（列 users/ 目录），避免同一人不同设备叫法不一致
+                    Menu {
+                        if loadingCloudUsers {
+                            Text("正在读取云端用户名…")
+                        } else if cloudUsernames.isEmpty {
+                            Button("读取云端已有用户名", systemImage: "arrow.clockwise") { loadCloudUsernames() }
+                        } else {
+                            ForEach(cloudUsernames, id: \.self) { name in
+                                Button {
+                                    username = name
+                                } label: {
+                                    if name == username {
+                                        Label(name, systemImage: "checkmark")
+                                    } else {
+                                        Text(name)
+                                    }
+                                }
+                            }
+                            Divider()
+                            Button("重新读取", systemImage: "arrow.clockwise") { loadCloudUsernames() }
+                        }
+                    } label: {
+                        if loadingCloudUsers {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Image(systemName: "chevron.down.circle")
+                                .font(.system(size: 20))
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    .onAppear {
+                        if cloudUsernames.isEmpty { loadCloudUsernames() }
+                    }
+                }
                 Button {
                     saveUsername()
                 } label: {
@@ -337,7 +375,7 @@ struct CosConfigView: View {
             } header: {
                 Text("多用户（共享房源）")
             } footer: {
-                Text("多台手机填同一个桶配置、各自填用户名，即可共享房源：一台录入，另一台下拉同步就能看到。操作日志/分享/统计会带上您的用户名，其他私有数据（名片/水印/统计/备份）按用户名分开。")
+                Text("多台手机填同一个桶配置、各自填用户名，即可共享房源：一台录入，另一台下拉同步就能看到。点右侧小箭头可列出云端已有的用户名，直接选（同一人换了设备也沿用原来的名字）。操作日志/分享/统计会带上用户名，其他私有数据（名片/水印/统计/备份）按用户名分开。")
             }
 
             Section("腾讯云 COS 配置") {
@@ -634,6 +672,40 @@ struct CosConfigView: View {
     }
 
     // MARK: - v1.19 多用户：保存用户名 / 导出「给别人用」的配置
+
+    /// v2.18：列云端 users/ 目录下已有的用户名（COS ListObjectsV2 delimiter="/" 的 CommonPrefixes）
+    /// 只读，不改任何云端数据；读不到（未配好桶/网络异常）时给明确提示，不静默。
+    private func loadCloudUsernames() {
+        guard let config = CosConfig.load() else {
+            savedTip = "还没配好 COS：先在下面填桶、地域、密钥并保存，才能读取云端已有用户名"
+            return
+        }
+        guard !loadingCloudUsers else { return }
+        loadingCloudUsers = true
+        Task {
+            do {
+                let items = try await CosUploader.listObjects(prefix: "users/", delimiter: "/", config: config)
+                let names = items.compactMap { item -> String? in
+                    let n = item.name
+                    guard n.hasPrefix("users/"), n.hasSuffix("/") else { return nil }
+                    let mid = String(n.dropFirst("users/".count).dropLast())
+                    return mid.isEmpty ? nil : mid
+                }
+                await MainActor.run {
+                    cloudUsernames = Array(Set(names)).sorted()
+                    loadingCloudUsers = false
+                    if cloudUsernames.isEmpty {
+                        savedTip = "云端 users/ 下还没有用户名：直接在输入框填一个新名字保存即可"
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    loadingCloudUsers = false
+                    savedTip = "读取云端用户名失败：\(error.localizedDescription)"
+                }
+            }
+        }
+    }
 
     /// v1.19 补全：单独保存用户名（此前只在「保存并验证连接」里顺带写，改后退出重进会被清空）
     private func saveUsername() {

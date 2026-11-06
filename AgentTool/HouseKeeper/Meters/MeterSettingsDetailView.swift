@@ -120,7 +120,7 @@ struct MeterSettingsDetailView: View {
             } header: {
                 Text("自动刷新")
             } footer: {
-                Text("开启后 App 运行期间按间隔自动刷新全部电表；关闭则只在进入板块或手动刷新时更新。")
+                Text("开启后只在 App 运行期间按间隔自动刷新全部电表；关闭后只有手动点「刷新」才更新（进入电表板块不会自动刷新）。")
             }
         }
         .navigationTitle("电表监控设置")
