@@ -231,9 +231,9 @@ struct CosConfigView: View {
         Form {
             Section {
                 LabeledContent("用途", value: "分享房源卡片链接")
-                LabeledContent("有效期", value: "长期有效（不自动过期）")
+                LabeledContent("有效期", value: "10 年内有效（不自动过期）")
             } footer: {
-                Text("分享时 App 会把该房源的图片和视频上传到腾讯云 COS，生成一个链接卡片发给微信好友；好友点开卡片即可查看，链接长期有效。")
+                Text("分享时把该房源的图片和视频传到腾讯云 COS，生成链接卡片发给微信；好友点开即可查看。这里的链接 10 年内有效；「公开选房链接」是另一套，按你设的天数到期。")
             }
 
             // v1.18：云函数后台——管理后台网址（可设置）、后台口令、部署教程
@@ -448,7 +448,7 @@ struct CosConfigView: View {
                 Button {
                     showBrowseConfig = true
                 } label: {
-                    Label("查看备份文件", systemImage: "folder")
+                    Label("查看配置备份", systemImage: "folder")
                 }
                 // v1.34：清空全部配置并断开与桶的连接
                 Button(role: .destructive) {
@@ -469,7 +469,7 @@ struct CosConfigView: View {
                 Text("1. 打开 cloud.tencent.com 注册并实名认证；2. 开通「对象存储 COS」；3. 创建存储桶：名称可自定义（如 fangyuan88）、地域按您实际选择的填写（如香港 ap-hongkong）、访问权限选「私有读写」；4. 在「访问管理 CAM → API 密钥管理」新建密钥，得到 SecretId 和 SecretKey；5. 在「存储桶 → 域名与传输管理 → 自定义源站域名」绑定自己的域名（需先在腾讯云购买域名），并把域名填入远程配置的「自定义域名」栏——微信只认自定义域名，才能把链接抓成网页卡片。注意：桶名和地域必须和您实际创建的存储桶一致，才能连接成功。")
                     .font(.footnote)
                     .foregroundColor(.secondary)
-                Text("密钥与名片只存在本机钥匙串，不会上传到任何地方。")
+                Text("SecretId / SecretKey 只存本机钥匙串，不随备份上传；名片会同步到云端（分享页要显示）。")
                     .font(.footnote)
                     .foregroundColor(.secondary)
             }
@@ -1158,7 +1158,7 @@ struct CosBackupBrowseView: View {
                     .listStyle(.insetGrouped)
                 }
             }
-            .navigationTitle("查看备份文件")
+            .navigationTitle("配置备份文件")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {

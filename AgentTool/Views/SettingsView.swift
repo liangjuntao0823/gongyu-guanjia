@@ -80,6 +80,7 @@ struct SettingsView: View {
     @State private var showAICacheConfirm = false
     @State private var houseCacheTip: String?
     @State private var roomsLinkExpiry = 2   // v1.55：选房链接有效期（天），默认 2，onAppear 从 UserDefaults 读取
+    @State private var compressOnShare = true   // v2.18 补：压缩开关改用显式状态，避免拨动后界面不刷新
     @State private var watermarkSubtitle = ""   // v1.41：分享水印入口副标题（onAppear 刷新，返回设置页即显示最新开关状态）
     // v1.84：电表监控设置（链接/数据源/阈值/定时刷新/提醒）
     @EnvironmentObject private var meterStore: MeterStore
@@ -236,8 +237,11 @@ struct SettingsView: View {
             .onAppear { refreshWatermarkSubtitle() }
             // v2.18：压缩参数与实现对齐——图片长边 1600 + JPEG 0.8；视频长边 960、约 1 Mbps（v2.15 起）
             Toggle(isOn: Binding(
-                get: { shareCompressionEnabled },
-                set: { UserDefaults.standard.set($0, forKey: "compressOnShare") }
+                get: { compressOnShare },
+                set: { newValue in
+                    compressOnShare = newValue
+                    UserDefaults.standard.set(newValue, forKey: "compressOnShare")
+                }
             )) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("压缩上传媒体（房源+分享）")
@@ -517,7 +521,7 @@ struct SettingsView: View {
                 Label {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("备份文件管理")
-                        Text("查看本机 / 云端备份，可单条上传、恢复、删除；旧版 JSON 备份也在里面")
+                        Text("查看本机 / 云端备份，可上传、下载、删除；要恢复到手机请点上面「恢复数据」。旧版 JSON 备份也在这里")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
@@ -660,7 +664,7 @@ struct SettingsView: View {
         } header: {
             Text("账单与默认值")
         } footer: {
-            Text("三个默认值只用于「账单」板块生成新账单时的预填，房源本身的租金不读这里；改了不影响任何已生成的账单。")
+            Text("这三个默认值是「水电结算」页的默认单价与预存，打开结算页自动填入；不影响已生成的结算记录，也不影响房源租金。")
         }
     }
 
@@ -741,7 +745,7 @@ struct SettingsView: View {
             HStack {
                 Label("软件说明", systemImage: "doc.text")
                 Spacer()
-                Text("米兰公馆公寓出租管理工具 · 中介与二房东工作台")
+                Text("公寓出租与招租管理平台（目前用于利保米兰公馆）")
                     .font(.footnote)
                     .foregroundColor(.secondary)
                     .multilineTextAlignment(.trailing)
@@ -841,6 +845,7 @@ struct SettingsView: View {
             }
             .onAppear {
                 loadAutoSettings()
+                compressOnShare = shareCompressionEnabled   // v2.18：压缩开关初值（进页面读当前设置）
                 backupProgress.value = nil   // v2.18：进页面时进度 HUD 一定不残留
                 // v1.55：读取选房链接有效期设置（默认 2 天）
                 let d = UserDefaults.standard.integer(forKey: "roomsLinkExpiryDays")
@@ -932,7 +937,7 @@ struct SettingsView: View {
             }
             // v1.6：房源分享缓存刷新（二级确认，防止误触导致全部链接失效）
             // v1.54：升级为「全量重建」——云端旧分享页全部删除（旧链接立即失效），并给每间房重新生成最新 H5
-            .confirmationDialog("刷新分享缓存", isPresented: $showHouseCacheConfirm, titleVisibility: .visible) {
+            .confirmationDialog("重建全部房源分享链接", isPresented: $showHouseCacheConfirm, titleVisibility: .visible) {
                 Button("清空并重建全部", role: .destructive) {
                     ShareCacheStore.clearAll()
                     rebuildAllShareH5()
@@ -941,7 +946,7 @@ struct SettingsView: View {
             } message: {
                 Text("将重建全部房源的分享链接：云端旧分享页全部删除（旧链接立即失效），并为每间房重新生成最新 H5。确定继续吗？")
             }
-            .alert("刷新分享缓存", isPresented: Binding(
+            .alert("重建全部分享链接", isPresented: Binding(
                 get: { houseCacheTip != nil },
                 set: { if !$0 { houseCacheTip = nil } }
             )) {
@@ -1063,7 +1068,7 @@ struct SettingsView: View {
                     backupProgress.value = nil
                     if let url = url {
                         BackupLogStore.log(category: "备份", action: "全量备份", result: "成功", detail: url.lastPathComponent, checksum: BackupV5Manager.sha1OfFile(at: url) ?? "")
-                        showMessage = RemoteConfig.tip("fullBackupOk", "全量备份成功：{file}\n可在「查看备份文件」中手动上传到云端").replacingOccurrences(of: "{file}", with: url.lastPathComponent)
+                        showMessage = RemoteConfig.tip("fullBackupOk2", "全量备份成功：{file}\n可在「备份文件管理」中手动上传到云端").replacingOccurrences(of: "{file}", with: url.lastPathComponent)
                     } else {
                         showMessage = "全量备份失败，请检查存储空间"
                     }

@@ -678,7 +678,7 @@ struct HouseListView: View {
             .accessibilityLabel(showOnlyNoMedia ? "仅看无媒体（已开启）" : "仅看无媒体")
 
             // v2.18：已收录总数（从设置页移来）——固定显示全量套数，不随筛选变化
-            Text("共 \(houses.count) 套")
+            Text("共\(houses.count)套")
                 .font(.caption2)
                 .foregroundColor(.secondary)
                 .lineLimit(1)

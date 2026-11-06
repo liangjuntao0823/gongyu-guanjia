@@ -549,7 +549,7 @@ struct MainTabView: View {
             // v1.14 需求2：导入成功后弹「立即恢复 / 稍后再说」二级确认
             if let name = note.object as? String {
                 importedZipName = name
-                importedZipMessage = "已导入备份「\(name)」到本地备份文件夹。\n立即恢复会用这份备份覆盖当前全部数据；也可稍后到「设置 → 备份数据 → 查看备份文件」查看并恢复。"
+                importedZipMessage = "已导入备份「\(name)」到本地备份文件夹。\n立即恢复会用这份备份覆盖当前全部数据；也可稍后到「设置 → 备份与安全 → 备份文件管理」查看并恢复。"
             }
         }
         .overlay { importedRestoreFlow }
