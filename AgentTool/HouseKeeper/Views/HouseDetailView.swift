@@ -45,6 +45,8 @@ struct HouseDetailView: View {
     @State private var shareError: String?
     // v2.17：只分享视频——准备中（转 mp4 + 相册留副本）
     @State private var isPreparingVideo = false
+    @State private var videoPrepareProgress = 0.0
+    @State private var videoPrepareTip = "正在准备视频…"
     // v1.15 需求1：一键保存到相册（独立状态，避免与多选「保存选中」的 saveTip/alert 冲突）
     @State private var showSaveConfirm = false
     @State private var isSavingMedia = false
@@ -104,11 +106,16 @@ struct HouseDetailView: View {
             ZStack {
                 Color.black.opacity(0.35).ignoresSafeArea()
                 VStack(spacing: 12) {
-                    ProgressView()
+                    ProgressView(value: videoPrepareProgress)
+                        .progressViewStyle(.linear)
                         .tint(.white)
-                    Text("正在准备视频…")
+                        .frame(width: 200)
+                    Text(videoPrepareTip)
                         .font(.footnote)
                         .foregroundColor(.white)
+                    Text("\(Int(videoPrepareProgress * 100))%")
+                        .font(.caption)
+                        .foregroundColor(.white.opacity(0.85))
                 }
                 .padding(20)
                 .background(Color.black.opacity(0.6))
@@ -958,8 +965,15 @@ struct HouseDetailView: View {
                 return
             }
             isPreparingVideo = true
+            videoPrepareProgress = 0
+            videoPrepareTip = "正在压缩视频…"
             Task {
-                let files = await VideoOnlyShare.prepareFiles(from: urls)
+                let files = await VideoOnlyShare.prepareFiles(from: urls) { p, msg in
+                    Task { @MainActor in
+                        videoPrepareProgress = p
+                        videoPrepareTip = msg
+                    }
+                }
                 await MainActor.run {
                     isPreparingVideo = false
                     guard !files.isEmpty else {

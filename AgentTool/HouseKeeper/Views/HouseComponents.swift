@@ -671,23 +671,88 @@ enum VideoOnlyShare {
     /// 本地视频 → 可直接交给系统分享面板的 mp4 文件地址（已是 mp4 直接用；mov 先转封装）。
     /// 注意必须给「文件地址」，不能给 AVAsset 对象：给对象时分享面板识别不出类型，
     /// 微信等扩展会整条消失，只剩备忘录这类万能接收项。
-    static func prepareFiles(from urls: [URL]) async -> [URL] {
+    /// v2.31：照相册分享的做法——先把视频「准备」成一段系统导出的兼容 mp4（有进度），再弹分享面板。
+    /// 相册里能发、App 里发不出去的大视频，差别就在这一步：相册是系统先导出（转码成 H.264/mp4，体积可控）再交给微信；
+    /// App 直接把原始大文件丢给微信扩展，扩展读不动就闪退（点了没反应）。
+    static func prepareFiles(from urls: [URL], progress: ((Double, String) -> Void)? = nil) async -> [URL] {
         var files: [URL] = []
-        for url in urls {
+        let total = max(urls.count, 1)
+        for (idx, url) in urls.enumerated() {
             guard FileManager.default.fileExists(atPath: url.path) else { continue }
-            // v2.30：微信扩展对视频有硬要求——只认 mp4 容器 + H.264 编码，且体积过大（几十 MB）时扩展直接起不来，
-            //        表现就是「点微信闪一下/点了没反应」，而小体积 H.264 的正常。
-            //        所以先判断能否直接发（mp4 + H.264 + 体积不大），否则统一转成 720p H.264+AAC 的 mp4。
-            if await isWeChatReady(url) { files.append(url); continue }
-            if let compatible = await transcodeToCompatible(url) {
-                files.append(compatible)
+            let base = Double(idx) / Double(total)
+            let span = 1.0 / Double(total)
+            if await isWeChatReady(url) {
+                files.append(url)
+                progress?(base + span, "跳过压缩（\(idx + 1)/\(total)）")
+                continue
+            }
+            progress?(base, "正在压缩视频（\(idx + 1)/\(total)）…")
+            if let compact = await compressForWeChat(url, progress: { p, msg in
+                progress?(base + p * span, msg)
+            }) {
+                files.append(compact)
             } else if let mp4 = await exportMP4(from: url) {
                 files.append(mp4)
             } else {
                 files.append(url)   // 全都失败：退回原文件，不让分享中断
             }
         }
+        progress?(1.0, "压缩完成")
         return files
+    }
+
+    /// 按系统相册的「导出再分享」思路压缩：依次尝试 720p → 540p → 低质量预设，
+    /// 体积降到 12MB 以内就停（微信扩展读取快、不会超时），都不达标再用自定义码率兜底到 8MB。
+    static func compressForWeChat(_ url: URL, progress: ((Double, String) -> Void)? = nil) async -> URL? {
+        let asset = AVURLAsset(url: url)
+        let target: Int64 = 12 * 1024 * 1024
+        let presets: [String] = [
+            AVAssetExportPreset1280x720,
+            AVAssetExportPreset960x540,
+            AVAssetExportPresetLowQuality
+        ]
+        for (i, preset) in presets.enumerated() {
+            guard let session = AVAssetExportSession(asset: asset, presetName: preset) else { continue }
+            let out = FileManager.default.temporaryDirectory
+                .appendingPathComponent("wx_share_\(UUID().uuidString).mp4")
+            session.outputURL = out
+            session.outputFileType = .mp4
+            session.shouldOptimizeForNetworkUse = true
+            let base = Double(i) / Double(presets.count)
+            let span = 1.0 / Double(presets.count)
+            let label = "正在压缩视频（第 \(i + 1)/\(presets.count) 档）"
+            let ok = await runExport(session: session) { p in
+                progress?(base + p * span, "\(label) \(Int(p * 100))%")
+            }
+            if ok {
+                let attrs = try? FileManager.default.attributesOfItem(atPath: out.path)
+                let size = (attrs?[.size] as? Int64) ?? 0
+                if size > 0, size <= target {
+                    return out
+                }
+            }
+            try? FileManager.default.removeItem(at: out)
+        }
+        // 兜底：自定义码率压到 8MB
+        return await transcodeToCompatible(url, maxBytes: 8 * 1024 * 1024, progress: progress)
+    }
+
+    /// 跑一次 AVAssetExportSession，边跑边回报进度（0…1）
+    private static func runExport(session: AVAssetExportSession,
+                                  progress: @escaping (Double) -> Void) async -> Bool {
+        let ticker = Task {
+            while !Task.isCancelled {
+                if session.status != .exporting { break }
+                progress(Double(session.progress))
+                try? await Task.sleep(nanoseconds: 120_000_000)
+            }
+        }
+        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+            session.exportAsynchronously { cont.resume() }
+        }
+        ticker.cancel()
+        progress(1.0)
+        return session.status == .completed
     }
 
     /// 微信能直接吃的判断：mp4 容器 + 首条视频轨是 H.264 + 体积不超过 18MB。
@@ -702,12 +767,14 @@ enum VideoOnlyShare {
         guard subType == 0x61766331 else { return false }
         let attrs = try? FileManager.default.attributesOfItem(atPath: url.path)
         let size = (attrs?[.size] as? Int) ?? Int.max
-        return size <= 18 * 1024 * 1024
+        return size <= 12 * 1024 * 1024
     }
 
     /// 转成微信一定能发的 mp4：长边 1280（720p）、H.264、AAC 96kbps，码率按「整片约 18MB」反算。
     /// 输出到临时目录，调用方用完不用删（系统会回收；文件被微信扩展复制后再删也无所谓）。
-    static func transcodeToCompatible(_ url: URL) async -> URL? {
+    static func transcodeToCompatible(_ url: URL,
+                                      maxBytes: Int64 = 8 * 1024 * 1024,
+                                      progress: ((Double, String) -> Void)? = nil) async -> URL? {
         let asset = AVURLAsset(url: url)
         guard let videoTrack = (try? await asset.loadTracks(withMediaType: .video))?.first else { return nil }
         let naturalSize = (try? await videoTrack.load(.naturalSize)) ?? CGSize(width: 1280, height: 720)
@@ -727,9 +794,9 @@ enum VideoOnlyShare {
         outW = max(outW, 2)
         outH = max(outH, 2)
 
-        // 目标整片 18MB：码率 = 18MB * 8 / 时长，夹在 700kbps–2.2Mbps
-        let targetBits = 18.0 * 1024 * 1024 * 8
-        let bitrate = Int(min(max(targetBits / seconds, 700_000), 2_200_000))
+        // 目标整片体积：码率 = 目标字节 * 8 / 时长，夹在 500kbps–2.2Mbps
+        let targetBits = Double(maxBytes) * 8
+        let bitrate = Int(min(max(targetBits / seconds, 500_000), 2_200_000))
         let fps = nominalFPS > 1 ? max(Int(nominalFPS.rounded()), 15) : 30
 
         let videoSettings: [String: Any] = [

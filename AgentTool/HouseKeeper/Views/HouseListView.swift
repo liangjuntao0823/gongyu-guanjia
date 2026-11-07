@@ -2137,7 +2137,12 @@ struct HouseListView: View {
         generateTip = "正在准备视频…"
         generateProgress = 0
         Task {
-            let files = await VideoOnlyShare.prepareFiles(from: urls)
+            let files = await VideoOnlyShare.prepareFiles(from: urls) { p, msg in
+                Task { @MainActor in
+                    generateProgress = p
+                    generateTip = msg
+                }
+            }
             await MainActor.run {
                 isGenerating = false
                 singleShareHouse = nil
@@ -2341,7 +2346,12 @@ struct HouseListView: View {
         generateTip = "正在准备视频（\(videoURLs.count) 套 / \(flat.count) 个）…"
         generateProgress = 0
         Task {
-            let files = await VideoOnlyShare.prepareFiles(from: flat)
+            let files = await VideoOnlyShare.prepareFiles(from: flat) { p, msg in
+                Task { @MainActor in
+                    generateProgress = p
+                    generateTip = msg
+                }
+            }
             await MainActor.run {
                 isGenerating = false
                 guard !files.isEmpty else {
