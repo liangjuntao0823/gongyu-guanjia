@@ -587,6 +587,55 @@ struct HouseShareSheet: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }
 
+// MARK: - v2.26：分享面板改从最顶层控制器直呈
+//
+// 此前用 SwiftUI 的 .sheet 包住 UIActivityViewController。第二次弹面板时，微信这类第三方
+// 分享扩展拿不到有效的呈现上下文，点了没反应（「拷贝」「存储到文件」这类系统项不受影响），
+// 表现为单套偶发点微信不动、多套发完第一套后第二套点微信仍不动，App 本身没卡死。
+// 现改为从当前最顶层控制器直接 present，并把「面板已关闭」改成 completion 回调驱动队列。
+
+enum SharePresenter {
+    static func present(items: [Any], completion: (() -> Void)? = nil) {
+        DispatchQueue.main.async {
+            guard !items.isEmpty else { completion?(); return }
+            // 上一次面板还挂在层级上（极少数）：先关掉再弹，避免 present 被系统静默忽略
+            if let top = topViewController(), top is UIActivityViewController {
+                top.dismiss(animated: false) {
+                    DispatchQueue.main.async { presentNow(items: items, completion: completion) }
+                }
+                return
+            }
+            presentNow(items: items, completion: completion)
+        }
+    }
+
+    private static func presentNow(items: [Any], completion: (() -> Void)?) {
+        guard let host = topViewController() else { completion?(); return }
+        let vc = UIActivityViewController(activityItems: items, applicationActivities: nil)
+        vc.completionWithItemsHandler = { _, _, _, _ in
+            DispatchQueue.main.async { completion?() }
+        }
+        if let pop = vc.popoverPresentationController {
+            pop.sourceView = host.view
+            pop.sourceRect = CGRect(x: host.view.bounds.midX, y: host.view.bounds.midY, width: 0, height: 0)
+            pop.permittedArrowDirections = []
+        }
+        host.present(vc, animated: true)
+    }
+
+    private static func topViewController() -> UIViewController? {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        let window = scenes.flatMap { $0.windows }.first { $0.isKeyWindow } ?? scenes.first?.windows.first
+        guard var top = window?.rootViewController else { return nil }
+        while let presented = top.presentedViewController, !presented.isBeingDismissed {
+            top = presented
+        }
+        if let nav = top as? UINavigationController { top = nav.visibleViewController ?? nav }
+        if let tab = top as? UITabBarController { top = tab.selectedViewController ?? tab }
+        return top
+    }
+}
+
 // MARK: - 空状态
 
 struct EmptyStateView: View {
@@ -644,6 +693,8 @@ enum VideoOnlyShare {
     static func movieItems(from files: [URL]) -> [NSItemProvider] {
         files.map { url in
             let provider = NSItemProvider()
+            // v2.26：带上文件名，微信扩展按扩展名识别「视频」更稳
+            provider.suggestedName = url.lastPathComponent
             provider.registerFileRepresentation(forTypeIdentifier: UTType.movie.identifier,
                                                 fileOptions: [],
                                                 visibility: .all) { completion in

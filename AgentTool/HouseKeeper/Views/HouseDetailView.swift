@@ -25,7 +25,6 @@ struct HouseDetailView: View {
     let house: House
 
     @State private var showEdit = false
-    @State private var showShare = false
     @State private var showDeleteConfirm = false
     @State private var showStatusConfirm = false
     @State private var showShareModePicker = false    // v1.21：分享前先选「脱敏 / 完整」
@@ -163,10 +162,6 @@ struct HouseDetailView: View {
             }
             .sheet(isPresented: $showEdit) {
                 HouseEditView(house: house)
-            }
-            .sheet(isPresented: $showShare) {
-                // 注意：UIActivityViewController 不能加 presentationDetents，否则弹分享面板会闪退
-                HouseShareSheet(items: shareItems)
             }
     }
 
@@ -937,7 +932,7 @@ struct HouseDetailView: View {
                         return
                     }
                     shareItems = VideoOnlyShare.movieItems(from: files)
-                    showShare = true
+                    SharePresenter.present(items: shareItems)
                 }
             }
         }
@@ -977,7 +972,7 @@ struct HouseDetailView: View {
                 await MainActor.run {
                     isSharing = false
                     shareItems = [url]
-                    showShare = true
+                    SharePresenter.present(items: shareItems)
                 }
             } catch {
                 await MainActor.run {

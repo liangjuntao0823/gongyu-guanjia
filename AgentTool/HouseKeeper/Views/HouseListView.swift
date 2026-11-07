@@ -112,7 +112,6 @@ struct HouseListView: View {
     @State private var saveToast: String?
     @State private var remainingShareCount = 0
     @State private var shareIndex = 0
-    @State private var currentShareStep: ShareStep? = nil
     @State private var isGenerating = false
     @State private var generateTip = ""
     @State private var generateProgress = 0.0   // v1.13 需求13：上传百分比进度
@@ -365,7 +364,7 @@ struct HouseListView: View {
                 Button("继续发送下一套") {
                     if shareIndex < shareQueue.count - 1 {
                         shareIndex += 1
-                        currentShareStep = ShareStep(items: shareQueue[shareIndex])
+                        presentShareStep(shareQueue[shareIndex])
                     }
                 }
                 Button("结束分享", role: .cancel) { exitMultiSelect() }
@@ -400,18 +399,7 @@ struct HouseListView: View {
             } message: {
                 Text(mediaSyncConfirmSummary())
             }
-            .sheet(item: $currentShareStep, onDismiss: {
-                // v2.17：一套发完不再自动弹下一套（发完在微信里，自动弹你也看不到）。
-                // 还有待发就回来问一句，切回公寓管家点「继续」才发下一套。
-                if shareIndex < shareQueue.count - 1 {
-                    remainingShareCount = shareQueue.count - shareIndex - 1
-                    showContinueShare = true
-                } else {
-                    exitMultiSelect()
-                }
-            }) { step in
-                HouseShareSheet(items: step.items)
-            }
+            // v2.26：分享面板改为 SharePresenter 直呈，不再挂 sheet（sheet 里第二次弹微信点不动）
             .overlay {
                 if isGenerating {
                     ZStack {
@@ -1030,12 +1018,23 @@ struct HouseListView: View {
         }
     }
 
+    /// v2.26：分享面板从顶层直呈，面板关闭后按队列决定「继续下一套 / 结束」
+    private func presentShareStep(_ items: [Any]) {
+        SharePresenter.present(items: items) {
+            if shareIndex < shareQueue.count - 1 {
+                remainingShareCount = shareQueue.count - shareIndex - 1
+                showContinueShare = true
+            } else {
+                exitMultiSelect()
+            }
+        }
+    }
+
     private func exitMultiSelect() {
         isSelecting = false
         selectedHouseIDs.removeAll()
         shareQueue = []
         shareIndex = 0
-        currentShareStep = nil
     }
 
     // MARK: - v2.24 删除（仅本地 / 双端）
@@ -2140,9 +2139,11 @@ struct HouseListView: View {
                     showInfoAlert = true
                     return
                 }
-                shareQueue = [VideoOnlyShare.movieItems(from: files) as [Any]]
+                // v2.26：分享项只构建一次，队列与真正弹出的面板共用同一批对象
+                let items = VideoOnlyShare.movieItems(from: files) as [Any]
+                shareQueue = [items]
                 shareIndex = 0
-                currentShareStep = ShareStep(items: VideoOnlyShare.movieItems(from: files))
+                presentShareStep(items)
             }
         }
     }
@@ -2184,7 +2185,7 @@ struct HouseListView: View {
                     isGenerating = false
                     shareQueue = [[url]]
                     shareIndex = 0
-                    currentShareStep = ShareStep(items: [url])
+                    presentShareStep([url])
                     singleShareHouse = nil
                 }
             } catch {
@@ -2260,7 +2261,7 @@ struct HouseListView: View {
                     isGenerating = false
                     shareQueue = [[url]]
                     shareIndex = 0
-                    currentShareStep = ShareStep(items: [url])
+                    presentShareStep([url])
                 }
             } catch {
                 await MainActor.run {
@@ -2346,7 +2347,7 @@ struct HouseListView: View {
                 }
                 shareQueue = batches
                 shareIndex = 0
-                currentShareStep = ShareStep(items: batches[0])
+                presentShareStep(batches[0])
             }
         }
     }
