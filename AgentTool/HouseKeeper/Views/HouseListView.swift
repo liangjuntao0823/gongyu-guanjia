@@ -106,6 +106,8 @@ struct HouseListView: View {
     @State private var selectedHouseIDs = Set<UUID>()
     // v2.17：队列元素从「卡片链接」扩展为任意分享素材（卡片 = [URL]，只分享视频 = [AVAsset]）
     @State private var shareQueue: [[Any]] = []
+    /// v2.29：分享面板回到 SwiftUI sheet 呈现（与 2.17 一致，实测 2.17 视频分享可用）
+    @State private var currentShareStep: ShareStep? = nil
     // v2.17：多选逐套分享时，一套发完询问「继续下一套 / 结束」
     @State private var showContinueShare = false
     // v2.17：保存类操作的轻提示（与工作台/成交板块一致的底部小胶囊，不弹遮罩、不占屏）
@@ -314,6 +316,17 @@ struct HouseListView: View {
                         }
                     }
                 }
+            }
+            // v2.29：分享面板走 sheet（与 2.17 可用版本一致）；面板关闭后再问「继续/结束」
+            .sheet(item: $currentShareStep, onDismiss: {
+                if !shareQueue.isEmpty, shareIndex < shareQueue.count - 1 {
+                    remainingShareCount = shareQueue.count - shareIndex - 1
+                    showContinueShare = true
+                } else if !shareQueue.isEmpty {
+                    exitMultiSelect()
+                }
+            }) { step in
+                HouseShareSheet(items: step.items)
             }
             .sheet(isPresented: $showAdd) {
                 HouseEditView(house: nil)
@@ -1020,14 +1033,7 @@ struct HouseListView: View {
 
     /// v2.26：分享面板从顶层直呈，面板关闭后按队列决定「继续下一套 / 结束」
     private func presentShareStep(_ items: [Any]) {
-        SharePresenter.present(items: items) {
-            if shareIndex < shareQueue.count - 1 {
-                remainingShareCount = shareQueue.count - shareIndex - 1
-                showContinueShare = true
-            } else {
-                exitMultiSelect()
-            }
-        }
+        currentShareStep = ShareStep(items: items)
     }
 
     private func exitMultiSelect() {

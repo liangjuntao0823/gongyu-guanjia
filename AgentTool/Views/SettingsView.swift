@@ -1407,6 +1407,10 @@ struct InterconnectionInfoView: View {
 
 // MARK: - 版本更新介绍
 struct VersionHistoryView: View {
+    // v2.29：进页面先拉一次云端配置再渲染——此前只在「同步云端房源」和“检查更新”时刷新，
+    // 装完新版打开设置看版本记录，看到的还是安装时那份旧缓存，云端新条目要等下次启动才出现。
+    @State private var cloudTick = 0
+    @State private var cloudLoading = false
     let versions: [(version: String, date: String, changes: [String])] = [
         ("v2.23", "2026-11-07", ["调整：设置页前 6 个板块改一级菜单，内容全部进二级页 —— 账号与云端 / 分享与展示 / 备份与安全 / 账单与默认值 / 外部服务 / 存储与清理，点进去才是具体设置；最下面「关于」原样留在首页", "新增：「清理下载的安装包」——存储与清理页新增一行，显示 App 内已下载的安装包个数与占用，一键清空（不影响已安装的 App）", "优化：更新包自动只留最新的一个 —— 新包下载并校验通过后，自动删掉 Updates 文件夹里其它旧 .ipa（每版约 10MB，不再越堆越多）", "优化：同步标红补齐媒体变化 —— 云端同步后，字段有变化、图片视频有增删的房源都画红框，点开一次详情才消失（此前只对字段变化标红）", "修正：版本更新介绍与云端同步 —— 云端更新日志此前是空的，界面一直停在 v2.18；本次把 v2.19–v2.23 写进云端，之后新版本随发布自动追加"]),
         ("v2.22", "2026-11-07", ["调整：首页版本号撤掉 —— 工作台标题旁不再显示版本号与橙色更新胶囊，改由启动弹窗提示", "新增：启动更新弹窗 —— 每次启动检查到新版本弹一次，显示新版本号、Build、发布日期、大小与更新内容，底部「立即更新」「下次再说」", "调整：自动检查开关生效 —— 设置页「启动时自动检查更新」关掉后启动不再联网查版本，手动检查仍可用", "说明：同一版本每次启动最多弹一次；没有新版本不弹"]),
@@ -1995,6 +1999,22 @@ struct VersionHistoryView: View {
             .background(Color.themeBg)
             .navigationTitle("版本更新介绍")
             .navigationBarTitleDisplayMode(.inline)
+            .overlay(alignment: .top) {
+                if cloudLoading {
+                    Text("正在同步云端更新记录…")
+                        .font(.footnote)
+                        .padding(.horizontal, 12).padding(.vertical, 6)
+                        .background(.ultraThinMaterial, in: Capsule())
+                        .padding(.top, 8)
+                }
+            }
+            .task {
+                cloudLoading = true
+                _ = await RemoteConfig.refresh()
+                cloudLoading = false
+                cloudTick += 1
+            }
+            .id(cloudTick)
         }
     }
 }

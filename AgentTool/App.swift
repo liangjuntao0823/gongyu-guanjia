@@ -170,6 +170,8 @@ struct AgentToolApp: App {
                 }
                 // v1.13 需求17：其他 App 用「用其他 App 打开」把备份 zip 发过来时，复制进本地备份目录并提示去恢复
                 // v1.44：同时识别「备份配置到文件」生成的 json 配置备份——复制进 备份/CosConfig 并提示可还原
+                // v2.29：启动即拉一次云端配置（公告/更新记录/提示文案），不必等用户去同步房源
+                .task { _ = await RemoteConfig.refresh() }
                 .onOpenURL { url in
                     if url.pathExtension.lowercased() == "json",
                        let tip = BackupImportHandler.handleIncomingConfigJSON(url) {

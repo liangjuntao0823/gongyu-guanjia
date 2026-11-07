@@ -30,6 +30,8 @@ struct HouseDetailView: View {
     @State private var showShareModePicker = false    // v1.21：分享前先选「脱敏 / 完整」
     @State private var previewRoute: PhotoPreviewRoute? = nil
     @State private var shareItems: [Any] = []
+    /// v2.29：视频/卡片分享统一走 sheet 呈现（与 2.17 一致）
+    @State private var detailShareStep: ShareStep? = nil
     // v2.26：视频逐个发送队列（微信扩展单次只认 1 个视频，多视频塞一个面板会整条失败）
     @State private var videoShareQueue: [[Any]] = []
     @State private var videoShareIndex = 0
@@ -164,6 +166,18 @@ struct HouseDetailView: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("编辑") { showEdit = true }
                 }
+            }
+            // v2.29：分享面板走 sheet（2.17 可用版本的做法），关闭后问「继续发送下一个」
+            .sheet(item: $detailShareStep, onDismiss: {
+                if !videoShareQueue.isEmpty, videoShareIndex < videoShareQueue.count - 1 {
+                    videoShareRemaining = videoShareQueue.count - videoShareIndex - 1
+                    showContinueVideoShare = true
+                } else if !videoShareQueue.isEmpty {
+                    videoShareQueue = []
+                    videoShareIndex = 0
+                }
+            }) { step in
+                HouseShareSheet(items: step.items)
             }
             .sheet(isPresented: $showEdit) {
                 HouseEditView(house: house)
@@ -928,15 +942,7 @@ struct HouseDetailView: View {
     /// v2.26：逐个弹出视频分享面板，发完一个问是否继续
     private func presentDetailVideoBatch() {
         guard videoShareIndex < videoShareQueue.count else { return }
-        SharePresenter.present(items: videoShareQueue[videoShareIndex]) {
-            if videoShareIndex < videoShareQueue.count - 1 {
-                videoShareRemaining = videoShareQueue.count - videoShareIndex - 1
-                showContinueVideoShare = true
-            } else {
-                videoShareQueue = []
-                videoShareIndex = 0
-            }
-        }
+        detailShareStep = ShareStep(items: videoShareQueue[videoShareIndex])
     }
 
     /// v2.17：只分享视频——不走云端卡片（无需备案域名、无需 COS 配置）。
@@ -1003,7 +1009,7 @@ struct HouseDetailView: View {
                 await MainActor.run {
                     isSharing = false
                     shareItems = [url]
-                    SharePresenter.present(items: shareItems)
+                    detailShareStep = ShareStep(items: shareItems)
                 }
             } catch {
                 await MainActor.run {
