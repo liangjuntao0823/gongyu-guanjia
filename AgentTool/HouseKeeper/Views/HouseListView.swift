@@ -956,7 +956,7 @@ struct HouseListView: View {
                         Button {
                             batchSetRented()
                         } label: {
-                            Text("批量已租")
+                            Text("已租")
                                 .font(.subheadline.weight(.semibold))
                                 .frame(maxWidth: .infinity)
                         }
