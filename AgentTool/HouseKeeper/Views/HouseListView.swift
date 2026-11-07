@@ -2139,11 +2139,14 @@ struct HouseListView: View {
                     showInfoAlert = true
                     return
                 }
-                // v2.26：分享项只构建一次，队列与真正弹出的面板共用同一批对象
-                let items = VideoOnlyShare.movieItems(from: files) as [Any]
-                shareQueue = [items]
+                // v2.26：微信扩展单次只认 1 个视频，按「每个视频一次面板」排队
+                var batches: [[Any]] = []
+                for file in files {
+                    batches.append(VideoOnlyShare.movieItems(from: [file]))
+                }
+                shareQueue = batches
                 shareIndex = 0
-                presentShareStep(items)
+                presentShareStep(batches[0])
             }
         }
     }
@@ -2343,7 +2346,7 @@ struct HouseListView: View {
                 // 关掉一个自动弹下一个（不用退出重选多套）
                 var batches: [[Any]] = []
                 for file in files {
-                    batches.append(VideoOnlyShare.movieItems(from: [file]) as [Any])
+                    batches.append(VideoOnlyShare.movieItems(from: [file]))
                 }
                 shareQueue = batches
                 shareIndex = 0

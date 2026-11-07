@@ -30,6 +30,11 @@ struct HouseDetailView: View {
     @State private var showShareModePicker = false    // v1.21：分享前先选「脱敏 / 完整」
     @State private var previewRoute: PhotoPreviewRoute? = nil
     @State private var shareItems: [Any] = []
+    // v2.26：视频逐个发送队列（微信扩展单次只认 1 个视频，多视频塞一个面板会整条失败）
+    @State private var videoShareQueue: [[Any]] = []
+    @State private var videoShareIndex = 0
+    @State private var videoShareRemaining = 0
+    @State private var showContinueVideoShare = false
     @State private var isSelecting = false          // 多选模式
     @State private var selectedMediaNames = Set<String>()   // 用唯一 fileName 标记选中
     @State private var saveTip: String?
@@ -272,6 +277,16 @@ struct HouseDetailView: View {
             Button("好") { dismiss() }
         } message: {
             Text(deleteResultMessage ?? "")
+        }
+        // v2.26：视频逐个发送——发完一个问「继续下一个 / 结束」
+        .alert("还有 \(videoShareRemaining) 个视频没发", isPresented: $showContinueVideoShare) {
+            Button("继续发送下一个") {
+                if videoShareIndex < videoShareQueue.count - 1 {
+                    videoShareIndex += 1
+                    presentDetailVideoBatch()
+                }
+            }
+            Button("结束", role: .cancel) { videoShareQueue = []; videoShareIndex = 0 }
         }
         .overlay {
             if isDeletingCloud {
@@ -910,6 +925,20 @@ struct HouseDetailView: View {
         showShareModePicker = true
     }
 
+    /// v2.26：逐个弹出视频分享面板，发完一个问是否继续
+    private func presentDetailVideoBatch() {
+        guard videoShareIndex < videoShareQueue.count else { return }
+        SharePresenter.present(items: videoShareQueue[videoShareIndex]) {
+            if videoShareIndex < videoShareQueue.count - 1 {
+                videoShareRemaining = videoShareQueue.count - videoShareIndex - 1
+                showContinueVideoShare = true
+            } else {
+                videoShareQueue = []
+                videoShareIndex = 0
+            }
+        }
+    }
+
     /// v2.17：只分享视频——不走云端卡片（无需备案域名、无需 COS 配置）。
     /// 把本地视频转成 mp4 后以「视频素材」交给系统分享面板，微信按视频消息接收（有缩略图、可播放）；
     /// 同时在相册留一份副本，万一某个微信版本仍按文件接收，可从相册再发一次。
@@ -931,8 +960,10 @@ struct HouseDetailView: View {
                         shareError = "视频文件缺失，无法分享"
                         return
                     }
-                    shareItems = VideoOnlyShare.movieItems(from: files)
-                    SharePresenter.present(items: shareItems)
+                    shareItems = []
+                    videoShareQueue = files.map { VideoOnlyShare.movieItems(from: [$0]) }
+                    videoShareIndex = 0
+                    presentDetailVideoBatch()
                 }
             }
         }
