@@ -615,9 +615,9 @@ struct HouseEditView: View {
                     Task {
                         do {
                             try await CosUploader.deleteRemoteMedia(fileName: old.fileName, kind: kind, roomKey: rk, config: config)
-                            BackupLogStore.log(category: "房源", action: "删除媒体（本地→云端）", result: "成功", detail: "\(rk)/\(old.fileName)", cloud: true)
+                            BackupLogStore.log(category: "房源", action: "删除媒体（本地→云端）", result: "成功", detail: "删除媒体 \(old.fileName)", room: rk, cloud: true)
                         } catch {
-                            BackupLogStore.log(category: "房源", action: "删除媒体（本地→云端）", result: "失败", detail: "\(rk)/\(old.fileName) \(error.localizedDescription)", cloud: true)
+                            BackupLogStore.log(category: "房源", action: "删除媒体（本地→云端）", result: "失败", detail: "删除媒体 \(old.fileName) 失败：\(error.localizedDescription)", room: rk, cloud: true)
                         }
                     }
                 }
@@ -648,17 +648,44 @@ struct HouseEditView: View {
 
         // v1.72（#7）：按编辑前后字段差异生成详细同步动作（修改租金同步 / 修改户型同步 …）
         // v2.6：日志细化到字段值对比——如「租金1100→1200」「房东业主→康」
+        // v2.28：日志拆成「动作 + 变化」两段——动作只写改了哪几项（修改租金同步），
+        //       变化单独写「修改租金 700 改 900」，日志里房号单独一行。
         var syncAction = "新增房源同步"
+        var syncChange = ""
         if let before {
-            var changed: [String] = []
-            if before.roomNo != target.roomNo || before.tower != target.tower { changed.append("房号") }
-            if before.landlord != target.landlord { changed.append("房东\(before.landlord)→\(target.landlord)") }
-            if before.layout != target.layout { changed.append("户型\(before.layout)→\(target.layout)") }
-            if before.price != target.price { changed.append("租金\(before.price)→\(target.price)") }
-            if before.password != target.password { changed.append("密码已改") }
-            if before.remark != target.remark { changed.append("备注") }
-            if before.status != target.status { changed.append("状态") }
-            syncAction = changed.isEmpty ? "修改房源同步" : "修改" + changed.joined(separator: "/") + "同步"
+            var fields: [String] = []
+            var changes: [String] = []
+            let blank = "（空）"
+            if before.roomNo != target.roomNo || before.tower != target.tower {
+                fields.append("房号")
+                changes.append("修改房号 \(before.tower)座\(before.roomNo) 改 \(target.tower)座\(target.roomNo)")
+            }
+            if before.landlord != target.landlord {
+                fields.append("房东")
+                changes.append("修改房东 \(before.landlord.isEmpty ? blank : before.landlord) 改 \(target.landlord.isEmpty ? blank : target.landlord)")
+            }
+            if before.layout != target.layout {
+                fields.append("户型")
+                changes.append("修改户型 \(before.layout.isEmpty ? blank : before.layout) 改 \(target.layout.isEmpty ? blank : target.layout)")
+            }
+            if before.price != target.price {
+                fields.append("租金")
+                changes.append("修改租金 \(before.price) 改 \(target.price)")
+            }
+            if before.password != target.password {
+                fields.append("密码")
+                changes.append("修改密码 \(before.password.isEmpty ? blank : before.password) 改 \(target.password.isEmpty ? blank : target.password)")
+            }
+            if before.remark != target.remark {
+                fields.append("备注")
+                changes.append("修改备注 \(before.remark.isEmpty ? blank : before.remark) 改 \(target.remark.isEmpty ? blank : target.remark)")
+            }
+            if before.status != target.status {
+                fields.append("状态")
+                changes.append("修改状态 \(before.status.label) 改 \(target.status.label)")
+            }
+            syncAction = fields.isEmpty ? "修改房源同步" : "修改" + fields.joined(separator: "、") + "同步"
+            syncChange = changes.joined(separator: "\n")
         }
 
         for item in mediaItems where item.house == nil {
@@ -700,7 +727,7 @@ struct HouseEditView: View {
                         try? await CloudBackupService.deleteRemoteObject(name: obj.name, config: config)
                     }
                     BackupLogStore.log(category: "房源", action: "房号迁移", result: "成功",
-                                       detail: "\(oldRoomKey) → \(newRoomKey)（已清云端旧目录）", cloud: true)
+                                       detail: "修改房号 \(oldRoomKey) 改 \(newRoomKey)（已清云端旧目录）", room: newRoomKey, cloud: true)
                 }
             }
         }
@@ -734,7 +761,7 @@ struct HouseEditView: View {
         // v2.6：传 removedMedia（编辑前快照 − 当前媒体），让合并写正确排除本次显式删除的媒体
         let currentMediaNames = Set(target.mediaItems.map { $0.fileName })
         let removedMedia = originalMediaNames.subtracting(currentMediaNames)
-        pushHouseToCloud(target, action: syncAction, removedMedia: removedMedia)
+        pushHouseToCloud(target, action: syncAction, changeText: syncChange, removedMedia: removedMedia)
         NotificationCenter.default.post(name: HouseListView.houseStoreChanged, object: nil)
         dismiss()
     }
@@ -786,14 +813,14 @@ struct HouseEditView: View {
             }
             HouseSyncProgress.shared.end()
             if failed > 0 {
-                BackupLogStore.log(category: "房源", action: "上传媒体（本地→云端）", result: "部分失败", detail: "\(house.displayRoomNo)：成功\(success) 失败\(failed)（已入队自动补传）" + (lastError.isEmpty ? "" : "；错误：\(lastError)"), cloud: true)
+                BackupLogStore.log(category: "房源", action: "上传媒体（本地→云端）", result: "部分失败", detail: "新增媒体 成功\(success) 失败\(failed)（已入队自动补传）" + (lastError.isEmpty ? "" : "；错误：\(lastError)"), room: house.displayRoomNo, cloud: true)
                 await MainActor.run {
                     if pendingUploadTip == nil {
                         pendingUploadTip = "房源已保存到本机；媒体上传云端失败（共 \(failed) 个），已自动排队，网络恢复后自动补传。"
                     }
                 }
             } else if success > 0 {
-                BackupLogStore.log(category: "房源", action: "上传媒体（本地→云端）", result: "成功", detail: "\(house.displayRoomNo)：\(success) 个媒体", cloud: true)
+                BackupLogStore.log(category: "房源", action: "上传媒体（本地→云端）", result: "成功", detail: "新增媒体 \(success) 个", room: house.displayRoomNo, cloud: true)
             }
         }
     }
@@ -802,7 +829,7 @@ struct HouseEditView: View {
     /// v1.72（#7）：action 传详细动作名（修改租金同步/新增房源同步…）；（#8）账本上传也驱动卡片底部进度条。
     /// v2.6：改用 uploadGuarded——写前先读云端，媒体名单合并（防本地空名单覆盖云端媒体），
     ///       云端已有该房时记一条冲突日志（谁、何时、本地字段覆盖）。
-    private func pushHouseToCloud(_ house: House, action: String, removedMedia: Set<String> = []) {
+    private func pushHouseToCloud(_ house: House, action: String, changeText: String = "", removedMedia: Set<String> = []) {
         guard let config = CosConfig.load() else { return }
         let record = CloudHouseSync.record(from: house, username: CloudUser.username)
         // v2.4：账本上传用 begin 计数——与并发中的媒体上传任务并存，完成后 end 不会误清媒体进度
@@ -818,15 +845,15 @@ struct HouseEditView: View {
                 }
                 // v2.6：云端已有该房时记一条冲突日志（跨账号/多设备可追溯）
                 if hadExisting && merged.mediaNames != record.mediaNames {
-                    BackupLogStore.log(category: "同步", action: "冲突合并", result: "成功",
+                    BackupLogStore.log(category: "同步", action: "冲突合并", result: "成功", detail: "云端媒体 \(record.mediaNames.count) 改 \(merged.mediaNames.count) 个", room: house.displayRoomNo, cloud: true)
                                        detail: "\(house.displayRoomNo)：云端原有媒体 \(record.mediaNames.count)→合并后 \(merged.mediaNames.count) 个",
                                        cloud: true)
                 }
-                BackupLogStore.log(category: "房源", action: action, result: "成功", detail: house.displayRoomNo, cloud: true)
+                BackupLogStore.log(category: "房源", action: action, result: "成功", detail: changeText, room: house.displayRoomNo, cloud: true)
             } catch {
                 HouseSyncProgress.shared.end()
                 await MainActor.run { SyncFailStore.mark(house.mediaRoomKey) }
-                BackupLogStore.log(category: "房源", action: action, result: "失败", detail: "\(house.displayRoomNo)：\(error.localizedDescription)", cloud: true)
+                BackupLogStore.log(category: "房源", action: action, result: "失败", detail: "同步失败：\(error.localizedDescription)", room: house.displayRoomNo, cloud: true)
                 // b118（P0③ CAS）：写前校验发现云端已被他人更新 → 明确提示，未覆盖云端数据
                 if error is CloudSyncConflict {
                     await MainActor.run {

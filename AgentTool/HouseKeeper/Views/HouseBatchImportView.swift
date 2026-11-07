@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import SwiftData
 import UniformTypeIdentifiers
 
@@ -80,16 +81,12 @@ struct HouseBatchImportView: View {
             }
         }
     }
-    @State private var activePicker: PickerTarget?
+    // v2.28：选择器改为从顶层控制器直接弹出，不再经 SwiftUI sheet（iOS 26/27 里点击文件无反应）
     @State private var templateURL: URL?
     @State private var pickedIsFolder = false   // v1.61：所选 zip 实为文件夹时标记
 
     // —— 通用 ——
     @State private var isImporting = false
-    // v1.71（#87/#97）：文档选择器延迟挂载——SwiftUI sheet 动画期间直接初始化
-    // UIDocumentPickerViewController（FileProvider 加载）会白屏数秒甚至卡死；先显示占位，
-    // 等 sheet 呈现稳定后再挂载真选择器，消除「打开选择框就白屏、要重启 App」。
-    @State private var pickerReady = false
     @State private var summary: BatchImportSummary?
     @State private var showSummary = false
     @State private var showError = false
@@ -120,31 +117,6 @@ struct HouseBatchImportView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("关闭") { dismiss() }
-                }
-            }
-        }
-        .sheet(item: $activePicker) { target in
-            Group {
-                if pickerReady {
-                    DocPicker(types: target.types) { url in
-                        switch target {
-                        case .csv: loadCsvFile(url)
-                        case .zip:
-                            // v1.61：支持直接选文件夹（不压缩的媒体包）
-                            var isDir: ObjCBool = false
-                            FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir)
-                            if isDir.boolValue { parseFolder(url) } else { parseZip(url) }
-                        }
-                    }
-                    .ignoresSafeArea()
-                } else {
-                    ProgressView("正在打开文件选择…")
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .onAppear {
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
-                                pickerReady = true
-                            }
-                        }
                 }
             }
         }
@@ -199,7 +171,7 @@ struct HouseBatchImportView: View {
                     .font(.subheadline)
                 }
                 Spacer()
-                Button("从文件选择 CSV") { activePicker = .csv }
+                Button("从文件选择 CSV") { presentDocumentPicker(.csv) }
                     .font(.subheadline)
                 Button("解析预览") { parseCsv() }
                     .buttonStyle(.borderedProminent)
@@ -215,6 +187,21 @@ struct HouseBatchImportView: View {
                 .buttonStyle(.borderedProminent)
                 .frame(maxWidth: .infinity)
                 .disabled(isImporting)
+            }
+        }
+    }
+
+    /// v2.28：文档选择器改为顶层直接弹出（此前在 sheet 内先占位再替换，iOS 26/27 上出现「能看见文件但点击无反应」）
+    private func presentDocumentPicker(_ target: PickerTarget) {
+        DocumentPickerPresenter.present(types: target.types) { urls in
+            guard let url = urls.first else { return }
+            switch target {
+            case .csv:
+                loadCsvFile(url)
+            case .zip:
+                var isDir: ObjCBool = false
+                FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir)
+                if isDir.boolValue { parseFolder(url) } else { parseZip(url) }
             }
         }
     }
@@ -305,7 +292,7 @@ struct HouseBatchImportView: View {
                 .font(.footnote)
                 .foregroundColor(.secondary)
             HStack(spacing: 12) {
-                Button("选择 zip 或文件夹") { activePicker = .zip }
+                Button("选择 zip 或文件夹") { presentDocumentPicker(.zip) }
                     .font(.subheadline)
                 Spacer()
                 if let name = pickedZip?.lastPathComponent {
@@ -634,28 +621,59 @@ struct HouseBatchImportView: View {
     }
 }
 
-// MARK: - v1.59 UIKit 文档选择器桥接（修复 SwiftUI fileImporter 在 sheet 内无反应）
+// MARK: - v2.28 文档选择器（顶层直接 present）
 
-struct DocPicker: UIViewControllerRepresentable {
-    let types: [UTType]
-    let onPick: (URL) -> Void
-
-    func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
-        let vc = UIDocumentPickerViewController(forOpeningContentTypes: types)
-        vc.allowsMultipleSelection = false
-        vc.delegate = context.coordinator
-        return vc
+/// 用法：DocumentPickerPresenter.present(types: [...]) { urls in ... }
+/// 关键点：控制器由顶层 UIViewController 直接 present，delegate 静态持有；
+/// 不套在 SwiftUI sheet 里，避免「界面出来了但点文件没反应」。
+enum DocumentPickerPresenter {
+    private final class Host: NSObject, UIDocumentPickerDelegate {
+        var onPick: (([URL]) -> Void)?
+        var onCancel: (() -> Void)?
+        func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
+            let cb = onPick
+            clear()
+            cb?(urls)
+        }
+        func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
+            let cb = onCancel
+            clear()
+            cb?()
+        }
+        private func clear() {
+            DocumentPickerPresenter.host = nil
+        }
     }
 
-    func updateUIViewController(_ uiViewController: UIDocumentPickerViewController, context: Context) {}
+    private static var host: Host?
 
-    func makeCoordinator() -> Coordinator { Coordinator(self) }
+    static func present(types: [UTType], onPick: @escaping ([URL]) -> Void, onCancel: (() -> Void)? = nil) {
+        guard let vc = topViewController() else { return }
+        let h = Host()
+        h.onPick = onPick
+        h.onCancel = onCancel
+        host = h
+        let picker = UIDocumentPickerViewController(forOpeningContentTypes: types)
+        picker.allowsMultipleSelection = false
+        picker.delegate = h
+        vc.present(picker, animated: true)
+    }
 
-    class Coordinator: NSObject, UIDocumentPickerDelegate {
-        let parent: DocPicker
-        init(_ parent: DocPicker) { self.parent = parent }
-        func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
-            if let url = urls.first { parent.onPick(url) }
+    private static func topViewController() -> UIViewController? {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        let keyWindow = scenes.flatMap { $0.windows }.first { $0.isKeyWindow }
+            ?? scenes.flatMap { $0.windows }.first
+        guard var vc = keyWindow?.rootViewController else { return nil }
+        while true {
+            if let presented = vc.presentedViewController, !presented.isBeingDismissed {
+                vc = presented
+            } else if let nav = vc as? UINavigationController, let top = nav.visibleViewController {
+                vc = top
+            } else if let tab = vc as? UITabBarController, let sel = tab.selectedViewController {
+                vc = sel
+            } else {
+                return vc
+            }
         }
     }
 }

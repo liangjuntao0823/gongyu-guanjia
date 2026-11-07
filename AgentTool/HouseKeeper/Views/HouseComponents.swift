@@ -667,27 +667,6 @@ struct EmptyStateView: View {
 
 /// 系统分享面板把「文件地址」交给微信时，微信只当文件附件；只有给视频素材（AVAsset）且容器是 mp4，
 /// 微信才按视频消息处理。这里统一做三件事：转 mp4（mov 也能播）、组装素材、顺手在相册留一份兜底。
-/// v2.26：交给系统分享面板的「视频项」——给的是文件地址，但显式声明成影片类型，
-/// 微信扩展才会按视频消息接收（收到有缩略图、点开可播放），不会退化成文件附件。
-final class MovieShareItem: NSObject, UIActivityItemSource {
-    private let url: URL
-    init(_ url: URL) { self.url = url }
-
-    func activityViewControllerPlaceholderItem(_ controller: UIActivityViewController) -> Any {
-        url
-    }
-
-    func activityViewController(_ controller: UIActivityViewController,
-                               itemForActivityType activityType: UIActivity.ActivityType?) -> Any? {
-        url
-    }
-
-    func activityViewController(_ controller: UIActivityViewController,
-                               dataTypeIdentifierForActivityType activityType: UIActivity.ActivityType?) -> String {
-        UTType.movie.identifier
-    }
-}
-
 enum VideoOnlyShare {
     /// 本地视频 → 可直接交给系统分享面板的 mp4 文件地址（已是 mp4 直接用；mov 先转封装）。
     /// 注意必须给「文件地址」，不能给 AVAsset 对象：给对象时分享面板识别不出类型，
@@ -711,11 +690,19 @@ enum VideoOnlyShare {
 
     /// 把 mp4 文件包成「影片」类型的分享项：系统按类型标签匹配微信扩展，
     /// 只给文件地址时微信拿到的是「文件」标签，就当附件发；显式声明 public.movie 才按视频消息发。
-    /// v2.26 修正：不再自建 NSItemProvider。
-    /// 自建 provider 需要微信扩展跨进程把文件换手回来，实测表现为「点微信闪一下就退出、什么都没收到」。
-    /// 改为给文件地址 + 明确声明 public.movie 类型，由系统按「影片」交给微信扩展。
+    /// v2.28：微信只有拿到「系统数据包」形式的影片才按视频消息接收；
+    /// 直接给文件地址（v2.27）在微信里会变成文件附件。这里恢复 provider 形式，只注册影片类型、不带 suggestedName。
     static func movieItems(from files: [URL]) -> [Any] {
-        files.map { MovieShareItem($0) }
+        files.map { url in
+            let provider = NSItemProvider()
+            provider.registerFileRepresentation(forTypeIdentifier: UTType.movie.identifier,
+                                                fileOptions: [],
+                                                visibility: .all) { completion in
+                completion(url, false, nil)
+                return nil
+            }
+            return provider
+        }
     }
 
     /// 静默在系统相册留一份（只申请新增权限）。

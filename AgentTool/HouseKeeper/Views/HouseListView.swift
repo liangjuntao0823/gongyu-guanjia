@@ -1114,10 +1114,10 @@ struct HouseListView: View {
                     var objCount = 0
                     try await CloudBackupService.deleteHouseRemoteFolder(roomKey: key, config: config, writeLog: false, reportCount: { objCount = $0 })
                     try await CloudHouseSync.delete(roomKey: key, config: config)
-                    BackupLogStore.log(category: "删除", action: "彻底删除（本地+云端）", result: "成功", detail: "\(key)（云端桶文件夹\(objCount)个对象 + 云端账本已移除）", cloud: true)
+                    BackupLogStore.log(category: "删除", action: "彻底删除（本地+云端）", result: "成功", detail: "删除房源（云端桶文件夹\(objCount)个对象 + 云端账本已移除）", room: key, cloud: true)
                 } catch {
                     failed.append(key)
-                    BackupLogStore.log(category: "删除", action: "彻底删除（本地+云端）", result: "失败", detail: "\(key) \(error.localizedDescription)", cloud: true)
+                    BackupLogStore.log(category: "删除", action: "彻底删除（本地+云端）", result: "失败", detail: "删除失败：\(error.localizedDescription)", room: key, cloud: true)
                 }
                 await MainActor.run { deleteDone = idx + 1 }
             }
@@ -1180,10 +1180,11 @@ struct HouseListView: View {
     /// v1.19：切换时刷新最后更新时间，并把新状态同步到云端账本（共享房源）。
     private func toggleHouseStatus(_ house: House) {
         guard let ctx = houseModelContext else { return }
+        let oldStatus = house.status
         house.status = (house.status == .rented) ? .available : .rented
         house.lastUpdatedAt = Date()
         try? ctx.save()
-        pushHouseToCloud(house, action: "切换状态同步")
+        pushHouseToCloud(house, action: "切换状态同步", changeText: "修改状态 \(oldStatus.label) 改 \(house.status.label)")
         NotificationCenter.default.post(name: Self.houseStoreChanged, object: nil)
     }
 
@@ -1191,7 +1192,7 @@ struct HouseListView: View {
 
     /// 把单套房源推送到云端账本（读改写，同房号覆盖）。无云存储配置则跳过（仅本地）。
     /// v1.72（#7）：动作按场景命名（切换状态同步…）；（#8）账本上传也驱动卡片进度条；（#6）写本地账本镜像。
-    private func pushHouseToCloud(_ house: House, action: String = "同步房源（本地→云端）") {
+    private func pushHouseToCloud(_ house: House, action: String = "同步房源（本地→云端）", changeText: String = "") {
         guard let config = CosConfig.load() else { return }
         let record = CloudHouseSync.record(from: house, username: CloudUser.username)
         LocalHouseLedger.save(house)
@@ -1205,11 +1206,11 @@ struct HouseListView: View {
                     SyncFailStore.clear(house.mediaRoomKey)
                     try? houseModelContext?.save()
                 }
-                BackupLogStore.log(category: "房源", action: action, result: "成功", detail: house.displayRoomNo, cloud: true)
+                BackupLogStore.log(category: "房源", action: action, result: "成功", detail: changeText, room: house.displayRoomNo, cloud: true)
             } catch {
                 HouseSyncProgress.shared.end()
                 await MainActor.run { SyncFailStore.mark(house.mediaRoomKey) }
-                BackupLogStore.log(category: "房源", action: action, result: "失败", detail: "\(house.displayRoomNo)：\(error.localizedDescription)", cloud: true)
+                BackupLogStore.log(category: "房源", action: action, result: "失败", detail: "同步失败：\(error.localizedDescription)", room: house.displayRoomNo, cloud: true)
             }
         }
     }
@@ -1620,10 +1621,10 @@ struct HouseListView: View {
         showToast(lines.isEmpty ? "没有需要补传的媒体" : lines.joined(separator: "\n"))
         if !uploaded.isEmpty {
             // v2.16：补齐云端媒体属于云端侧动作，只写云端日志区，本机区不再出现
-            CloudOps.log(category: "同步", action: "补齐云端媒体（本地→云端）", result: "成功", detail: uploaded.joined(separator: "，"))
+            CloudOps.log(category: "同步", action: "补齐云端媒体（本地→云端）", result: "成功", detail: "补齐 \(uploaded.count) 个媒体：" + uploaded.joined(separator: "，"))
         }
         if !failed.isEmpty {
-            CloudOps.log(category: "同步", action: "补齐云端媒体（本地→云端）", result: "失败", detail: failed.joined(separator: "，"))
+            CloudOps.log(category: "同步", action: "补齐云端媒体（本地→云端）", result: "失败", detail: "补齐失败：" + failed.joined(separator: "，"))
         }
     }
 
@@ -1974,8 +1975,8 @@ struct HouseListView: View {
                 syncCenter.dismiss()
                 syncTaskMinimized = false
             }
-            // v2.7（P2⑯ 桶孤儿清理）：同步完成后列桶，删除不在任何账本名单里的孤儿媒体对象
-            Task.detached { await Self.cleanupOrphanMedia(config: config, knownRoomKeys: Set(recs.map { $0.roomKey })) }
+            // v2.28：按用户要求移除「同步成功后自动清理孤儿」——自动删云端对象风险高（账本读取失败会整目录误删），
+            // 只保留设置页「清理桶孤儿媒体」手动按钮（先扫描列清单、确认后才删）
         } catch {
             showToast(RemoteConfig.tip("syncFail", "同步失败：{error}").replacingOccurrences(of: "{error}", with: error.localizedDescription), isError: true)
             BackupLogStore.log(category: "同步", action: "同步房源（云端→本地）", result: "失败", detail: error.localizedDescription, cloud: false)
@@ -2097,11 +2098,11 @@ struct HouseListView: View {
                             SyncFailStore.clear(house.mediaRoomKey)
                             try? houseModelContext?.save()
                         }
-                        BackupLogStore.log(category: "房源", action: "批量标记已租同步", result: "成功", detail: house.displayRoomNo, cloud: true)
+                        BackupLogStore.log(category: "房源", action: "批量标记已租同步", result: "成功", detail: "修改状态 待租 改 已租", room: house.displayRoomNo, cloud: true)
                     } catch {
                         HouseSyncProgress.shared.end()
                         await MainActor.run { SyncFailStore.mark(house.mediaRoomKey) }
-                        BackupLogStore.log(category: "房源", action: "批量标记已租同步", result: "失败", detail: "\(house.displayRoomNo)：\(error.localizedDescription)", cloud: true)
+                        BackupLogStore.log(category: "房源", action: "批量标记已租同步", result: "失败", detail: "同步失败：\(error.localizedDescription)", room: house.displayRoomNo, cloud: true)
                     }
                 }
             }

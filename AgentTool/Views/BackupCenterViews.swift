@@ -1025,43 +1025,72 @@ private struct BackupLogRow: View {
     }
 }
 
-// MARK: - 日志行组件（云端，op=「分类·动作·结果」拆开展示，显示操作者用户名）
+// MARK: - 日志行组件（云端）
+// v2.28：三段式——第一行动作、第二行房号、第三行具体变化；
+//       颜色：删除类红、修改类黄、新增/同步类绿，失败一律红。
 private struct CloudOpRow: View {
     let entry: CloudOpEntry
+
+    private var parts: (cat: String, act: String, res: String) {
+        let p = entry.op.components(separatedBy: "·")
+        return (p.count > 0 ? p[0] : entry.op,
+                p.count > 1 ? p[1] : "",
+                p.count > 2 ? p[2] : "")
+    }
+
+    private var tint: Color {
+        let act = parts.act
+        let cat = parts.cat
+        let res = parts.res
+        if ["失败", "错误", "异常", "报错", "超时", "中断", "拒绝"].contains(where: { res.contains($0) }) {
+            return .red
+        }
+        if act.contains("删除") || act.contains("清空") || cat.contains("删除") {
+            return .red
+        }
+        if act.contains("修改") || act.contains("编辑") || act.contains("切换状态")
+            || act.contains("标记已租") || act.contains("迁移") || act.contains("合并")
+            || act.contains("冲突") {
+            return .orange
+        }
+        return .green
+    }
+
     var body: some View {
-        let parts = entry.op.components(separatedBy: "·")
-        let cat = parts.count > 0 ? parts[0] : entry.op
-        let act = parts.count > 1 ? parts[1] : ""
-        let res = parts.count > 2 ? parts[2] : ""
-        VStack(alignment: .leading, spacing: 3) {
-            HStack {
-                if !cat.isEmpty {
-                    // v1.68：云端日志结果字段不总是「成功/失败」二字（如「补传7套」「删除房源」等动作详情），
-                    // 颜色改为「明确失败词才标红」，其余（成功/动作详情/空结果）统一标绿，不再误标。
-                    let isFail = ["失败", "错误", "异常", "报错", "超时", "中断", "拒绝"].contains { res.contains($0) }
-                    Text(cat)
-                        .font(.caption.weight(.semibold))
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(isFail ? Color.red.opacity(0.15) : Color.green.opacity(0.15))
-                        .foregroundColor(isFail ? .red : .green)
-                        .clipShape(Capsule())
+        HStack(alignment: .top, spacing: 8) {
+            RoundedRectangle(cornerRadius: 2)
+                .fill(tint)
+                .frame(width: 3)
+            VStack(alignment: .leading, spacing: 4) {
+                // 第一行：动作
+                HStack(spacing: 8) {
+                    Text(parts.act.isEmpty ? parts.cat : parts.act)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundColor(tint)
+                    if !parts.res.isEmpty, parts.res != "成功" {
+                        Text(parts.res).font(.caption2).foregroundColor(.secondary)
+                    }
+                    Spacer()
+                    Text(entry.t).font(.caption).foregroundColor(.secondary)
                 }
-                if !act.isEmpty { Text(act).font(.subheadline.weight(.medium)) }
-                Spacer()
-                Text(entry.t).font(.caption).foregroundColor(.secondary)
-            }
-            if !entry.detail.isEmpty {
-                Text(entry.detail).font(.footnote).foregroundColor(.secondary)
-            }
-            // b119（清单6）：操作者移到最右侧显示（房号靠左，操作者靠右）
-            HStack {
+                // 第二行：房号
                 if !entry.room.isEmpty {
-                    Text("房号：\(entry.room)").font(.caption2).foregroundColor(.secondary)
+                    Text("房号：\(entry.room)")
+                        .font(.footnote.weight(.medium))
+                        .foregroundColor(.primary)
                 }
-                Spacer()
-                if !entry.user.isEmpty {
-                    Text("操作者：\(entry.user)").font(.caption2).foregroundColor(.secondary)
+                // 第三行：具体变化
+                if !entry.detail.isEmpty {
+                    Text(entry.detail)
+                        .font(.footnote)
+                        .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                HStack {
+                    Spacer()
+                    if !entry.user.isEmpty {
+                        Text("操作者：\(entry.user)").font(.caption2).foregroundColor(.secondary)
+                    }
                 }
             }
         }
