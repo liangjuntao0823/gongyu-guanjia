@@ -359,8 +359,64 @@ final class UpdateDownloader: ObservableObject {
             }
         }
 
+        // v2.23：校验通过后清掉目录里其它旧安装包——只留刚下载的这一个（每版约 10MB，不清理会一直堆）
+        Self.pruneOldPackages(keep: dest)
+
         localURL = dest
         progress = 1
         phase = .ready
+    }
+}
+
+// MARK: - v2.23 下载包目录工具（设置页「清理下载的安装包」用）
+extension UpdateDownloader {
+    /// Updates/ 目录（App 沙盒 Documents/Updates，文件 App 可见）
+    static func downloadsDirectory() -> URL {
+        let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Updates", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    /// 目录内全部 .ipa（按修改时间新→旧）
+    static func downloadedPackages() -> [URL] {
+        let dir = downloadsDirectory()
+        let items = (try? FileManager.default.contentsOfDirectory(
+            at: dir,
+            includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey]
+        )) ?? []
+        return items
+            .filter { $0.pathExtension.lowercased() == "ipa" }
+            .sorted { a, b in
+                let da = (try? a.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+                let db = (try? b.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+                return da > db
+            }
+    }
+
+    /// 目录占用（字节）
+    static func downloadsSizeBytes() -> Int {
+        downloadedPackages().reduce(0) { sum, url in
+            let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+            return sum + size
+        }
+    }
+
+    /// 清空目录内全部安装包（返回删除个数）
+    @discardableResult
+    static func clearDownloads() -> Int {
+        let items = downloadedPackages()
+        var n = 0
+        for url in items {
+            if (try? FileManager.default.removeItem(at: url)) != nil { n += 1 }
+        }
+        return n
+    }
+
+    /// 只保留指定这一个，其余 .ipa 全删
+    static func pruneOldPackages(keep: URL) {
+        for url in downloadedPackages() where url.standardizedFileURL != keep.standardizedFileURL {
+            try? FileManager.default.removeItem(at: url)
+        }
     }
 }

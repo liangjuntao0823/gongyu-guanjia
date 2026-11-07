@@ -1672,6 +1672,10 @@ struct HouseListView: View {
                             mediaRoomKeys.append((h.mediaRoomKey, h.displayRoomNo))
                             mediaDiffRoomNo.append(h.displayRoomNo)
                         }
+                        // v2.23：媒体有增删（云端换图/删视频）也算「有变化」，一并标红待看
+                        if needDownload || needRemove {
+                            unreadRoomKeys.append(h.mediaRoomKey)
+                        }
                         if needRemove {
                             for item in Array(h.mediaItems) where !cloudNorm.contains(Self.mediaNormKey(item.fileName)) {
                                 MediaStore.delete(fileName: item.fileName, roomKey: h.mediaRoomKey)
