@@ -264,7 +264,7 @@ final class UpdateCenter: ObservableObject {
         guard autoCheckEnabled else { return }
         let last = UserDefaults.standard.double(forKey: lastCheckKey)
         guard Date().timeIntervalSince1970 - last > 6 * 3600 else { return }
-        Task { await UpdateCenter.shared.runCheck() }
+        Task { await UpdateCenter.shared.runCheck(showPopup: false) }
     }
 }
 
