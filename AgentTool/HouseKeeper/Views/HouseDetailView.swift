@@ -527,10 +527,12 @@ struct HouseDetailView: View {
                         let url = MediaStore.url(for: media.fileName, roomKey: house.mediaRoomKey)
                         if media.kind == "image",
                            let image = UIImage(contentsOfFile: url.path) {
-                            PHAssetChangeRequest.creationRequestForAsset(from: image)
+                            let imgReq = PHAssetChangeRequest.creationRequestForAsset(from: image)
+                            imgReq?.creationDate = Date()
                         } else if media.kind == "video",
                                   FileManager.default.fileExists(atPath: url.path) {
-                            PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: url)
+                            let vidReq = PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: url)
+                            vidReq?.creationDate = Date()
                         }
                     }
                 } completionHandler: { success, error in
@@ -1085,9 +1087,11 @@ struct HouseDetailView: View {
         try await PHPhotoLibrary.shared().performChanges {
             for url in urls {
                 if url.pathExtension.lowercased() == "mp4" || url.pathExtension.lowercased() == "mov" || url.pathExtension.lowercased() == "m4v" {
-                    PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: url)
+                    let vReq = PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: url)
+                    vReq?.creationDate = Date()
                 } else {
-                    PHAssetChangeRequest.creationRequestForAssetFromImage(atFileURL: url)
+                    let iReq = PHAssetChangeRequest.creationRequestForAssetFromImage(atFileURL: url)
+                    iReq?.creationDate = Date()
                 }
             }
         }
@@ -1188,7 +1192,8 @@ struct PhotoPreviewView: View {
             switch status {
             case .authorized, .limited:
                 PHPhotoLibrary.shared().performChanges {
-                    PHAssetChangeRequest.creationRequestForAsset(from: image)
+                    let imgReq = PHAssetChangeRequest.creationRequestForAsset(from: image)
+                    imgReq?.creationDate = Date()
                 } completionHandler: { success, error in
                     DispatchQueue.main.async {
                         saveMessage = success

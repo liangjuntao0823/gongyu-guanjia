@@ -7,6 +7,7 @@
 //
 
 import SwiftUI
+import Photos
 import PhotosUI
 import PDFKit
 import AVFoundation
@@ -231,7 +232,14 @@ struct AIAssistantView: View {
     }
 
     private func saveImageToAlbum(_ img: UIImage) {
-        UIImageWriteToSavedPhotosAlbum(img, nil, nil, nil)
+        // v2.32：走 PhotoKit 写入并把创建时间设为现在，保存后排在相册最前面
+        PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
+            guard status == .authorized || status == .limited else { return }
+            PHPhotoLibrary.shared().performChanges {
+                let req = PHAssetChangeRequest.creationRequestForAsset(from: img)
+                req?.creationDate = Date()
+            }
+        }
         // 短暂 toast 反馈
         if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
            let root = scene.windows.first?.rootViewController {

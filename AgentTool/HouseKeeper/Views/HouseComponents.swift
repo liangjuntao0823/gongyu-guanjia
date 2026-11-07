@@ -558,7 +558,9 @@ struct FullScreenVideoPlayer: View {
             switch status {
             case .authorized, .limited:
                 PHPhotoLibrary.shared().performChanges {
-                    PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: url)
+                    // v2.32：把创建时间写成「现在」，相册按时间排序，保存后直接排在最前面
+                    let videoReq = PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: url)
+                    videoReq?.creationDate = Date()
                 } completionHandler: { success, error in
                     DispatchQueue.main.async {
                         saveMessage = success
@@ -975,7 +977,9 @@ enum VideoOnlyShare {
         }
         try? await PHPhotoLibrary.shared().performChanges {
             for url in copies {
-                PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: url)
+                // v2.32：创建时间写成现在，保证存进去排在相册最前（文件元数据改写不一定被相册采信）
+                let videoReq = PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: url)
+                videoReq?.creationDate = Date()
             }
         }
     }
