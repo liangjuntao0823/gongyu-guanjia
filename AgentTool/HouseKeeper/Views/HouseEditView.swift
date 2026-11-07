@@ -846,8 +846,6 @@ struct HouseEditView: View {
                 // v2.6：云端已有该房时记一条冲突日志（跨账号/多设备可追溯）
                 if hadExisting && merged.mediaNames != record.mediaNames {
                     BackupLogStore.log(category: "同步", action: "冲突合并", result: "成功", detail: "云端媒体 \(record.mediaNames.count) 改 \(merged.mediaNames.count) 个", room: house.displayRoomNo, cloud: true)
-                                       detail: "\(house.displayRoomNo)：云端原有媒体 \(record.mediaNames.count)→合并后 \(merged.mediaNames.count) 个",
-                                       cloud: true)
                 }
                 BackupLogStore.log(category: "房源", action: action, result: "成功", detail: changeText, room: house.displayRoomNo, cloud: true)
             } catch {
