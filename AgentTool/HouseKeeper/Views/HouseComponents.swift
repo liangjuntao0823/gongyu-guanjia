@@ -675,17 +675,206 @@ enum VideoOnlyShare {
         var files: [URL] = []
         for url in urls {
             guard FileManager.default.fileExists(atPath: url.path) else { continue }
-            if url.pathExtension.lowercased() == "mp4" {
-                files.append(url)
-                continue
-            }
-            if let mp4 = await exportMP4(from: url) {
+            // v2.30：微信扩展对视频有硬要求——只认 mp4 容器 + H.264 编码，且体积过大（几十 MB）时扩展直接起不来，
+            //        表现就是「点微信闪一下/点了没反应」，而小体积 H.264 的正常。
+            //        所以先判断能否直接发（mp4 + H.264 + 体积不大），否则统一转成 720p H.264+AAC 的 mp4。
+            if await isWeChatReady(url) { files.append(url); continue }
+            if let compatible = await transcodeToCompatible(url) {
+                files.append(compatible)
+            } else if let mp4 = await exportMP4(from: url) {
                 files.append(mp4)
             } else {
-                files.append(url)   // 转封装失败：退回原文件，不让分享中断
+                files.append(url)   // 全都失败：退回原文件，不让分享中断
             }
         }
         return files
+    }
+
+    /// 微信能直接吃的判断：mp4 容器 + 首条视频轨是 H.264 + 体积不超过 18MB。
+    private static func isWeChatReady(_ url: URL) async -> Bool {
+        guard url.pathExtension.lowercased() == "mp4" else { return false }
+        let asset = AVURLAsset(url: url)
+        guard let track = (try? await asset.loadTracks(withMediaType: .video))?.first else { return false }
+        let descs = (try? await track.load(.formatDescriptions)) ?? []
+        guard let first = descs.first else { return false }
+        let subType = CMFormatDescriptionGetMediaSubType(first)
+        // 'avc1' = H.264（HEVC 是 'hvc1'/'hev1'，微信部分机型不认）
+        guard subType == 0x61766331 else { return false }
+        let attrs = try? FileManager.default.attributesOfItem(atPath: url.path)
+        let size = (attrs?[.size] as? Int) ?? Int.max
+        return size <= 18 * 1024 * 1024
+    }
+
+    /// 转成微信一定能发的 mp4：长边 1280（720p）、H.264、AAC 96kbps，码率按「整片约 18MB」反算。
+    /// 输出到临时目录，调用方用完不用删（系统会回收；文件被微信扩展复制后再删也无所谓）。
+    static func transcodeToCompatible(_ url: URL) async -> URL? {
+        let asset = AVURLAsset(url: url)
+        guard let videoTrack = (try? await asset.loadTracks(withMediaType: .video))?.first else { return nil }
+        let naturalSize = (try? await videoTrack.load(.naturalSize)) ?? CGSize(width: 1280, height: 720)
+        let transform = (try? await videoTrack.load(.preferredTransform)) ?? .identity
+        let duration = (try? await asset.load(.duration)) ?? CMTime(value: 1, timescale: 1)
+        let seconds = max(CMTimeGetSeconds(duration), 0.1)
+        let nominalFPS = (try? await videoTrack.load(.nominalFrameRate)) ?? 30
+        let audioTrack = (try? await asset.loadTracks(withMediaType: .audio))?.first
+
+        let longSide = max(naturalSize.width, naturalSize.height)
+        guard longSide > 0 else { return nil }
+        let shrink = min(1280.0 / Double(longSide), 1.0)
+        var outW = Int((Double(naturalSize.width) * shrink).rounded())
+        var outH = Int((Double(naturalSize.height) * shrink).rounded())
+        outW -= outW % 2
+        outH -= outH % 2
+        outW = max(outW, 2)
+        outH = max(outH, 2)
+
+        // 目标整片 18MB：码率 = 18MB * 8 / 时长，夹在 700kbps–2.2Mbps
+        let targetBits = 18.0 * 1024 * 1024 * 8
+        let bitrate = Int(min(max(targetBits / seconds, 700_000), 2_200_000))
+        let fps = nominalFPS > 1 ? max(Int(nominalFPS.rounded()), 15) : 30
+
+        let videoSettings: [String: Any] = [
+            AVVideoCodecKey: AVVideoCodecType.h264,
+            AVVideoWidthKey: outW,
+            AVVideoHeightKey: outH,
+            AVVideoCompressionPropertiesKey: [
+                AVVideoAverageBitRateKey: bitrate,
+                AVVideoMaxKeyFrameIntervalKey: fps * 2,
+                AVVideoProfileLevelKey: AVVideoProfileLevelH264HighAutoLevel,
+                AVVideoExpectedSourceFrameRateKey: fps,
+                AVVideoAllowFrameReorderingKey: true
+            ] as [String: Any]
+        ]
+
+        let out = FileManager.default.temporaryDirectory
+            .appendingPathComponent("wx_share_\(UUID().uuidString).mp4")
+        if FileManager.default.fileExists(atPath: out.path) { try? FileManager.default.removeItem(at: out) }
+
+        guard let writer = try? AVAssetWriter(outputURL: out, fileType: .mp4),
+              let reader = try? AVAssetReader(asset: asset) else { return nil }
+        writer.shouldOptimizeForNetworkUse = true
+
+        let videoInput = AVAssetWriterInput(mediaType: .video, outputSettings: videoSettings)
+        videoInput.expectsMediaDataInRealTime = false
+        videoInput.transform = transform
+        guard writer.canAdd(videoInput) else { return nil }
+        writer.add(videoInput)
+
+        let adaptor = AVAssetWriterInputPixelBufferAdaptor(
+            assetWriterInput: videoInput,
+            sourcePixelBufferAttributes: [
+                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+                kCVPixelBufferWidthKey as String: outW,
+                kCVPixelBufferHeightKey as String: outH
+            ] as [String: Any]
+        )
+
+        let videoOutput = AVAssetReaderTrackOutput(
+            track: videoTrack,
+            outputSettings: [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA]
+        )
+        videoOutput.alwaysCopiesSampleData = false
+        guard reader.canAdd(videoOutput) else { return nil }
+        reader.add(videoOutput)
+
+        var audioInput: AVAssetWriterInput?
+        var audioOutput: AVAssetReaderTrackOutput?
+        if let audioTrack {
+            let pcmSettings: [String: Any] = [
+                AVFormatIDKey: kAudioFormatLinearPCM,
+                AVNumberOfChannelsKey: 2,
+                AVSampleRateKey: 44100,
+                AVLinearPCMBitDepthKey: 16,
+                AVLinearPCMIsFloatKey: false,
+                AVLinearPCMIsBigEndianKey: false,
+                AVLinearPCMIsNonInterleaved: false
+            ]
+            let aacSettings: [String: Any] = [
+                AVFormatIDKey: kAudioFormatMPEG4AAC,
+                AVNumberOfChannelsKey: 2,
+                AVSampleRateKey: 44100,
+                AVEncoderBitRateKey: 96_000
+            ]
+            let o = AVAssetReaderTrackOutput(track: audioTrack, outputSettings: pcmSettings)
+            o.alwaysCopiesSampleData = false
+            let i = AVAssetWriterInput(mediaType: .audio, outputSettings: aacSettings)
+            i.expectsMediaDataInRealTime = false
+            if reader.canAdd(o), writer.canAdd(i) {
+                reader.add(o)
+                writer.add(i)
+                audioOutput = o
+                audioInput = i
+            }
+        }
+
+        guard writer.startWriting(), reader.startReading() else {
+            try? FileManager.default.removeItem(at: out)
+            return nil
+        }
+        writer.startSession(atSourceTime: .zero)
+
+        let ciContext = CIContext(options: [.cacheIntermediates: false])
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let outRect = CGRect(x: 0, y: 0, width: outW, height: outH)
+
+        let ok = await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
+            DispatchQueue(label: "wx.video.transcode").async {
+                var good = true
+                let deadline = Date().addingTimeInterval(600)
+
+                func drainAudio() {
+                    guard let i = audioInput, let o = audioOutput else { return }
+                    while i.isReadyForMoreMediaData, let sample = o.copyNextSampleBuffer() {
+                        if !i.append(sample) { good = false; return }
+                    }
+                }
+
+                while good {
+                    if Date() > deadline { good = false; break }
+                    if !videoInput.isReadyForMoreMediaData {
+                        drainAudio()
+                        Thread.sleep(forTimeInterval: 0.002)
+                        continue
+                    }
+                    guard let sample = videoOutput.copyNextSampleBuffer() else { break }
+                    autoreleasepool {
+                        guard let srcBuffer = CMSampleBufferGetImageBuffer(sample),
+                              let pool = adaptor.pixelBufferPool else { good = false; return }
+                        var dstRef: CVPixelBuffer?
+                        guard CVPixelBufferPoolCreatePixelBuffer(nil, pool, &dstRef) == kCVReturnSuccess,
+                              let dst = dstRef else { good = false; return }
+                        let srcImage = CIImage(cvPixelBuffer: srcBuffer)
+                        let sx = CGFloat(outW) / CGFloat(CVPixelBufferGetWidth(srcBuffer))
+                        let sy = CGFloat(outH) / CGFloat(CVPixelBufferGetHeight(srcBuffer))
+                        let scaled = srcImage.transformed(by: CGAffineTransform(scaleX: sx, y: sy))
+                        ciContext.render(scaled, to: dst, bounds: outRect, colorSpace: colorSpace)
+                        if !adaptor.append(dst, withPresentationTime: CMSampleBufferGetPresentationTimeStamp(sample)) {
+                            good = false
+                        }
+                    }
+                    drainAudio()
+                }
+
+                videoInput.markAsFinished()
+                audioInput?.markAsFinished()
+                if good, writer.status == .writing {
+                    writer.endSession(atSourceTime: duration)
+                    writer.finishWriting {
+                        let done = writer.status == .completed
+                        cont.resume(returning: done)
+                    }
+                } else {
+                    writer.cancelWriting()
+                    cont.resume(returning: false)
+                }
+            }
+        }
+        let outAttrs = try? FileManager.default.attributesOfItem(atPath: out.path)
+        let outSize = (outAttrs?[.size] as? Int) ?? 0
+        guard ok, outSize > 0 else {
+            try? FileManager.default.removeItem(at: out)
+            return nil
+        }
+        return out
     }
 
     /// 把 mp4 文件包成「影片」类型的分享项：系统按类型标签匹配微信扩展，
