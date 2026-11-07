@@ -336,7 +336,9 @@ struct MainTabView: View {
     @Environment(\.modelContext) private var modelContext
     // v1.12：自动备份快速备份需要房源容器（保存快照中的房源 JSON）
     @Environment(\.houseModelContext) private var houseModelContext
-    // v2.21：在线更新状态统一由 UpdateCenter 管理（工作台版本号 + 设置页检查共用）
+    // v2.22：在线更新——启动检查到新版本弹一次窗（开关关掉就不查）
+    @ObservedObject private var updateCenter = UpdateCenter.shared
+    @State private var showUpdateDetailFromPopup = false
     // v1.83：上次异常退出提示（检测到崩溃日志时弹一次，设置页可查看/导出）
     @State private var showCrashTip = false
 
@@ -461,13 +463,30 @@ struct MainTabView: View {
             // v1.71（#95）：全局提示遮罩——完成/错误提示离开任何板块都能点「好」
             GlobalAlertOverlay()
         }
+        .overlay {
+            if let a = updateCenter.available, updateCenter.launchPopupVersion != nil {
+                UpdateLaunchPopup(
+                    update: a,
+                    onUpdate: {
+                        updateCenter.dismissLaunchPopup()
+                        showUpdateDetailFromPopup = true
+                    },
+                    onLater: { updateCenter.dismissLaunchPopup() }
+                )
+            }
+        }
+        .sheet(isPresented: $showUpdateDetailFromPopup) {
+            if let a = updateCenter.available { UpdateDetailView(update: a) }
+        }
         .onAppear {
             // v1.80：远程配置——先读本地缓存（断网可用），再异步拉取云端最新（联网更新缓存）
             RemoteConfig.loadCache()
             // v2.21：每次进 App 都检查一次更新——先按本地缓存判断（离线也能显示），
             // 再复用同一次 config.json 拉取完成在线检查，不额外发请求。
             UpdateCenter.shared.evaluate()
-            Task { await UpdateCenter.shared.checkOnLaunch() }
+            if UpdateCenter.autoCheckEnabled {
+                Task { await UpdateCenter.shared.checkOnLaunch() }
+            }
             // v1.83：上次异常退出提示（崩溃日志存在时弹一次；设置→崩溃日志可导出定位）
             // v1.95：改为只对【新增】的崩溃日志弹一次——用 UserDefaults 记录上次已提示的最新日志文件名，
             // 相同日志不再重复弹窗（此前每次启动只要有日志就弹，用户反馈每次打开都弹）

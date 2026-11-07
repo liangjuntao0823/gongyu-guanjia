@@ -788,7 +788,7 @@ struct SettingsView: View {
                 get: { UpdateCenter.autoCheckEnabled },
                 set: { UpdateCenter.autoCheckEnabled = $0 }
             )) {
-                Label("每次启动自动检查更新", systemImage: "arrow.triangle.2.circlepath")
+                Label("启动时自动检查更新", systemImage: "arrow.triangle.2.circlepath")
             }
             HStack {
                 Label("开发者", systemImage: "person")

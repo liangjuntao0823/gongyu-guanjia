@@ -162,6 +162,8 @@ final class UpdateCenter: ObservableObject {
     @Published private(set) var available: Available?
     @Published private(set) var checkState: CheckState = .idle
     @Published private(set) var lastCheckedAt: Date?
+    /// v2.22：启动弹窗（只在每次冷启动检查出有新版本时置一次；关掉即清空）
+    @Published private(set) var launchPopupVersion: String?
 
     private static let lastCheckKey = "update.lastCheckAt"
     private static let autoCheckKey = "update.autoCheckEnabled"
@@ -226,17 +228,21 @@ final class UpdateCenter: ObservableObject {
         )
     }
 
-    /// 每次进 App 都跑一次（冷启动）
+    /// 每次进 App 都跑一次（冷启动）——有新版本时弹一次启动弹窗
     func checkOnLaunch() async {
-        await runCheck()
+        await runCheck(showPopup: true)
     }
 
-    /// 设置页「检查更新」手动触发
+    /// 设置页「检查更新」手动触发（不弹启动弹窗，结果就地显示在设置页）
     func checkManually() async {
-        await runCheck()
+        await runCheck(showPopup: false)
     }
 
-    private func runCheck() async {
+    func dismissLaunchPopup() {
+        launchPopupVersion = nil
+    }
+
+    private func runCheck(showPopup: Bool) async {
         checkState = .checking
         let ok = await RemoteConfig.refresh()
         evaluate()
@@ -247,6 +253,9 @@ final class UpdateCenter: ObservableObject {
         }
         lastCheckedAt = Date()
         UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: Self.lastCheckKey)
+        if showPopup, let a = available {
+            launchPopupVersion = a.version
+        }
     }
 
     /// 回前台节流检查（6 小时内不重复联网）

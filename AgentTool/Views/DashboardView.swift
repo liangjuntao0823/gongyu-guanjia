@@ -30,9 +30,6 @@ struct DashboardView: View {
     @State private var showRentStat = false // v1.99：单月收租统计
     @State private var showMoreActions = false  // v1.84：更多收纳面板
     @State private var showQuickActionEdit = false // v1.84：快捷操作自定义排序
-    // v2.21：在线更新——工作台显示当前版本号，有更新时后面跟橙色胶囊
-    @ObservedObject private var updateCenter = UpdateCenter.shared
-    @State private var showUpdateDetail = false
     @AppStorage("qa.dashboardOrder") private var qaDashOrder = ""
     @AppStorage("qa.moreOrder") private var qaMoreOrder = ""
     @State private var showAddDeal = false
@@ -485,19 +482,16 @@ struct DashboardView: View {
 
                 // 中间：标题+副标题
                 VStack(alignment: .leading, spacing: 8) {
-                    HStack(spacing: 6) {
-                        Button {
-                            editText = userTitle
-                            showEditTitle = true
-                        } label: {
-                            Text(userTitle)
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundColor(.themeText)
-                                .lineLimit(1)
-                        }
-                        .buttonStyle(.plain)
-                        versionBadge
+                    Button {
+                        editText = userTitle
+                        showEditTitle = true
+                    } label: {
+                        Text(userTitle)
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(.themeText)
+                            .lineLimit(1)
                     }
+                    .buttonStyle(.plain)
 
                     // 副标题：X月还剩X天X小时，加油
                     HStack(spacing: 0) {
@@ -781,9 +775,6 @@ struct DashboardView: View {
             guard active else { return }
             currentTime = Date()
             refreshDashboard()
-        }
-        .sheet(isPresented: $showUpdateDetail) {
-            if let a = updateCenter.available { UpdateDetailView(update: a) }
         }
         .sheet(isPresented: $showImagePicker) {
             ImagePickerView { image in
@@ -1636,34 +1627,113 @@ struct AdminWebView: UIViewRepresentable {
     }
 }
 
-// MARK: - v2.21 在线更新（工作台徽章 + 更新详情页）
+// MARK: - v2.22 在线更新（启动弹窗 + 更新详情页）
 
-extension DashboardView {
-    /// 当前版本号；云端有新版本时变橙色「↑ 2.21」胶囊，点开看更新说明
-    fileprivate var versionBadge: some View {
-        Group {
-            if let a = updateCenter.available {
-                Button {
-                    showUpdateDetail = true
-                } label: {
-                    HStack(spacing: 2) {
-                        Image(systemName: "arrow.up.circle.fill")
-                            .font(.system(size: 9))
-                        Text(a.version)
-                            .font(.system(size: 11, weight: .semibold))
-                    }
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(Color.orange)
-                    .cornerRadius(6)
+struct UpdateLaunchPopup: View {
+    let update: UpdateCenter.Available
+    let onUpdate: () -> Void
+    let onLater: () -> Void
+
+    private var sizeText: String {
+        guard update.sizeBytes > 0 else { return "" }
+        return String(format: "%.1f MB", Double(update.sizeBytes) / 1_048_576)
+    }
+
+    private var metaText: String {
+        var parts: [String] = []
+        if update.build > 0 { parts.append("b\(update.build)") }
+        if !update.releasedAt.isEmpty { parts.append(update.releasedAt) }
+        if !sizeText.isEmpty { parts.append(sizeText) }
+        return parts.joined(separator: " · ")
+    }
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.4)
+                .ignoresSafeArea()
+
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(spacing: 7) {
+                    Image(systemName: "arrow.up.circle.fill")
+                        .font(.system(size: 14))
+                        .foregroundColor(.orange)
+                    Text("发现新版本")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(.themeText2)
+                    Spacer()
                 }
-                .buttonStyle(.plain)
-            } else {
-                Text("v\(UpdateCenter.appVersion)")
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("v\(update.version)")
+                        .font(.system(size: 25, weight: .bold))
+                        .foregroundColor(.themeText)
+                    if !metaText.isEmpty {
+                        Text(metaText)
+                            .font(.system(size: 12))
+                            .foregroundColor(.themeText3)
+                    }
+                }
+
+                if update.notes.isEmpty {
+                    Text("本次更新的具体内容见后台配置。")
+                        .font(.system(size: 13))
+                        .foregroundColor(.themeText3)
+                } else {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 9) {
+                            ForEach(update.notes, id: \.self) { line in
+                                HStack(alignment: .top, spacing: 7) {
+                                    Image(systemName: "circle.fill")
+                                        .font(.system(size: 4))
+                                        .foregroundColor(.themeAccent)
+                                        .padding(.top, 6)
+                                    Text(line)
+                                        .font(.system(size: 13))
+                                        .foregroundColor(.themeText)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                            }
+                        }
+                    }
+                    .frame(maxHeight: 200)
+                }
+
+                Text("iOS 不能自己装 IPA：点「立即更新」下载安装包，再用签名工具安装。")
                     .font(.system(size: 11))
                     .foregroundColor(.themeText3)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                HStack(spacing: 10) {
+                    Button(action: onLater) {
+                        Text("下次再说")
+                            .font(.system(size: 15, weight: .medium))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 10)
+                            .background(Color.themeAccentWeak)
+                            .foregroundColor(.themeText2)
+                            .cornerRadius(10)
+                    }
+                    .buttonStyle(.plain)
+
+                    Button(action: onUpdate) {
+                        Text("立即更新")
+                            .font(.system(size: 15, weight: .semibold))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 10)
+                            .background(AppTheme.primary)
+                            .foregroundColor(.white)
+                            .cornerRadius(10)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.top, 2)
             }
+            .padding(20)
+            .frame(maxWidth: 340)
+            .background(Color.themePanel)
+            .cornerRadius(18)
+            .shadow(color: Color.black.opacity(0.2), radius: 22, y: 8)
+            .padding(.horizontal, 28)
         }
     }
 }
