@@ -674,6 +674,14 @@ struct HouseEditView: View {
         // 此时不做文件名过滤（全传），否则新目录媒体要等下次同步对账才补。
         // v1.41 语义保持：上传失败自动入队，启动/回前台自动补传
         let roomChanged = isEditing && !originalRoomKey.isEmpty && originalRoomKey != target.mediaRoomKey
+        // v2.24：房号改了之后，未读红框 / 未同步标记跟着新房号走，旧 key 顺手清掉（不再残留脏数据）
+        if roomChanged {
+            let oldKey = originalRoomKey
+            let newKey = target.mediaRoomKey
+            if UnreadCloudHouseStore.isUnread(oldKey) { UnreadCloudHouseStore.mark([newKey]) }
+            UnreadCloudHouseStore.clear(oldKey)
+            SyncFailStore.clear(oldKey)
+        }
         pushHouseMediaToCloud(target, originalNames: roomChanged ? [] : originalMediaNames)
 
         // v2.6：房号改名时删云端旧房号目录（账本+媒体），避免残留导致下次同步提示"补录错误房源"
@@ -805,6 +813,7 @@ struct HouseEditView: View {
                 HouseSyncProgress.shared.end()
                 await MainActor.run {
                     house.cloudStatus = .both
+                    SyncFailStore.clear(house.mediaRoomKey)
                     try? modelContext.save()
                 }
                 // v2.6：云端已有该房时记一条冲突日志（跨账号/多设备可追溯）
@@ -816,6 +825,7 @@ struct HouseEditView: View {
                 BackupLogStore.log(category: "房源", action: action, result: "成功", detail: house.displayRoomNo, cloud: true)
             } catch {
                 HouseSyncProgress.shared.end()
+                await MainActor.run { SyncFailStore.mark(house.mediaRoomKey) }
                 BackupLogStore.log(category: "房源", action: action, result: "失败", detail: "\(house.displayRoomNo)：\(error.localizedDescription)", cloud: true)
                 // b118（P0③ CAS）：写前校验发现云端已被他人更新 → 明确提示，未覆盖云端数据
                 if error is CloudSyncConflict {

@@ -38,6 +38,33 @@ enum UnreadCloudHouseStore {
     }
 }
 
+// MARK: - v2.24 同步失败标记
+
+/// 房源「账本推送云端失败」的轻量标记（存 UserDefaults，成功推送后自动清除）。
+/// 用途：卡片上标「未同步」，让用户知道这次编辑只落在本机、云端还没收到。
+enum SyncFailStore {
+    private static let storageKey = "house_sync_failed_keys"
+    static let didChange = Notification.Name("houseSyncFailedKeysChanged")
+
+    static func all() -> Set<String> { Set(UserDefaults.standard.stringArray(forKey: storageKey) ?? []) }
+    static func isFailed(_ roomKey: String) -> Bool { all().contains(roomKey) }
+
+    static func mark(_ roomKey: String) {
+        guard !roomKey.isEmpty else { return }
+        var set = all(); set.insert(roomKey)
+        UserDefaults.standard.set(Array(set), forKey: storageKey)
+        NotificationCenter.default.post(name: didChange, object: nil)
+    }
+
+    static func clear(_ roomKey: String) {
+        var set = all()
+        guard set.contains(roomKey) else { return }
+        set.remove(roomKey)
+        UserDefaults.standard.set(Array(set), forKey: storageKey)
+        NotificationCenter.default.post(name: didChange, object: nil)
+    }
+}
+
 // MARK: - 主题色（合体后统一跟随主 App 深绿主题：主题绿主色 + 主题绿强调 + 统一底色）
 
 enum AppTheme {
@@ -228,6 +255,8 @@ struct HouseCardView: View {
     @State private var playingVideo: MediaItem? = nil
     // v2.20：云端同步新增/修改过、还没点开详情 → 红框
     @State private var isUnread = false
+    // v2.24：账本推云端失败的房源 → 标「未同步」
+    @State private var syncFailed = false
 
     /// 本房源是否正在上传/同步（匹配房号）
     private var isSyncingThis: Bool {
@@ -291,6 +320,11 @@ struct HouseCardView: View {
                             .font(.footnote)
                             .foregroundColor(.secondary)
                     }
+                    if syncFailed {
+                        Text("未同步")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundColor(.red)
+                    }
                     Spacer(minLength: 0)
                     CloudBadge(status: house.cloudStatus)
                 }
@@ -341,12 +375,18 @@ struct HouseCardView: View {
             RoundedRectangle(cornerRadius: 12)
                 .stroke(Color.red.opacity(0.85), lineWidth: isUnread ? 2 : 0)
         )
-        .onAppear { isUnread = UnreadCloudHouseStore.isUnread(house.mediaRoomKey) }
+        .onAppear {
+            isUnread = UnreadCloudHouseStore.isUnread(house.mediaRoomKey)
+            syncFailed = SyncFailStore.isFailed(house.mediaRoomKey)
+        }
         .onChange(of: house.mediaRoomKey) { _, newKey in
             isUnread = UnreadCloudHouseStore.isUnread(newKey)
         }
         .onReceive(NotificationCenter.default.publisher(for: UnreadCloudHouseStore.didChange)) { _ in
             isUnread = UnreadCloudHouseStore.isUnread(house.mediaRoomKey)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: SyncFailStore.didChange)) { _ in
+            syncFailed = SyncFailStore.isFailed(house.mediaRoomKey)
         }
         .fullScreenCover(item: $previewRoute) { route in
             PhotoPreviewView(photos: house.photos, startIndex: route.index, roomKey: house.mediaRoomKey)

@@ -2619,6 +2619,7 @@ struct BackupSettingsPage: View {
     @State private var showBackupKindSheet = false
     @State private var showOfflineRestoreConfirm = false
     @State private var showBackupCenterBrowse = false
+    @State private var showMigration = false
     @State private var showBackupCenterRestore = false
     @State private var showLogsView = false
     @State private var showCrashLogsView = false
@@ -2752,6 +2753,56 @@ struct BackupSettingsPage: View {
                         Image(systemName: "folder")
                     }
                 }
+                Button { showMigration = true } label: {
+                    Label {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("换机迁移")
+                            Text("导出 .zfgj 迁移包拷到新手机，一次性复制；不是日常同步")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    } icon: {
+                        Image(systemName: "iphone.and.arrow.forward")
+                    }
+                }
+                NavigationLink {
+                    MediaPendingView()
+                } label: {
+                    Label {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("待补传媒体")
+                            Text("上传失败的图片视频排在这里，逐个重试")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    } icon: {
+                        Image(systemName: "arrow.triangle.2.circlepath")
+                    }
+                }
+                Button { showOfflineRestoreConfirm = true } label: {
+                    Label {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("离线重建房源")
+                            Text("扫描本机账本重建房源记录，无需联网；不删除任何现有数据")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    } icon: {
+                        Image(systemName: "arrow.clockwise.icloud")
+                    }
+                }
+                Button { showLogsView = true } label: {
+                    Label {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("操作日志")
+                            Text("备份 / 恢复 / 上传 / 删除 / 同步的流水，本机区 + 云端区")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    } icon: {
+                        Image(systemName: "list.bullet.rectangle")
+                    }
+                }
                 Button { showCrashLogsView = true } label: {
                     HStack {
                         Label {
@@ -2800,6 +2851,9 @@ struct BackupSettingsPage: View {
         }
         .sheet(isPresented: $showLogsView) {
             BackupLogsView()
+        }
+        .sheet(isPresented: $showMigration) {
+            MigrationView()
         }
         .sheet(isPresented: $showCrashLogsView) {
             CrashLogsView()

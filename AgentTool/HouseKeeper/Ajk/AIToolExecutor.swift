@@ -135,11 +135,11 @@ struct AIToolExecutor {
         "type": "function",
         "function": [
             "name": "update_property",
-            "description": "房源域通用工具：新增/编辑/切换状态/移入回收站/还原/生成分享文案。房号规则：房号前带 2- 前缀表示 2 座（如 2-1418），否则为 1 座（如 2334）。",
+            "description": "房源域通用工具：新增/编辑/切换状态/彻底删除/生成分享文案（删除即彻底删除，不支持还原）。房号规则：房号前带 2- 前缀表示 2 座（如 2-1418），否则为 1 座（如 2334）。",
             "parameters": [
                 "type": "object",
                 "properties": [
-                    "action_type": ["type": "string", "description": "add_house=新增房源；edit_field=编辑字段；change_status=切换待租/已租；delete_house=移入回收站；restore_trash=从回收站还原；share_house=生成分享文案", "enum": ["add_house", "edit_field", "change_status", "delete_house", "restore_trash", "share_house"]],
+                    "action_type": ["type": "string", "description": "add_house=新增房源；edit_field=编辑字段；change_status=切换待租/已租；delete_house=彻底删除（不可恢复）；restore_trash=已废弃（房源不可还原）；share_house=生成分享文案", "enum": ["add_house", "edit_field", "change_status", "delete_house", "restore_trash", "share_house"]],
                     "room_no": ["type": "string", "description": "房号，如 2334 或 2-1418（2- 前缀=2座）"],
                     "room_nos": ["type": "array", "items": ["type": "string"], "description": "批量操作时的房号数组，如 [\"2334\",\"2325\"]"],
                     "tower": ["type": "integer", "description": "座号 1 或 2（缺省按房号规则推断）"],
@@ -375,9 +375,9 @@ struct AIToolExecutor {
                 let rooms = (a["room_nos"] as? [String] ?? [a["room_no"] as? String].compactMap { $0 }).joined(separator: "、")
                 return "将房源 \(rooms) 状态改为「\(a["status"] as? String ?? "?")」"
             case "delete_house":
-                return "将房源 \(a["room_no"] as? String ?? "?") 移入回收站（可还原）"
+                return "将房源 \(a["room_no"] as? String ?? "?") 彻底删除（本地 + 云端，不可恢复）"
             case "restore_trash":
-                return "从回收站还原房源 \(a["room_no"] as? String ?? "?")"
+                return "还原房源 \(a["room_no"] as? String ?? "?")（现已不支持，房源删除即彻底删除）"
             case "share_house":
                 return "生成房源 \(a["room_no"] as? String ?? "?") 的分享文案（\(a["mode"] as? String == "hidden" ? "隐藏版" : "完整版")）"
             default:
@@ -560,12 +560,14 @@ struct AIToolExecutor {
                               price: price, password: s(a, "password"), remark: s(a, "remark"))
             houseCtx.insert(house)
             try? houseCtx.save()
+            await pushHouseToCloud(house)
             logAI(category: "房源", action: "新增房源", result: "成功", detail: "\(tower)座\(room) \(price) 元/月")
             return "已新增房源：\(tower)座\(room)，\(s(a, "layout").isEmpty ? "未填户型" : s(a, "layout"))，\(price) 元/月，房东 \(s(a, "landlord").isEmpty ? "未填" : s(a, "landlord"))，时间 \(dateText(Date()))"
 
         case "edit_field":
             let room = s(a, "room_no")
             guard let house = findHouse(room, in: houseCtx) else { return "未找到房源 \(room)" }
+            let oldRoomKey = house.mediaRoomKey
             let field = s(a, "field")
             let value = s(a, "value")
             let old: String
@@ -581,6 +583,14 @@ struct AIToolExecutor {
             }
             house.updatedAt = Date()
             try? houseCtx.save()
+            await pushHouseToCloud(house)
+            // 房号改了：旧房号的云端账本与目录要清掉，否则下次同步会当成一套新房源补回来
+            if oldRoomKey != house.mediaRoomKey, let config = CosConfig.load(), config.isValid {
+                try? await CloudHouseSync.delete(roomKey: oldRoomKey, config: config)
+                if let objs = try? await CosUploader.listObjects(prefix: "h/\(oldRoomKey)/", config: config) {
+                    for obj in objs { try? await CloudBackupService.deleteRemoteObject(name: obj.name, config: config) }
+                }
+            }
             logAI(category: "房源", action: "编辑房源", result: "成功", detail: "\(house.tower)座\(house.roomNo) 修改 \(field)：\(old) → \(value)")
             return "已修改房源 \(house.tower)座\(house.roomNo) 的「\(field)」：\(old) → \(value)，时间 \(dateText(Date()))"
 
@@ -592,17 +602,20 @@ struct AIToolExecutor {
             let target: HouseStatus = (raw == "rented" || raw == "已租") ? .rented : .available
             var done: [String] = []
             var miss: [String] = []
+            var changed: [House] = []
             for room in rooms {
                 if let house = findHouse(room, in: houseCtx) {
                     let old = house.status == .rented ? "已租" : "待租"
                     house.status = target
                     house.updatedAt = Date()
                     done.append("\(house.tower)座\(house.roomNo)（\(old) → \(target == .rented ? "已租" : "待租")）")
+                    changed.append(house)
                 } else {
                     miss.append(room)
                 }
             }
             try? houseCtx.save()
+            for h in changed { await pushHouseToCloud(h) }
             let detail = done.joined(separator: "；") + (miss.isEmpty ? "" : "；未找到：\(miss.joined(separator: "、"))")
             logAI(category: "房源", action: "切换状态", result: "成功", detail: detail)
             return "状态切换完成：\(detail)，时间 \(dateText(Date()))"
@@ -610,23 +623,24 @@ struct AIToolExecutor {
         case "delete_house":
             let room = s(a, "room_no")
             guard let house = findHouse(room, in: houseCtx) else { return "未找到房源 \(room)" }
-            house.isDeleted = true
-            house.deletedAt = Date()
-            house.updatedAt = Date()
+            // v2.24：房源删除改为彻底删除（本地目录 + 数据库 + 云端账本与目录），与手动删除同口径
+            let roomKey = house.mediaRoomKey
+            let label = "\(house.tower)座\(house.roomNo)"
+            MediaStore.deleteHouseDirectory(roomKey: roomKey)
+            houseCtx.delete(house)
             try? houseCtx.save()
-            logAI(category: "房源", action: "移入回收站", result: "成功", detail: "\(house.tower)座\(house.roomNo)")
-            return "已将房源 \(house.tower)座\(house.roomNo) 移入回收站（可在回收站还原），时间 \(dateText(Date()))"
+            SyncFailStore.clear(roomKey)
+            UnreadCloudHouseStore.clear(roomKey)
+            if let config = CosConfig.load(), config.isValid {
+                try? await CloudHouseSync.delete(roomKey: roomKey, config: config)
+                try? await CloudBackupService.deleteHouseRemoteFolder(roomKey: roomKey, config: config)
+            }
+            logAI(category: "房源", action: "彻底删除", result: "成功", detail: label + "（本地 + 云端）")
+            return "已彻底删除房源 \(label)：本地照片视频、数据库记录、云端目录一并清除，不可恢复，时间 \(dateText(Date()))"
 
         case "restore_trash":
-            let room = s(a, "room_no")
-            let houses = (try? houseCtx.fetch(FetchDescriptor<House>())) ?? []
-            guard let house = houses.first(where: { ($0.roomNo == room || displayMatch($0, room)) && $0.isTrashed }) else { return "回收站未找到房源 \(room)" }
-            house.isDeleted = false
-            house.deletedAt = nil
-            house.updatedAt = Date()
-            try? houseCtx.save()
-            logAI(category: "房源", action: "还原房源", result: "成功", detail: "\(house.tower)座\(house.roomNo)")
-            return "已从回收站还原房源 \(house.tower)座\(house.roomNo)，时间 \(dateText(Date()))"
+            // v2.24：房源删除已是彻底删除，回收站里不再有房源可还原
+            return "房源删除后不可还原（回收站已不再收录房源）。如需找回，请到「设置 → 备份与安全 → 恢复数据」用之前的备份恢复，或从云端同步重新拉取。"
 
         case "share_house":
             let room = s(a, "room_no")
@@ -637,6 +651,22 @@ struct AIToolExecutor {
 
         default:
             return "未知房源动作：\(action)"
+        }
+    }
+
+    /// v2.24：AI 改完房源立刻推云端账本（与手动编辑同一条路径），失败在卡片标「未同步」
+    private func pushHouseToCloud(_ house: House) async {
+        guard let config = CosConfig.load(), config.isValid else { return }
+        let record = CloudHouseSync.record(from: house, username: CloudUser.username)
+        do {
+            _ = try await CloudHouseSync.uploadGuarded(record: record, removedMedia: [], config: config)
+            house.cloudStatus = .both
+            try? houseModelContext?.save()
+            SyncFailStore.clear(house.mediaRoomKey)
+        } catch {
+            SyncFailStore.mark(house.mediaRoomKey)
+            BackupLogStore.log(category: "同步", action: "AI推送房源失败", result: "失败",
+                               detail: "\(house.displayRoomNo)：\(error.localizedDescription)", cloud: true)
         }
     }
 

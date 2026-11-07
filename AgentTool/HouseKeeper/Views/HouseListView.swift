@@ -68,6 +68,14 @@ struct HouseListView: View {
     //   - showInfoAlert + infoMessage：分享错误 / 批量结果提示
     @State private var showDeleteConfirm = false
     @State private var isBatchDelete = false
+    // v2.24：删除双选项（仅本地 / 双端）+ 云端删除进度（成功才关，失败可重试，不做待清理清单）
+    @State private var deleteFailedKeys: [String] = []
+    @State private var deleteRunning = false
+    @State private var deleteDone = 0
+    @State private var deleteTotal = 0
+    @State private var deleteCurrentRoom = ""
+    /// v2.24：只看无媒体 = 沙盒 media/<房号>/ 目录里实际没有媒体文件（与卡片「无实拍图」同口径）
+    @State private var noMediaKeys: Set<String> = []
     @State private var showShareModeAlert = false
     @State private var showInfoAlert = false
     @State private var infoMessage = ""
@@ -142,15 +150,18 @@ struct HouseListView: View {
                 let matchTower = towerFilter == nil || house.tower == towerFilter
                 let matchStatus = statusFilter == nil || house.status == statusFilter
                 let matchLayout = layoutFilters.isEmpty || layoutFilters.contains(house.layout)
-                // v2.7（P2⑮）：无媒体筛选——mediaItems 为空才算无媒体
-                let matchNoMedia = !showOnlyNoMedia || house.mediaItems.isEmpty
+                // v2.24：无媒体筛选以「沙盒目录里实际有没有文件」为准（此前判 mediaItems，与卡片口径打架）
+                let matchNoMedia = !showOnlyNoMedia || noMediaKeys.contains(house.mediaRoomKey)
                 return matchSearch && matchTower && matchStatus && matchLayout && matchNoMedia
             }
             .sorted { a, b in
                 // b106：排序三档——默认（现有逻辑）/ 价格升序 / 更新时间降序
                 switch houseSortMode {
                 case .priceAsc:
-                    if a.price != b.price { return a.price < b.price }
+                    // v2.24：未填租金（0 元）排最后，不再霸占榜首
+                    let ap = a.price > 0 ? a.price : Int.max
+                    let bp = b.price > 0 ? b.price : Int.max
+                    if ap != bp { return ap < bp }
                 case .updatedDesc:
                     let at = a.lastUpdatedAt ?? a.updatedAt
                     let bt = b.lastUpdatedAt ?? b.updatedAt
@@ -186,7 +197,7 @@ struct HouseListView: View {
             let matchSearch = searchText.isEmpty || h.displayRoomNo.localizedCaseInsensitiveContains(searchText)
             let matchTower = towerFilter == nil || h.tower == towerFilter
             let matchStatus = statusFilter == nil || h.status == statusFilter
-            let matchNoMedia = !showOnlyNoMedia || h.mediaItems.isEmpty
+            let matchNoMedia = !showOnlyNoMedia || noMediaKeys.contains(h.mediaRoomKey)
             return matchSearch && matchTower && matchStatus && matchNoMedia
         }
         return Array(Set(base.compactMap { $0.layout.isEmpty ? nil : $0.layout })).sorted()
@@ -443,27 +454,12 @@ struct HouseListView: View {
                     syncTaskMinimized = false
                 }
             }
-            .alert("删除这套房源？", isPresented: $showDeleteConfirm) {
-                if isBatchDelete {
-                    Button("彻底删除", role: .destructive) { batchSoftDelete() }
-                } else if let target = deleteTarget {
-                    Button("彻底删除", role: .destructive) { softDeleteHouse(target) }
-                }
+            .alert(isBatchDelete ? "删除选中的 \(selectedHouseIDs.count) 套房源" : "删除这套房源", isPresented: $showDeleteConfirm) {
+                Button("仅删除本地（云端保留）") { startDelete(both: false) }
+                Button("删除双端（推荐）", role: .destructive) { startDelete(both: true) }
                 Button("取消", role: .cancel) { deleteTarget = nil }
             } message: {
-                if isBatchDelete {
-                    Text("将彻底删除选中的 \(selectedHouseIDs.count) 套房源：本地照片视频、数据库记录、已在云端的 h/<房号>/ 目录一并清除，不可恢复。备份镜像 backups/media 保留。")
-                } else if let target = deleteTarget {
-                    // v1.19 补全：删除确认提示按该房当前存储位置动态显示（是否删云端一目了然）
-                    switch target.cloudStatus {
-                    case .both:
-                        Text("将删除「本地 + 云端」这套房源：本地照片视频、数据库记录，以及云端 h/\(target.mediaRoomKey)/ 一并清除，不可恢复。备份镜像 backups/media 保留。")
-                    case .local:
-                        Text("将删除本地房源（未上传云端）：本地照片视频、数据库记录一并清除，不可恢复。备份镜像 backups/media 保留。")
-                    case .cloud:
-                        Text("将删除云端同步副本：该房本机无媒体，将从云端 h/\(target.mediaRoomKey)/ 清除，不可恢复。")
-                    }
-                }
+                Text(deleteConfirmMessage)
             }
         }
         .onAppear {
@@ -576,9 +572,27 @@ struct HouseListView: View {
         // v1.71：存量无前缀媒体目录自动归一迁移（media/2059/ → media/1-2059/），幂等；修复
         // v1.69 前编辑页新图落盘无前缀目录导致的上传失败、云端断媒体、刷新缺媒体死循环。
         MediaStore.migrateUnprefixedHouseDirectories(houses: houses)
+        // v2.24：刷新「无媒体」房号集合（按磁盘实际文件，不看 mediaItems 关系缓存）
+        var noMedia: Set<String> = []
+        for h in houses {
+            let dir = MediaStore.houseDirectory(roomKey: h.mediaRoomKey)
+            if MediaStore.mediaFileNames(in: dir).isEmpty { noMedia.insert(h.mediaRoomKey) }
+        }
+        noMediaKeys = noMedia
     }
 
     // MARK: - 头部折叠（v2.3 需求②：自动折叠方案确认无效，改为按钮式——手动收起/展开；不再随滚动自动切换）
+
+    /// v2.24（B13）：筛选区收起后显示当前筛选条件，而不是一句「已收起」
+    private var filterSummaryText: String {
+        var parts: [String] = []
+        parts.append(towerFilter.map { "\($0)座" } ?? "全部座")
+        parts.append(statusFilter?.label ?? "全部状态")
+        if !layoutFilters.isEmpty { parts.append(layoutFilters.sorted().joined(separator: "、")) }
+        if showOnlyNoMedia { parts.append("只看无媒体") }
+        if !searchText.isEmpty { parts.append("搜「\(searchText)」") }
+        return parts.joined(separator: " · ")
+    }
 
     private var collapsibleHeader: some View {
         VStack(spacing: 0) {
@@ -595,7 +609,7 @@ struct HouseListView: View {
                         Image(systemName: "chevron.down")
                             .font(.system(size: 11, weight: .semibold))
                             .foregroundColor(.secondary)
-                        Text("筛选区已收起，点此展开")
+                        Text("\(filterSummaryText) · 点此展开")
                             .font(.footnote)
                             .foregroundColor(.secondary)
                         Spacer()
@@ -954,7 +968,7 @@ struct HouseListView: View {
                             isBatchDelete = true
                             showDeleteConfirm = true
                         } label: {
-                            Text("删除（\(selectedHouseIDs.count)）")
+                            Text("删除")
                                 .font(.subheadline.weight(.semibold))
                                 .frame(maxWidth: .infinity)
                         }
@@ -979,6 +993,8 @@ struct HouseListView: View {
                 .background(.ultraThinMaterial)
             }
         }
+        // v2.24：云端删除进度 / 失败重试浮层（居中，成功自动消失）
+        .overlay { deleteOverlayCard }
         // v2.17：轻提示（底部胶囊，2.6 秒自动消失，不挡列表、不需要点「好」）
         .overlay(alignment: .bottom) {
             if let t = saveToast {
@@ -1022,50 +1038,141 @@ struct HouseListView: View {
         currentShareStep = nil
     }
 
-    /// v1.36 需求1：卡片左滑「删除」→ 彻底删除（本地文件+数据库记录+云端桶 h/<房号>/ 一并删除，不再进回收站）
-    /// 保留二次确认弹窗；backups/media 镜像保留；云端失败写操作日志（不阻塞本地删除）
-    private func softDeleteHouse(_ house: House) {
+    // MARK: - v2.24 删除（仅本地 / 双端）
+
+    private var deleteConfirmMessage: String {
+        let count = isBatchDelete ? selectedHouseIDs.count : 1
+        let scope: String
+        switch deleteTarget?.cloudStatus {
+        case .some(.local): scope = "这套房源本机有、云端没有"
+        case .some(.cloud): scope = "这套房源本机无媒体、云端有"
+        default: scope = "这套房源本地和云端都有"
+        }
+        let head = isBatchDelete ? "共 \(count) 套，\(scope)。" : "\(scope)。"
+        return head + "\n\n仅删除本地：云端不动，下次同步会把它们重新带回列表。\n删除双端（推荐）：本地照片视频、数据库记录、云端 h/<房号>/ 与账本一并清除，不可恢复（备份镜像 backups/media 保留）。"
+    }
+
+    /// 统一下手：本地先删（立刻生效），选双端再进云端进度；成功才关浮层，失败留「重试删除」
+    private func startDelete(both: Bool) {
         guard let ctx = houseModelContext else {
             showToast(RemoteConfig.tip("containerUnavailable", "数据容器不可用，无法删除"), isError: true)
             return
         }
-        let roomKey = house.mediaRoomKey
-        let config = CosConfig.load()
-        let wasCloud = house.cloudStatus   // v1.19 补全：记录删除前存储位置，用于成功提示
-        MediaStore.deleteHouseDirectory(roomKey: roomKey)
-        ctx.delete(house)
+        // 先把房号目录取成值，删完对象就失效了
+        var keys: [String] = []
+        var rooms: [String] = []
+        if isBatchDelete {
+            for h in houses where selectedHouseIDs.contains(h.id) {
+                keys.append(h.mediaRoomKey); rooms.append(h.displayRoomNo)
+            }
+        } else if let t = deleteTarget {
+            keys.append(t.mediaRoomKey); rooms.append(t.displayRoomNo)
+        }
+        guard !keys.isEmpty else { deleteTarget = nil; isBatchDelete = false; return }
+        _ = rooms
+        // 本地删除
+        for h in houses where keys.contains(h.mediaRoomKey) {
+            MediaStore.deleteHouseDirectory(roomKey: h.mediaRoomKey)
+            SyncFailStore.clear(h.mediaRoomKey)
+            UnreadCloudHouseStore.clear(h.mediaRoomKey)
+            ctx.delete(h)
+        }
         do {
             try ctx.save()
-            NotificationCenter.default.post(name: Self.houseStoreChanged, object: nil)
         } catch {
             showToast(RemoteConfig.tip("deleteFail", "删除失败：{error}").replacingOccurrences(of: "{error}", with: error.localizedDescription), isError: true)
+            return
         }
-        // v1.19 补全：删除成功提示——区分删了本地 / 云端 / 双端
-        switch wasCloud {
-        case .local:
-            showToast(RemoteConfig.tip("deletedLocal", "已删除本地房源"))
-        case .both:
-            showToast(RemoteConfig.tip("deletingCloud", "已删除本地房源，正在同步删除云端…"))
-        case .cloud:
-            showToast(RemoteConfig.tip("cloudCopyDeleted", "已删除云端同步副本"))
+        deleteTarget = nil
+        if isBatchDelete { exitMultiSelect() }
+        isBatchDelete = false
+        NotificationCenter.default.post(name: Self.houseStoreChanged, object: nil)
+
+        if !both {
+            showToast(RemoteConfig.tip("deletedLocalOnly", "已删除本地房源；云端仍保留，下次同步会重新出现").replacingOccurrences(of: "本地房源", with: "\(keys.count) 套本地房源"))
+            return
         }
-        // 云端同步删除（v1.69 规范：单条日志「彻底删除（本地+云端）」）
-        if let config = config, config.isValid {
-            Task {
+        guard let config = CosConfig.load(), config.isValid else {
+            showToast("已删除本地 \(keys.count) 套（未配置云端，无需再删云端）")
+            return
+        }
+        runCloudDelete(keys: keys, config: config)
+    }
+
+    /// 串行删云端：转圈进度，全部成功才关；有失败留着让你点「重试删除」
+    private func runCloudDelete(keys: [String], config: CosConfig) {
+        guard !keys.isEmpty else { return }
+        deleteFailedKeys = []
+        deleteTotal = keys.count
+        deleteDone = 0
+        deleteCurrentRoom = ""
+        deleteRunning = true
+        Task {
+            var failed: [String] = []
+            for (idx, key) in keys.enumerated() {
+                await MainActor.run { deleteCurrentRoom = key }
                 do {
                     var objCount = 0
-                    try await CloudBackupService.deleteHouseRemoteFolder(roomKey: roomKey, config: config, writeLog: false, reportCount: { objCount = $0 })
-                    try await CloudHouseSync.delete(roomKey: roomKey, config: config)
-                    BackupLogStore.log(category: "删除", action: "彻底删除（本地+云端）", result: "成功", detail: "\(roomKey)（云端桶文件夹\(objCount)个对象 + 云端账本已移除）", cloud: true)
+                    try await CloudBackupService.deleteHouseRemoteFolder(roomKey: key, config: config, writeLog: false, reportCount: { objCount = $0 })
+                    try await CloudHouseSync.delete(roomKey: key, config: config)
+                    BackupLogStore.log(category: "删除", action: "彻底删除（本地+云端）", result: "成功", detail: "\(key)（云端桶文件夹\(objCount)个对象 + 云端账本已移除）", cloud: true)
                 } catch {
-                    BackupLogStore.log(category: "删除", action: "彻底删除（本地+云端）", result: "失败", detail: "\(roomKey) \(error.localizedDescription)", cloud: true)
-                    await MainActor.run {
-                        showToast(RemoteConfig.tip("cloudDeleteFail", "云端删除失败：{error}。可在「设置 → 桶管理」手动清理 h/\(roomKey)/").replacingOccurrences(of: "{error}", with: error.localizedDescription), isError: true)
-                    }
+                    failed.append(key)
+                    BackupLogStore.log(category: "删除", action: "彻底删除（本地+云端）", result: "失败", detail: "\(key) \(error.localizedDescription)", cloud: true)
+                }
+                await MainActor.run { deleteDone = idx + 1 }
+            }
+            await MainActor.run {
+                deleteRunning = false
+                deleteCurrentRoom = ""
+                if failed.isEmpty {
+                    showToast(RemoteConfig.tip("deleteBothOk", "已删除（本地 + 云端）").replacingOccurrences(of: "已删除", with: "已删除 \(keys.count) 套"))
+                } else {
+                    deleteFailedKeys = failed
                 }
             }
-        } else {
-            BackupLogStore.log(category: "删除", action: "彻底删除（本地+云端）", result: "跳过", detail: "未配置云存储 \(roomKey)", cloud: true)
+        }
+    }
+
+    /// 云端删除进度 / 失败重试（居中浮层；成功自动消失，失败留「重试删除 / 关闭」）
+    @ViewBuilder private var deleteOverlayCard: some View {
+        if deleteRunning {
+            VStack(spacing: 12) {
+                Text("正在同步删除云端")
+                    .font(.headline)
+                ProgressView(value: deleteTotal == 0 ? 0 : Double(deleteDone) / Double(deleteTotal))
+                    .progressViewStyle(.linear)
+                    .frame(width: 210)
+                Text("\(deleteDone)/\(deleteTotal)" + (deleteCurrentRoom.isEmpty ? "" : " · h/\(deleteCurrentRoom)/"))
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+            .padding(24)
+            .background(.regularMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 16))
+            .shadow(radius: 12)
+        } else if !deleteFailedKeys.isEmpty {
+            VStack(spacing: 12) {
+                Text("云端没删掉")
+                    .font(.headline)
+                Text("本机已删除；这 \(deleteFailedKeys.count) 套的云端还在，联网后可重试\n\(deleteFailedKeys.joined(separator: "、"))")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+                HStack(spacing: 12) {
+                    Button("重试删除") {
+                        if let config = CosConfig.load(), config.isValid { runCloudDelete(keys: deleteFailedKeys, config: config) }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    Button("关闭") { deleteFailedKeys = [] }
+                        .buttonStyle(.bordered)
+                }
+            }
+            .padding(24)
+            .frame(maxWidth: 300)
+            .background(.regularMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 16))
+            .shadow(radius: 12)
         }
     }
 
@@ -1096,11 +1203,13 @@ struct HouseListView: View {
                 HouseSyncProgress.shared.end()
                 await MainActor.run {
                     house.cloudStatus = .both
+                    SyncFailStore.clear(house.mediaRoomKey)
                     try? houseModelContext?.save()
                 }
                 BackupLogStore.log(category: "房源", action: action, result: "成功", detail: house.displayRoomNo, cloud: true)
             } catch {
                 HouseSyncProgress.shared.end()
+                await MainActor.run { SyncFailStore.mark(house.mediaRoomKey) }
                 BackupLogStore.log(category: "房源", action: action, result: "失败", detail: "\(house.displayRoomNo)：\(error.localizedDescription)", cloud: true)
             }
         }
@@ -1965,85 +2074,43 @@ struct HouseListView: View {
     private func batchSetRented() {
         guard !selectedHouseIDs.isEmpty, let ctx = houseModelContext else { return }
         var changed = 0
+        var rentedHouses: [House] = []
         for house in houses where selectedHouseIDs.contains(house.id) && house.status == .available {
             house.status = .rented
+            house.lastUpdatedAt = Date()
+            rentedHouses.append(house)
             changed += 1
         }
         try? ctx.save()
+        // v2.24：批量已租也要推云端（此前只改本地，下次同步被云端旧状态回滚回去）
+        if let config = CosConfig.load(), config.isValid, !rentedHouses.isEmpty {
+            let toPush = rentedHouses
+            Task {
+                for house in toPush {
+                    let record = CloudHouseSync.record(from: house, username: CloudUser.username)
+                    LocalHouseLedger.save(house)
+                    HouseSyncProgress.shared.begin(roomKey: house.mediaRoomKey, direction: .upload, progress: 0.2, label: "同步账本")
+                    do {
+                        try await CloudHouseSync.upload(record: record, config: config)
+                        HouseSyncProgress.shared.end()
+                        await MainActor.run {
+                            house.cloudStatus = .both
+                            SyncFailStore.clear(house.mediaRoomKey)
+                            try? houseModelContext?.save()
+                        }
+                        BackupLogStore.log(category: "房源", action: "批量标记已租同步", result: "成功", detail: house.displayRoomNo, cloud: true)
+                    } catch {
+                        HouseSyncProgress.shared.end()
+                        await MainActor.run { SyncFailStore.mark(house.mediaRoomKey) }
+                        BackupLogStore.log(category: "房源", action: "批量标记已租同步", result: "失败", detail: "\(house.displayRoomNo)：\(error.localizedDescription)", cloud: true)
+                    }
+                }
+            }
+        }
         NotificationCenter.default.post(name: Self.houseStoreChanged, object: nil)
         let total = selectedHouseIDs.count
         exitMultiSelect()
         showToast(RemoteConfig.tip("bulkRentDone", "已将 {changed} 套标记为已租（共选中 {total} 套）").replacingOccurrences(of: "{changed}", with: String(changed)).replacingOccurrences(of: "{total}", with: String(total)))
-    }
-
-    /// v1.36 需求1：批量删除 → 彻底删除（本地文件+数据库记录+云端桶一并删除，不再进回收站）
-    private func batchSoftDelete() {
-        guard !selectedHouseIDs.isEmpty, let ctx = houseModelContext else {
-            showToast(RemoteConfig.tip("containerUnavailable", "数据容器不可用，无法删除"), isError: true)
-            return
-        }
-        var changed = 0
-        var deletedKeys: [String] = []
-        let config = CosConfig.load()
-        for house in houses where selectedHouseIDs.contains(house.id) {
-            let roomKey = house.mediaRoomKey
-            MediaStore.deleteHouseDirectory(roomKey: roomKey)
-            ctx.delete(house)
-            deletedKeys.append(roomKey)
-            changed += 1
-        }
-        do {
-            try ctx.save()
-            NotificationCenter.default.post(name: Self.houseStoreChanged, object: nil)
-        } catch {
-            showToast(RemoteConfig.tip("deleteFail", "删除失败：{error}").replacingOccurrences(of: "{error}", with: error.localizedDescription), isError: true)
-        }
-        // 云端同步删除（v1.69 规范）：单 Task 内**串行**逐套执行——此前每套一个并发 Task 同时
-        // 读改写云端账本 h/_houses.json，并发互相覆盖导致删除不彻底（实测 7 套删完账本仍剩 3 套）。
-        // 日志每套只记一条「彻底删除（本地+云端）」，不再出现「删媒体 + 删文件夹」两条混杂记录。
-        // v1.71：接入全局同步任务中心——顶部进度条实时显示「批量删除云端房源 N 套」逐套推进，
-        // 云端全部删完才弹完成提示（此前本地删完就弹「同步删除中」，云端过程无感知）。
-        if let config = config, config.isValid {
-            Task {
-                syncCenter.begin(title: "批量删除云端房源", roomKeys: deletedKeys, total: deletedKeys.count)
-                var failedKeys: [String] = []
-                var done = 0
-                for roomKey in deletedKeys {
-                    syncCenter.advance(done: done, current: roomKey)
-                    do {
-                        var objCount = 0
-                        try await CloudBackupService.deleteHouseRemoteFolder(roomKey: roomKey, config: config, writeLog: false, reportCount: { objCount = $0 })
-                        try await CloudHouseSync.delete(roomKey: roomKey, config: config)
-                        BackupLogStore.log(category: "删除", action: "彻底删除（本地+云端）", result: "成功", detail: "\(roomKey)（云端桶文件夹\(objCount)个对象 + 云端账本已移除）", cloud: true)
-                    } catch {
-                        failedKeys.append(roomKey)
-                        BackupLogStore.log(category: "删除", action: "彻底删除（本地+云端）", result: "失败", detail: "\(roomKey) \(error.localizedDescription)", cloud: true)
-                    }
-                    done += 1
-                    syncCenter.advance(done: done, current: roomKey)
-                }
-                syncCenter.finish(success: failedKeys.isEmpty)
-                var lines = ["云端删除完成：成功 \(deletedKeys.count - failedKeys.count) 套"]
-                if !failedKeys.isEmpty {
-                    lines.append("失败 \(failedKeys.count) 套：\(failedKeys.joined(separator: "，"))（可在「设置 → 桶管理」手动清理）")
-                }
-                await MainActor.run {
-                    showToast(lines.joined(separator: "\n"))
-                }
-                // v1.71：完成后进度条自动收起
-                Task {
-                    try? await Task.sleep(nanoseconds: 1_200_000_000)
-                    syncCenter.dismiss()
-                    syncTaskMinimized = false
-                }
-            }
-        } else {
-            BackupLogStore.log(category: "删除", action: "彻底删除（本地+云端）", result: "跳过", detail: "未配置云存储 共\(deletedKeys.count)套", cloud: true)
-        }
-        let total = selectedHouseIDs.count
-        exitMultiSelect()
-        // v1.19 补全：批量删除成功提示（含云端同步）
-        showToast(RemoteConfig.tip("bulkDeleteDone", "已彻底删除 {changed} 套本地房源（共选中 {total} 套）；云端同步删除中…").replacingOccurrences(of: "{changed}", with: String(changed)).replacingOccurrences(of: "{total}", with: String(total)))
     }
 
     /// v1.7：卡片左滑「分享」→ 单套分享卡片（脱敏 / 完整），生成链接后弹系统分享面板
