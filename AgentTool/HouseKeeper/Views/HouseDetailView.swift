@@ -528,7 +528,7 @@ struct HouseDetailView: View {
                         if media.kind == "image",
                            let image = UIImage(contentsOfFile: url.path) {
                             let imgReq = PHAssetChangeRequest.creationRequestForAsset(from: image)
-                            imgReq?.creationDate = Date()
+                            imgReq.creationDate = Date()
                         } else if media.kind == "video",
                                   FileManager.default.fileExists(atPath: url.path) {
                             let vidReq = PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: url)
@@ -1193,7 +1193,7 @@ struct PhotoPreviewView: View {
             case .authorized, .limited:
                 PHPhotoLibrary.shared().performChanges {
                     let imgReq = PHAssetChangeRequest.creationRequestForAsset(from: image)
-                    imgReq?.creationDate = Date()
+                    imgReq.creationDate = Date()
                 } completionHandler: { success, error in
                     DispatchQueue.main.async {
                         saveMessage = success

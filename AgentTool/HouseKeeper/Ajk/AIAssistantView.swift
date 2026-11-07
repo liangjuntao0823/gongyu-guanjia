@@ -237,7 +237,7 @@ struct AIAssistantView: View {
             guard status == .authorized || status == .limited else { return }
             PHPhotoLibrary.shared().performChanges {
                 let req = PHAssetChangeRequest.creationRequestForAsset(from: img)
-                req?.creationDate = Date()
+                req.creationDate = Date()
             }
         }
         // 短暂 toast 反馈
